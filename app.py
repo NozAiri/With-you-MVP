@@ -408,7 +408,7 @@ else:
 # --------- Footer notice ---------
 st.markdown("""
 <div style="text-align:center; color:#6b6575; margin-top:12px;">
-  <small>※ 個人名や連絡先は書かないでね。<br>
   もし今、とてもつらくて危ないと感じるときは、あなたの地域の相談先にアクセスしてね。</small>
 </div>
 """, unsafe_allow_html=True)
+
