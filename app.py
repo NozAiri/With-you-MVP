@@ -441,5 +441,3 @@ st.markdown("""
   もし今、とてもつらくて危ないと感じるときは、あなたの地域の相談先にアクセスしてね。</small>
 </div>
 """, unsafe_allow_html=True)
-
-
