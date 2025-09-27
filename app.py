@@ -1,6 +1,6 @@
-# app.py — Sora (Intro-first, Polite JP, Pastel Aurora, One-page)
-# 目的が最初の5秒で伝わる「イントロ画面」を追加。ワークは敬語ベース。
-# パステル（オレンジ/ピンク/紫/水色）＋静止の星。ページ遷移なしの内部切替。
+# app.py — Intro-first with your exact copy & polite prompts
+# 初回は必ずヒーロー＋Q&Aを表示。ワーク中の文言は敬語ベース。
+# パステル（オレンジ/ピンク/紫/水色）＋静止の星。ページ移動なし（内部切替）。
 
 from datetime import datetime, date
 from pathlib import Path
@@ -125,7 +125,7 @@ def _append_csv(p: Path, row: dict):
     df.to_csv(p, index=False)
 
 def _download_button(df: pd.DataFrame, label: str, filename: str):
-    if df.empty: st.caption("（まだデータがございません）"); return
+    if df.empty: st.caption("（まだデータはございません）"); return
     st.download_button(label, df.to_csv(index=False).encode("utf-8"),
                        file_name=filename, mime="text/csv")
 
@@ -159,10 +159,9 @@ def ensure_reflection_defaults():
     r["date"] = d
 
 st.session_state.setdefault("view","INTRO")  # ← 最初は必ずイントロ
-ensure_cbt_defaults()
-ensure_reflection_defaults()
+ensure_cbt_defaults(); ensure_reflection_defaults()
 
-# ---------------- Companion（やさしい声がけ） ----------------
+# ---------------- Gentle companion ----------------
 def companion(emoji: str, text: str, sub: Optional[str]=None):
     st.markdown(
         f"""
@@ -182,14 +181,17 @@ def support(distress: Optional[int]=None, lonely: Optional[int]=None):
     else:
         companion("🌟","ここまで入力いただけて十分です。","短くても大丈夫です。")
 
-# ---------------- Intro (FIRST VIEW) ----------------
+# ---------------- INTRO (your exact copy first) ----------------
 def view_intro():
-    # ヒーロー
     st.markdown("""
 <div class="card" style="padding:22px;">
-  <h2 style="margin:.1rem 0 .4rem; color:#2f2a3b;">しんどい夜の考えのループを、<b>3分で整理して落ち着きを取り戻す</b>。</h2>
-  <p style="margin:.4rem 0;">短い質問にお答えいただくだけで、<b>いまの状況・ご自身の考え・次の一歩</b>がはっきりします。</p>
-  <ul style="margin:.4rem 0 .2rem;">
+  <h2 style="margin:.1rem 0 .6rem; color:#2f2a3b;">
+    しんどい夜の考えのループを、<b>3分で整理して落ち着きを取り戻す。</b>
+  </h2>
+  <p style="margin:.2rem 0 .6rem;">
+    短い質問に答えるだけで、<b>いまの状況・自分の考え・次の一歩</b>がはっきりします。
+  </p>
+  <ul style="margin:.4rem 0 .6rem;">
     <li>⏱ <b>所要時間</b>：約3分</li>
     <li>🎯 <b>目的</b>：落ち着きを取り戻し、現実的な見方と小さな行動を決める</li>
     <li>🔒 <b>安心</b>：データは端末に保存／医療・診断ではありません</li>
@@ -205,21 +207,21 @@ def view_intro():
         if st.button("ホームを見る", use_container_width=True):
             st.session_state.view = "HOME"
 
-    # Q&Aカード
     st.markdown("""
 <div class="card">
-  <h3 style="margin:.2rem 0 .6rem;">初めての方へ</h3>
-  <p><b>これは何ですか？</b><br>
+  <h3 style="margin:.2rem 0 .6rem;">初めての方向け（Q&Aカード）</h3>
+
+  <p><b>これは何？</b><br>
   しんどい夜に、短時間で思考を整理し、落ち着きを取り戻すためのノートです。</p>
 
-  <p><b>いつ使いますか？</b></p>
+  <p><b>いつ使う？</b></p>
   <ul>
     <li>眠る前に考えが止まらないとき</li>
     <li>不安で判断がぶれるとき</li>
     <li>とりあえず状況を整えたいとき</li>
   </ul>
 
-  <p><b>どう使いますか？（3ステップ）</b></p>
+  <p><b>どう使う？（3ステップ）</b></p>
   <ol>
     <li>出来事を一行</li>
     <li>考えを一行</li>
@@ -253,7 +255,7 @@ def quick_switch():
         if st.button("⬇️ エクスポート", key="qs_exp"): st.session_state.view="EXPORT"
     st.markdown('</div>', unsafe_allow_html=True)
 
-# ---------------- Home ----------------
+# ---------------- HOME ----------------
 def view_home():
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.markdown("#### 本日、どのように進められますか？")
@@ -278,7 +280,7 @@ def view_home():
         st.markdown('</div>', unsafe_allow_html=True)
     st.markdown('</div></div>', unsafe_allow_html=True)
 
-# ---------------- CBT (Polite) ----------------
+# ---------------- CBT (polite prompts) ----------------
 def view_cbt():
     ensure_cbt_defaults()
     quick_switch()
@@ -286,7 +288,7 @@ def view_cbt():
     # 1) 事実
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.subheader("1) いま起きたこと（事実）")
-    st.caption("気持ちや推測は次の欄で扱いますので、事実だけを短くご記入ください。")
+    st.caption("気持ちや推測は次の欄で扱いますので、事実のみを簡潔にご記入ください。")
     st.session_state.cbt["fact"] = st.text_area(
         "本日、どのようなことがございましたか？",
         value=st.session_state.cbt.get("fact",""),
@@ -354,7 +356,7 @@ def view_cbt():
     st.caption("片方だけでも構いません。短く箇条書きでご記入ください。")
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # 5) 言い換え + 一歩
+    # 5) 見方の調整 + 一歩
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.subheader("5) 現実的な見方に整える")
     suggestions=[]
