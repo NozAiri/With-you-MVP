@@ -412,20 +412,78 @@ def view_cbt():
             value=st.session_state.cbt.get("alt",""),
             placeholder="例）移動中かも／前も夜に返ってきた など", height=96)
 
-    st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
-    st.subheader("結論は少しだけ保留にする")
-    st.caption("当てはまるものだけ軽くチェック。“かもしれない”の視点で。")
-    g = st.session_state.cbt["checks"]
-    c1,c2,c3,c4 = st.columns(4)
-    with c1:
-        g["extreme"] = st.checkbox("0/100で考えたかも", value=bool(g.get("extreme",False)))
-    with c2:
-        g["mind_read"] = st.checkbox("心を読み切った気になったかも", value=bool(g.get("mind_read",False)))
-    with c3:
-        g["fortune"] = st.checkbox("先の展開を決め打ちしたかも", value=bool(g.get("fortune",False)))
-    with c4:
-        g["catastrophe"] = st.checkbox("最悪だけを優先したかも", value=bool(g.get("catastrophe",False)))
-    st.markdown('</div>', unsafe_allow_html=True)
+    # --- 一言をテキストエリアに追記する小ヘルパー（未定義なら追加） ---
+def append_to_textarea(ss_key: str, phrase: str):
+    cur = st.session_state.cbt.get(ss_key, "") or ""
+    glue = "" if (cur.strip() == "" or cur.strip().endswith(("。","!","！"))) else " "
+    st.session_state.cbt[ss_key] = (cur + glue + phrase).strip()
+
+# --- チェックの表示名（あなたの指定どおり） ---
+CHECK_LABELS = {
+    "bw":       "0/100で考えていたかも"      
+    "catastrophe": "最悪の状態を想定していたかも"
+    "fortune":  "先の展開を一つに決めていたかも"
+    "emotion":  "感情が先に走っているかも"
+    "decide":   "決めつけてしまっていたかも"
+def ensure_cbt_defaults():
+    if "cbt" not in st.session_state or not isinstance(st.session_state.cbt, dict):
+        st.session_state.cbt = {}
+    cbt = st.session_state.cbt
+    # ...（既存のデフォルトはそのまま）...
+    checks = cbt.setdefault("checks", {})  # ← 旧コードが "gentle_checks" なら "checks" に揃えてOK
+    # 既存キーを保ちつつ、足りないキーを追加
+    checks.setdefault("bw", False)            # 0/100で考えていたかも
+    checks.setdefault("catastrophe", False)   # 最悪の状態を想定していたかも
+    checks.setdefault("fortune", False)       # 先の展開を一つに決めていたかも
+    checks.setdefault("emotion", False)       # 感情が先に走っているかも
+    checks.setdefault("decide", False)        # 決めつけてしまっていたかも
+st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
+st.subheader("視界をひろげる小さなチェック")
+st.caption("当てはまるものだけ軽くオンに。合わなければスルーで大丈夫です。")
+render_checks_and_tips()
+
+}
+
+# --- 各チェックに1対1対応の“一言”（あなたの文言をそのまま採用） ---
+TIP_MAP = {
+    "bw":         "🌷 部分的にOKも、あるかもしれません。",
+    "catastrophe":"☁️ 他の展開もあるかもしれません。",
+    "fortune":    "🎈 他の展開になればラッキーですね。",
+    "emotion":    "🫶 気持ちはそのまま、事実はそっと分けておいておくのもありかもしれません。",
+    "decide":     "🌿 分からない場合はいったん保留にするのもありですね。",
+}
+
+# --- チェックUI＋一言チップ（押すと“ほかの見方”に挿入） ---
+def render_checks_and_tips():
+    g = st.session_state.cbt.setdefault("checks", {})
+    # チェックボックス（2列で見やすく）
+    cols = st.columns(2)
+    keys = list(CHECK_LABELS.keys())
+    for i, k in enumerate(keys):
+        with cols[i % 2]:
+            g[k] = st.checkbox(CHECK_LABELS[k], value=bool(g.get(k, False)))
+    st.session_state.cbt["checks"] = g
+
+    # ONのものに対応する一言を下に並べる
+    on_keys = [k for k,v in g.items() if v]
+    if on_keys:
+        st.write("💡 タップで“ほかの見方”に挿入できます")
+        st.markdown('<div class="chips">', unsafe_allow_html=True)
+        tip_cols = st.columns(min(4, len(on_keys)))
+        for i, k in enumerate(on_keys):
+            tip = TIP_MAP.get(k, "")
+            if not tip: 
+                continue
+            with tip_cols[i % len(tip_cols)]:
+                if st.button(tip, key=f"tipbtn_{k}", use_container_width=True):
+                    append_to_textarea("alt", tip)   # ← “ほかの見方”に追記
+                    # 端末対応なら軽い振動（存在する場合のみ実行）
+                    try:
+                        st.markdown("<script>navigator.vibrate && navigator.vibrate(10)</script>", unsafe_allow_html=True)
+                    except:
+                        pass
+        st.markdown("</div>", unsafe_allow_html=True)
+
 
     # Step3 一言で言い直す
     st.markdown('<div class="card">', unsafe_allow_html=True)
