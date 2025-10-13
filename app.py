@@ -1,16 +1,17 @@
-# app.py — Intro-first with your exact copy & polite prompts
-# 初回は必ずヒーロー＋Q&Aを表示。ワーク中の文言は敬語ベース。
+# app.py — Companion tone / 2min note / no action-forcing
+# 入口は絵文字のみ → 「きっかけ」→「手がかり」→「一言で言い直す」
+# 医療/診断ではない前提。行動は決めさせない。やさしい敬語＋短い説明。
 # パステル（オレンジ/ピンク/紫/水色）＋静止の星。ページ移動なし（内部切替）。
 
 from datetime import datetime, date
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 import pandas as pd
 import streamlit as st
 
 # ---------------- Page config ----------------
 st.set_page_config(
-    page_title="Sora — しんどい夜の3分ノート",
+    page_title="Sora — しんどい夜の2分ノート",
     page_icon="🌙",
     layout="centered",
     initial_sidebar_state="collapsed",
@@ -64,7 +65,7 @@ small{color:var(--muted)}
 .hr{height:1px; background:linear-gradient(to right,transparent,#c7b8ff,transparent); margin:10px 0 6px}
 
 .tag{display:inline-block; padding:6px 12px; border-radius:999px;
-  background:#f7f2ff; color:#3a2a5a; font-weight:800; margin:0 6px 6px 0; border:1px solid var(--outline)}
+  background:#f7f2ff; color:#3a2a5a; font-weight:800; margin:0 6px 6px 0; border:1px solid(var(--outline))}
 
 textarea, input, .stTextInput>div>div>input{
   border-radius:14px!important; background:#ffffff; color:#2a2731; border:1px solid #e9ddff;
@@ -97,8 +98,18 @@ textarea, input, .stTextInput>div>div>input{
   padding:8px 12px; height:auto; border-radius:999px; font-weight:900
 }
 
-/* モバイル */
+/* Emoji grid */
+.emoji-grid{display:grid; grid-template-columns:repeat(8,1fr); gap:8px; margin:8px 0 6px}
+.emoji-btn>button{
+  width:100%!important; aspect-ratio:1/1; border-radius:18px!important;
+  font-size:1.55rem!important; background:#fff; border:1px solid #eadfff!important;
+  box-shadow:0 8px 16px rgba(60,45,90,.06);
+}
+.emoji-btn>button:hover{filter:brightness(.99)}
+
+@media (max-width: 840px){ .emoji-grid{grid-template-columns:repeat(6,1fr)} }
 @media (max-width: 640px){
+  .emoji-grid{grid-template-columns:repeat(4,1fr)}
   .tile-grid{grid-template-columns:1fr}
   .tile .stButton>button{min-height:180px}
   .block-container{padding-left:1rem; padding-right:1rem}
@@ -129,20 +140,33 @@ def _download_button(df: pd.DataFrame, label: str, filename: str):
     st.download_button(label, df.to_csv(index=False).encode("utf-8"),
                        file_name=filename, mime="text/csv")
 
-# ---------------- Session defaults (robust) ----------------
+# ---------------- Session defaults ----------------
 def ensure_cbt_defaults():
     if "cbt" not in st.session_state or not isinstance(st.session_state.cbt, dict):
         st.session_state.cbt = {}
     cbt = st.session_state.cbt
     flat_defaults = {
-        "fact":"", "auto_thought":"", "distress_before":5, "prob_before":50,
-        "evidence_for":"", "evidence_against":"", "reframe_text":"",
-        "prob_after":40, "distress_after":3, "small_step":""
+        "emotions": [],    # 入口：絵文字の選択
+        "trigger_tags": [],# きっかけチップ
+        "trigger_free":"", # 任意の一言
+        "fact":"",         # 見えている手がかり（事実）
+        "alt":"",          # ほかの手がかり（別の説明/例外）
+        "checks":{         # 結論は少し保留（やわらかい点検）
+            "extreme":False,"mind_read":False,"fortune":False,"catastrophe":False
+        },
+        "distress_before":5,
+        "prob_before":50,
+        "rephrase":"",     # 一言で言い直す（最終）
+        "prob_after":40,
+        "distress_after":4
     }
-    for k,v in flat_defaults.items(): cbt.setdefault(k, v)
-    checks = cbt.setdefault("gentle_checks", {})
-    for k in ["extreme","mind_read","catastrophe","fortune","self_blame"]:
-        checks.setdefault(k, False)
+    # deep set
+    for k,v in flat_defaults.items():
+        if isinstance(v, dict):
+            cbt.setdefault(k,{})
+            for kk,vv in v.items(): cbt[k].setdefault(kk,vv)
+        else:
+            cbt.setdefault(k,v)
 
 def ensure_reflection_defaults():
     if "reflection" not in st.session_state or not isinstance(st.session_state.reflection, dict):
@@ -181,27 +205,27 @@ def support(distress: Optional[int]=None, lonely: Optional[int]=None):
     else:
         companion("🌟","ここまで入力いただけて十分です。","短くても大丈夫です。")
 
-# ---------------- INTRO (your exact copy first) ----------------
+# ---------------- INTRO（伴走トーン） ----------------
 def view_intro():
     st.markdown("""
 <div class="card" style="padding:22px;">
   <h2 style="margin:.1rem 0 .6rem; color:#2f2a3b;">
-    しんどい夜の考えのループを、<b>3分で整理して落ち着きを取り戻す。</b>
+    いま感じていることを、<b>いっしょに静かに整えます。</b>
   </h2>
-  <p style="margin:.2rem 0 .6rem;">
-    短い質問に答えるだけで、<b>いまの状況・自分の考え・次の一歩</b>がはっきりします。
-  </p>
   <ul style="margin:.4rem 0 .6rem;">
-    <li>⏱ <b>所要時間</b>：約3分</li>
-    <li>🎯 <b>目的</b>：落ち着きを取り戻し、現実的な見方と小さな行動を決める</li>
-    <li>🔒 <b>安心</b>：データは端末に保存／医療・診断ではありません</li>
+    <li>⏱ <b>所要</b>：約2分 ／ <b>3ステップ</b></li>
+    <li>🎯 <b>内容</b>：気持ちのきっかけ→手がかり→一言で言い直す</li>
+    <li>🔒 <b>安心</b>：この端末の中だけ／いつでも全消去可／医療・診断ではありません</li>
   </ul>
+  <p style="margin:.2rem 0 .2rem; color:#6f7180">
+    ※ 空欄があっても大丈夫です。途中でやめても問題ございません。
+  </p>
 </div>
 """, unsafe_allow_html=True)
 
     cta1, cta2 = st.columns([3,2])
     with cta1:
-        if st.button("今すぐ3分をはじめる", use_container_width=True):
+        if st.button("今すぐはじめる（約2分）", use_container_width=True):
             st.session_state.view = "CBT"
     with cta2:
         if st.button("ホームを見る", use_container_width=True):
@@ -209,31 +233,21 @@ def view_intro():
 
     st.markdown("""
 <div class="card">
-  <h3 style="margin:.2rem 0 .6rem;">初めての方向け（Q&Aカード）</h3>
-
-  <p><b>これは何？</b><br>
-  しんどい夜に、短時間で思考を整理し、落ち着きを取り戻すためのノートです。</p>
-
-  <p><b>いつ使う？</b></p>
+  <h3 style="margin:.2rem 0 .6rem;">初めての方向け（Q&A）</h3>
+  <p><b>これは何ですか？</b><br>
+  しんどい夜に、短時間で“考え方”を静かに確かめるためのノートです。</p>
+  <p><b>いつ使いますか？</b></p>
   <ul>
-    <li>眠る前に考えが止まらないとき</li>
-    <li>不安で判断がぶれるとき</li>
-    <li>とりあえず状況を整えたいとき</li>
+    <li>寝る前に考えが止まらないとき</li>
+    <li>返信が来なくて不安なとき</li>
+    <li>提出・発表を前に落ち着かせたいとき</li>
   </ul>
-
-  <p><b>どう使う？（3ステップ）</b></p>
+  <p><b>どう進みますか？（3ステップ）</b></p>
   <ol>
-    <li>出来事を一行</li>
-    <li>考えを一行</li>
-    <li>次の一歩を一行（迷えば候補から選択）</li>
+    <li>いまの気持ちを絵文字で選ぶ／近いきっかけを選ぶ</li>
+    <li>見えている手がかり／ほかの手がかりを並べる</li>
+    <li>いまの考えを一言で言い直す（行動は決めなくてOK）</li>
   </ol>
-
-  <p><b>目指すゴール</b></p>
-  <ul>
-    <li>堂々巡りが落ち着く</li>
-    <li><b>現実的な見方</b>が定まる</li>
-    <li><b>具体的な一歩</b>が決まる</li>
-  </ul>
 </div>
 """, unsafe_allow_html=True)
 
@@ -246,7 +260,7 @@ def quick_switch():
     with c2:
         if st.button("🏠 ホーム", key="qs_home"): st.session_state.view="HOME"
     with c3:
-        if st.button("📓 整理ワーク", key="qs_cbt"): st.session_state.view="CBT"
+        if st.button("📓 2分ノート", key="qs_cbt"): st.session_state.view="CBT"
     with c4:
         if st.button("📝 1日のふり返り", key="qs_ref"): st.session_state.view="REFLECT"
     with c5:
@@ -263,7 +277,7 @@ def view_home():
     c1,c2 = st.columns(2)
     with c1:
         st.markdown('<div class="tile tile-cbt">', unsafe_allow_html=True)
-        if st.button("📓 整理ワーク\n（3分）", key="tile_cbt"): st.session_state.view="CBT"
+        if st.button("📓 2分ノート", key="tile_cbt"): st.session_state.view="CBT"
         st.markdown('</div>', unsafe_allow_html=True)
     with c2:
         st.markdown('<div class="tile tile-ref">', unsafe_allow_html=True)
@@ -280,117 +294,131 @@ def view_home():
         st.markdown('</div>', unsafe_allow_html=True)
     st.markdown('</div></div>', unsafe_allow_html=True)
 
-# ---------------- CBT (polite prompts) ----------------
+# ---------------- CBT（2分ノート：行動なし） ----------------
+EMOJIS = ["😟","😡","😢","😔","😤","😴","🙂","🤷‍♀️"]
+
+def emoji_toggle_row(selected: List[str]) -> List[str]:
+    st.caption("いまの気持ちをタップ（複数OK／途中でやめてもOK）")
+    st.markdown('<div class="emoji-grid">', unsafe_allow_html=True)
+    new_selected = set(selected)
+    cols = st.columns(8) if len(EMOJIS)>=8 else st.columns(len(EMOJIS))
+    # 配置をフラットに
+    idx = 0
+    for e in EMOJIS:
+        with cols[idx % len(cols)]:
+            key = f"emo_{e}_{idx}"
+            pressed = st.button(e, key=key, use_container_width=True)
+            if pressed:
+                if e in new_selected:
+                    new_selected.remove(e)
+                else:
+                    new_selected.add(e)
+        idx += 1
+    st.markdown('</div>', unsafe_allow_html=True)
+    return list(new_selected)
+
 def view_cbt():
     ensure_cbt_defaults()
     quick_switch()
 
-    # 1) 事実
+    # Step0 絵文字選択（ラベルなし）
     st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.subheader("1) いま起きたこと（事実）")
-    st.caption("気持ちや推測は次の欄で扱いますので、事実のみを簡潔にご記入ください。")
-    st.session_state.cbt["fact"] = st.text_area(
-        "本日、どのようなことがございましたか？",
-        value=st.session_state.cbt.get("fact",""),
-        placeholder="例）21:20にメッセージを送りました。既読はまだです。明日は小テストがあります。",
-        height=96, label_visibility="collapsed"
-    )
+    st.subheader("いまの気持ち")
+    st.session_state.cbt["emotions"] = emoji_toggle_row(st.session_state.cbt.get("emotions", []))
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # 2) 心の声 + つらさ/確からしさ(前)
+    # Step1 きっかけ
     st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.subheader("2) こころの声（浮かんだ考え）")
-    st.session_state.cbt["auto_thought"] = st.text_area(
-        "その時、どのような考えが浮かびましたか？",
-        value=st.session_state.cbt.get("auto_thought",""),
-        placeholder="例）嫌われたのかもしれません…",
-        height=88
+    st.subheader("この気持ち、近かったきっかけは？")
+    st.caption("言葉にしづらい時は、近いものだけタップで結構です。")
+    # チップ（複数選択をボタンで擬似実装）
+    chip_defs = [
+        ("⏱️ さっきの出来事", "time"),
+        ("🧠 浮かんだ一言", "thought_line"),
+        ("🤝 人との関係", "relationship"),
+        ("🫀 体のサイン", "body"),
+        ("🌀 うまく言えない", "unknown"),
+    ]
+    chosen = set(st.session_state.cbt.get("trigger_tags", []))
+    st.markdown('<div class="chips">', unsafe_allow_html=True)
+    cols = st.columns(len(chip_defs))
+    for i,(label,val) in enumerate(chip_defs):
+        with cols[i]:
+            if st.button(label, key=f"chip_{val}"):
+                if val in chosen: chosen.remove(val)
+                else: chosen.add(val)
+    st.markdown('</div>', unsafe_allow_html=True)
+    st.session_state.cbt["trigger_tags"] = list(chosen)
+
+    st.session_state.cbt["trigger_free"] = st.text_area(
+        "任意の一言（なくて大丈夫です）",
+        value=st.session_state.cbt.get("trigger_free",""),
+        placeholder="例）21:20に送信→返信まだ／「また失敗する」と浮かんだ",
+        height=76
     )
     cols = st.columns(2)
     with cols[0]:
-        st.session_state.cbt["distress_before"] = st.slider(
-            "いまのしんどさ（0〜10）", 0, 10, int(st.session_state.cbt.get("distress_before",5)))
+        st.session_state.cbt["distress_before"] = st.slider("いまのしんどさ（0〜10）", 0, 10, int(st.session_state.cbt.get("distress_before",5)))
     with cols[1]:
-        st.session_state.cbt["prob_before"] = st.slider(
-            "その考えをどの程度本当だと感じますか？（%）", 0, 100, int(st.session_state.cbt.get("prob_before",50)))
+        st.session_state.cbt["prob_before"] = st.slider("いまの考えは、どのくらい“ありえそう”？（%）", 0, 100, int(st.session_state.cbt.get("prob_before",50)))
     support(distress=st.session_state.cbt["distress_before"])
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # 3) やさしい確認
+    # Step2 手がかり
     st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.subheader("3) やさしい確認")
-    g = st.session_state.cbt["gentle_checks"]
-    col1,col2,col3,col4,col5 = st.columns(5)
-    with col1:
-        g["extreme"] = st.checkbox("0か100で決めつけていませんか？", value=bool(g.get("extreme",False)))
-    with col2:
-        g["mind_read"] = st.checkbox("相手の気持ちを決めつけていませんか？", value=bool(g.get("mind_read",False)))
-    with col3:
-        g["catastrophe"] = st.checkbox("最悪だけを想像していませんか？", value=bool(g.get("catastrophe",False)))
-    with col4:
-        g["fortune"] = st.checkbox("まだ起きていない先を断言していませんか？", value=bool(g.get("fortune",False)))
-    with col5:
-        g["self_blame"] = st.checkbox("ご自身を過度に責めていませんか？", value=bool(g.get("self_blame",False)))
-
-    hints=[]
-    if g["extreme"]:     hints.append("一部うまくいかなくても、すべてが否定されるとは限りません。")
-    if g["mind_read"]:   hints.append("相手の本音は、確かめないと分からないことが多いです。")
-    if g["catastrophe"]: hints.append("一番悪い未来以外の可能性も並べてみましょう。")
-    if g["fortune"]:     hints.append("現時点の情報で判断し、未来の予想は保留にしても大丈夫です。")
-    if g["self_blame"]:  hints.append("出来事のすべてがご自身の責任とは限りません。")
-    if hints:
-        st.write("💡 ヒント")
-        for h in hints: st.markdown(f"- {h}")
-    st.markdown('</div>', unsafe_allow_html=True)
-
-    # 4) 根拠
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.subheader("4) 根拠を分けて書く")
+    st.subheader("手がかりを並べてみる")
+    st.caption("片方だけでも構いません。思いついた分だけで結構です。")
     cols = st.columns(2)
     with cols[0]:
-        st.session_state.cbt["evidence_for"] = st.text_area(
-            "その考えを支持する根拠", value=st.session_state.cbt.get("evidence_for",""), height=96)
+        st.session_state.cbt["fact"] = st.text_area("見えている手がかり（事実）",
+            value=st.session_state.cbt.get("fact",""),
+            placeholder="例）返信がまだ来ていない／明日が提出日 など", height=96)
     with cols[1]:
-        st.session_state.cbt["evidence_against"] = st.text_area(
-            "反対の根拠・例外", value=st.session_state.cbt.get("evidence_against",""), height=96)
-    st.caption("片方だけでも構いません。短く箇条書きでご記入ください。")
+        st.session_state.cbt["alt"] = st.text_area("ほかの手がかり（別の説明・例外）",
+            value=st.session_state.cbt.get("alt",""),
+            placeholder="例）移動中かも／前も夜に返ってきた など", height=96)
+
+    st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
+    st.subheader("結論は少しだけ保留にする")
+    st.caption("当てはまるものだけ軽くチェック。“かもしれない”の視点で。")
+    g = st.session_state.cbt["checks"]
+    c1,c2,c3,c4 = st.columns(4)
+    with c1:
+        g["extreme"] = st.checkbox("0/100で考えたかも", value=bool(g.get("extreme",False)))
+    with c2:
+        g["mind_read"] = st.checkbox("心を読み切った気になったかも", value=bool(g.get("mind_read",False)))
+    with c3:
+        g["fortune"] = st.checkbox("先の展開を決め打ちしたかも", value=bool(g.get("fortune",False)))
+    with c4:
+        g["catastrophe"] = st.checkbox("最悪だけを優先したかも", value=bool(g.get("catastrophe",False)))
+
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # 5) 見方の調整 + 一歩
+    # Step3 一言で言い直す（= 今の見方を更新）
     st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.subheader("5) 現実的な見方に整える")
-    suggestions=[]
-    if g["extreme"]:     suggestions.append("うまくいっていない部分はありますが、すべてが失敗とは言い切れません。")
-    if g["mind_read"]:   suggestions.append("相手にも事情がある可能性があります。まずは事実から確認します。")
-    if g["catastrophe"]: suggestions.append("不安はありますが、未来はひとつではありません。現時点の事実に基づいて考えます。")
-    if g["fortune"]:     suggestions.append("今わかる範囲に焦点を当て、断定は避けます。")
-    if g["self_blame"]:  suggestions.append("自分の影響は一部であり、すべてを背負う必要はありません。")
-    if not suggestions:
-        suggestions = [
-            "いま分かっている事実に沿って考え直します。",
-            "不安を認めつつ、確認できる情報を優先します。",
-            "今日はここまでにして、明日また見直します。"
-        ]
-    idx = st.radio("候補（編集して構いません）", options=list(range(len(suggestions))),
-                   format_func=lambda i:suggestions[i], index=0, horizontal=False)
-    default_text = suggestions[idx] if 0 <= idx < len(suggestions) else ""
-    st.session_state.cbt["reframe_text"] = st.text_area(
-        "現実的な見方（1行程度）をご記入ください：",
-        value=st.session_state.cbt.get("reframe_text","") or default_text, height=90)
-
-    cols = st.columns(2)
-    with cols[0]:
-        st.session_state.cbt["prob_after"] = st.slider(
-            "その見方はどの程度しっくりきますか？（%）", 0, 100, int(st.session_state.cbt.get("prob_after",40)))
-    with cols[1]:
-        st.session_state.cbt["distress_after"] = st.slider(
-            "いまのしんどさ（見方の調整後）", 0, 10, int(st.session_state.cbt.get("distress_after",3)))
-
-    st.session_state.cbt["small_step"] = st.text_input(
-        "本日または明日に取れる小さな一歩を1つだけご記入ください：",
-        value=st.session_state.cbt.get("small_step",""),
-        placeholder="例）明日の午前に、テスト範囲を10分だけ確認します。"
+    st.subheader("いまの考えを、一言で言い直す")
+    st.caption("分からない部分は保留で大丈夫です。選んでから編集いただけます。")
+    starters = [
+        "分からない部分は保留にします。",
+        "可能性は1つではありません。",
+        "途中経過として受け止めます。",
+        "今ある事実の範囲で考え直します。",
+        "決め打ちはいったん止めて、様子を見ます。"
+    ]
+    idx = st.radio("候補（編集可）", options=list(range(len(starters))),
+                   format_func=lambda i: starters[i], index=0, horizontal=False)
+    default_text = starters[idx] if 0 <= idx < len(starters) else ""
+    st.session_state.cbt["rephrase"] = st.text_area(
+        "一言（1行程度）",
+        value=st.session_state.cbt.get("rephrase","") or default_text,
+        height=84
     )
+
+    ccols = st.columns(2)
+    with ccols[0]:
+        st.session_state.cbt["prob_after"] = st.slider("いまの言い直しは、どのくらい“しっくり”？（%）", 0, 100, int(st.session_state.cbt.get("prob_after",40)))
+    with ccols[1]:
+        st.session_state.cbt["distress_after"] = st.slider("いまのしんどさ（言い直し後）", 0, 10, int(st.session_state.cbt.get("distress_after",4)))
     st.markdown('</div>', unsafe_allow_html=True)
 
     # 保存・初期化
@@ -398,27 +426,27 @@ def view_cbt():
     with c1:
         if st.button("💾 保存して完了（入力欄を初期化）"):
             now = datetime.now().isoformat(timespec="seconds")
-            g = st.session_state.cbt["gentle_checks"]
             row = {
                 "id":f"cbt-{now}","ts":now,
+                "emotions":" ".join(st.session_state.cbt.get("emotions",[])),
+                "trigger_tags":" ".join(st.session_state.cbt.get("trigger_tags",[])),
+                "trigger_free":st.session_state.cbt.get("trigger_free",""),
                 "fact":st.session_state.cbt.get("fact",""),
-                "auto_thought":st.session_state.cbt.get("auto_thought",""),
+                "alt":st.session_state.cbt.get("alt",""),
+                "extreme":st.session_state.cbt["checks"].get("extreme",False),
+                "mind_read":st.session_state.cbt["checks"] .get("mind_read",False),
+                "fortune":st.session_state.cbt["checks"]  .get("fortune",False),
+                "catastrophe":st.session_state.cbt["checks"].get("catastrophe",False),
                 "distress_before":st.session_state.cbt.get("distress_before",0),
                 "prob_before":st.session_state.cbt.get("prob_before",0),
-                "extreme":g.get("extreme",False),"mind_read":g.get("mind_read",False),
-                "catastrophe":g.get("catastrophe",False),"fortune":g.get("fortune",False),
-                "self_blame":g.get("self_blame",False),
-                "evidence_for":st.session_state.cbt.get("evidence_for",""),
-                "evidence_against":st.session_state.cbt.get("evidence_against",""),
-                "reframe_text":st.session_state.cbt.get("reframe_text",""),
+                "rephrase":st.session_state.cbt.get("rephrase",""),
                 "prob_after":st.session_state.cbt.get("prob_after",0),
                 "distress_after":st.session_state.cbt.get("distress_after",0),
-                "small_step":st.session_state.cbt.get("small_step",""),
             }
             _append_csv(CBT_CSV,row)
             st.session_state.cbt = {}
             ensure_cbt_defaults()
-            st.success("保存いたしました。お疲れさまでした。")
+            st.success("保存いたしました。ここで完了です。行動は決めなくて大丈夫です。")
     with c2:
         if st.button("🧼 入力欄のみ初期化（未保存分は消去）"):
             st.session_state.cbt = {}
@@ -434,11 +462,11 @@ def view_reflect():
     st.caption("点数ではなく、心が少しやわらぐ表現で短くご記入ください。")
     st.session_state.reflection["date"] = st.date_input("日付", value=st.session_state.reflection["date"])
     st.session_state.reflection["today_small_win"] = st.text_area(
-        "本日できたことを1つだけ挙げてください：",
+        "本日できたことを1つだけ：",
         value=st.session_state.reflection.get("today_small_win",""), height=76
     )
     st.session_state.reflection["self_message"] = st.text_area(
-        "いまのご自身へ一言かけるとしたら：",
+        "いまのご自身へ一言：",
         value=st.session_state.reflection.get("self_message",""), height=76
     )
     st.session_state.reflection["note_for_tomorrow"] = st.text_area(
@@ -475,51 +503,44 @@ def view_reflect():
 def view_history():
     quick_switch()
     st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.subheader("📓 記録（整理ワーク）")
+    st.subheader("📓 記録（2分ノート）")
     df = _load_csv(CBT_CSV)
     if df.empty:
-        st.caption("まだ保存されたワークはございません。最初の3分を行うと、こちらに一覧が表示されます。")
+        st.caption("まだ保存されたノートはございません。最初の2分を行うと、こちらに一覧が表示されます。")
     else:
-        q = st.text_input("キーワード検索（事実・考え・見方・一歩）", "")
+        q = st.text_input("キーワード検索（手がかり・言い直し・きっかけ・感情）", "")
         view = df.copy()
+        text_cols = ["fact","alt","rephrase","trigger_free","emotions","trigger_tags"]
+        for c in text_cols:
+            if c in view.columns: view[c] = view[c].astype(str)
         if q.strip():
             q = q.strip().lower()
-            for c in ["fact","auto_thought","reframe_text","evidence_for","evidence_against","small_step"]:
-                view[c] = view[c].astype(str)
-            mask = (
-                view["fact"].str.lower().str.contains(q) |
-                view["auto_thought"].str.lower().str.contains(q) |
-                view["reframe_text"].str.lower().str.contains(q) |
-                view["evidence_for"].str.lower().str.contains(q) |
-                view["evidence_against"].str.lower().str.contains(q) |
-                view["small_step"].str.lower().str.contains(q)
-            )
+            mask = False
+            for c in text_cols:
+                if c in view.columns:
+                    mask = mask | view[c].str.lower().str.contains(q)
             view = view[mask]
         if "ts" in view.columns:
             view = view.sort_values("ts", ascending=False)
         for _, r in view.head(50).iterrows():
             st.markdown('<div class="card">', unsafe_allow_html=True)
             st.markdown(f"**🕒 {r.get('ts','')}**")
-            st.markdown(f"**出来事**：{r.get('fact','')}")
-            st.markdown(f"**考え**：{r.get('auto_thought','')}")
-            st.markdown(f"**根拠（支持）**：{r.get('evidence_for','')}")
-            st.markdown(f"**根拠（反証）**：{r.get('evidence_against','')}")
-            st.markdown(f"**現実的な見方**：{r.get('reframe_text','')}")
+            st.markdown(f"**感情**：{r.get('emotions','')}")
+            st.markdown(f"**きっかけ**：{r.get('trigger_tags','')} ／ {r.get('trigger_free','')}")
+            st.markdown(f"**見えている手がかり**：{r.get('fact','')}")
+            st.markdown(f"**ほかの手がかり**：{r.get('alt','')}")
+            st.markdown(f"**一言で言い直す**：{r.get('rephrase','')}")
             try:
                 b = int(r.get("distress_before",0)); a = int(r.get("distress_after",0))
                 pb = int(r.get("prob_before",0)); pa = int(r.get("prob_after",0))
-                st.caption(f"しんどさ: {b} → {a} ／ 確からしさ: {pb}% → {pa}%")
+                st.caption(f"しんどさ: {b} → {a} ／ 体感の確からしさ: {pb}% → {pa}%")
             except Exception:
                 pass
-            step = r.get("small_step","")
-            if isinstance(step,str) and step.strip():
-                st.markdown(f"**小さな一歩**：{step}")
             tags=[]
-            if r.get("extreme",False): tags.append("0/100の決めつけ")
-            if r.get("mind_read",False): tags.append("相手の気持ちの決めつけ")
-            if r.get("catastrophe",False): tags.append("最悪の想像")
-            if r.get("fortune",False): tags.append("先の断言")
-            if r.get("self_blame",False): tags.append("過度の自己責任")
+            if r.get("extreme",False): tags.append("0/100の見方")
+            if r.get("mind_read",False): tags.append("読心の見方")
+            if r.get("fortune",False): tags.append("先の決め打ち")
+            if r.get("catastrophe",False): tags.append("最悪を優先")
             if tags:
                 st.markdown(" ".join([f"<span class='tag'>{t}</span>" for t in tags]), unsafe_allow_html=True)
             st.markdown('</div>', unsafe_allow_html=True)
@@ -572,7 +593,7 @@ def view_export():
     st.subheader("⬇️ エクスポート & 設定")
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.markdown("**データのエクスポート（CSV）**")
-    _download_button(_load_csv(CBT_CSV), "⬇️ 整理ワーク（CSV）をダウンロード", "cbt_entries.csv")
+    _download_button(_load_csv(CBT_CSV), "⬇️ 2分ノート（CSV）をダウンロード", "cbt_entries.csv")
     _download_button(_load_csv(REFLECT_CSV), "⬇️ ふり返り（CSV）をダウンロード", "daily_reflections.csv")
     st.markdown('</div>', unsafe_allow_html=True)
 
