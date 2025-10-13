@@ -414,7 +414,7 @@ def view_intro():
             st.session_state.view = "CBT"
     with cta2:
         if st.button("ホームを見る", use_container_width=True):
-            st.session_state.view = "HOME")
+            st.session_state.view = "HOME"
 
 # ---------------- HOME ----------------
 def view_home():
