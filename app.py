@@ -1,4 +1,8 @@
-# app.py — Sora 2分ノート（やさしい伴走トーン・フル実装）
+# app.py — Sora 2分ノート（濃紺ヒーロー版・ポスター調UI）
+# * 濃いネイビーの基調色 / ピンク系アクセント
+# * ヒーローはポスター文言に寄せたレイアウト
+# * ナビは白ゴースト、選択UIはグラデのピルで明確に区別
+# * “チェック→あなたの一言”を挿入する挙動はそのまま
 
 from datetime import datetime, date
 from pathlib import Path
@@ -19,11 +23,22 @@ def inject_css():
     st.markdown("""
 <style>
 :root{
-  --text:#2a2731; --muted:#6f7180;
-  --glass:rgba(255,255,255,.94); --glass-brd:rgba(185,170,255,.28);
-  --outline:#e9ddff;
-  --grad-from:#ffa16d; --grad-to:#ff77a3;
-  --chip:#fff6fb; --chip-brd:#ffd7f0;
+  /* Base (Dark Navy) & Accents */
+  --bg:#0f1022;         /* 背景（濃紺） */
+  --panel:#171833;      /* カードの内側 */
+  --panel-brd:#3a3d66;  /* カード枠線 */
+  --text:#f6f4ff;       /* 主要テキスト */
+  --muted:#b5b7d4;      /* 補助テキスト */
+
+  --accent1:#ffd9cc;    /* 淡ピーチ（文字・アイコン） */
+  --accent2:#ff9ec3;    /* ピンク（強め） */
+  --accent3:#ffc4dd;    /* 淡ピンク */
+  --outline:#6a6fb0;    /* 薄い線 */
+
+  --grad-from:#ff9fb0;  /* チップ用：上 */
+  --grad-to:#ff78a2;    /* チップ用：下 */
+
+  --chip-brd:rgba(255,189,222,.35);
 
   --tile-a:#ffb37c; --tile-b:#ffe0c2;
   --tile-c:#ff9ec3; --tile-d:#ffd6ea;
@@ -31,99 +46,114 @@ def inject_css():
   --tile-g:#89d7ff; --tile-h:#d4f2ff;
 }
 
-.stApp{
-  background:
-    radial-gradient(820px 520px at 0% -10%,  rgba(255,226,200,.55) 0%, transparent 60%),
-    radial-gradient(780px 480px at 100% -8%, rgba(255,215,242,.55) 0%, transparent 60%),
-    radial-gradient(960px 560px at -10% 98%, rgba(232,216,255,.45) 0%, transparent 60%),
-    radial-gradient(960px 560px at 110% 100%, rgba(217,245,255,.46) 0%, transparent 60%),
-    linear-gradient(180deg, #fffefd 0%, #fff8fb 28%, #f7f3ff 58%, #f2fbff 100%);
-}
-/* 控えめな静止の星 */
-.stApp:before{
-  content:""; position:fixed; inset:0; pointer-events:none; z-index:0;
-  background-image:
-    radial-gradient(circle, rgba(255,255,255,.65) 0.6px, transparent 1px),
-    radial-gradient(circle, rgba(255,255,255,.35) 0.5px, transparent 1px);
-  background-size: 22px 22px, 34px 34px;
-  background-position: 0 0, 10px 12px;
-  opacity:.18;
-}
+html, body, .stApp{background:var(--bg)}
 
-.block-container{max-width:960px; padding-top:1rem; padding-bottom:2rem; position:relative; z-index:1}
+.block-container{max-width:960px; padding-top:0.4rem; padding-bottom:2rem; position:relative; z-index:1}
 h1,h2,h3{color:var(--text); letter-spacing:.2px}
 p,label,.stMarkdown,.stTextInput,.stTextArea{color:var(--text); font-size:1.06rem}
 small{color:var(--muted)}
 
 .card{
-  background:var(--glass); border:1px solid var(--glass-brd);
-  border-radius:20px; padding:16px; margin-bottom:14px;
-  box-shadow:0 18px 36px rgba(80,70,120,.14); backdrop-filter:blur(8px);
+  background:var(--panel); border:1px solid var(--panel-brd);
+  border-radius:20px; padding:18px; margin-bottom:14px;
+  box-shadow:0 22px 44px rgba(11,12,30,.25);
 }
-.hr{height:1px; background:linear-gradient(to right,transparent,#c7b8ff,transparent); margin:12px 0 10px}
 
-/* --- 共通の（グラデ）ボタン：選択ピルやCTA用 --- */
-.stButton>button,.stDownloadButton>button{
-  width:100%; padding:14px 16px; border-radius:999px; border:1px solid var(--outline);
-  background:linear-gradient(180deg,var(--grad-from),var(--grad-to)); color:#fff; font-weight:900; font-size:1.04rem;
-  box-shadow:0 12px 26px rgba(255,145,175,.22);
+/* --- ヒーロー（ポスター調） --- */
+.hero{
+  border:2px solid rgba(255,217,204,.45);
+  background:linear-gradient(180deg, rgba(36,38,80,.55), rgba(26,27,58,.55));
+  padding:22px; border-radius:24px; margin:10px 0 14px;
 }
-.stButton>button:hover{filter:brightness(.98)}
+.hero h1{
+  color:var(--text); font-size:1.5rem; font-weight:900; margin:.2rem 0 1rem;
+}
+.hero .lead{
+  font-size:1.9rem; font-weight:900; color:var(--accent1);
+  margin:.4rem 0 1.2rem;
+}
+.hero .box{
+  border:2px solid rgba(255,217,204,.55);
+  border-radius:18px; padding:14px; margin:10px 0 14px; color:var(--text);
+  background:linear-gradient(180deg, rgba(28,29,66,.7), rgba(23,24,52,.7));
+}
+.hero .badges{
+  display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin:10px 0 4px;
+}
+.hero .badge{
+  background:linear-gradient(180deg, #2b2d66, #232553);
+  border:2px solid rgba(255,217,204,.45); border-radius:16px;
+  padding:12px; text-align:center; color:var(--accent1); font-weight:800;
+}
+.hero .badge .big{font-size:1.7rem; color:#fff}
+.hero .list{
+  background:linear-gradient(180deg,#23244d,#1b1c41);
+  border:2px solid rgba(255,217,204,.45);
+  border-radius:18px; padding:12px 14px;
+}
+.hero li{margin:.2rem 0;}
 
-/* ======================= ナビ専用（白いゴースト） ======================= */
+/* --- ナビ（白ゴースト） --- */
 .topbar{
   position:sticky; top:0; z-index:10;
-  background:rgba(255,255,255,.7); backdrop-filter:blur(8px);
-  border-bottom:1px solid #ececff;
-  margin:0 -12px 10px; padding:8px 12px;
+  background:rgba(15,16,34,.7); backdrop-filter:blur(8px);
+  border-bottom:1px solid #2e3263;
+  margin:0 -12px 8px; padding:8px 12px 10px;
 }
 .topnav{display:flex; gap:8px; flex-wrap:wrap; margin:4px 0 2px}
 .topnav .nav-btn>button{
-  background:#ffffff !important;
-  color:#2d2a33 !important;
-  border:1px solid #d9dbe8 !important;
-  box-shadow:none !important;
-  height:auto !important;
-  padding:9px 12px !important;
-  border-radius:12px !important;
-  font-weight:700 !important;
-  font-size:.95rem !important;
-  letter-spacing:.1px;
+  background:#fbfbff !important; color:#1e1f3f !important;
+  border:1px solid #d9dbe8 !important; box-shadow:none !important;
+  height:auto !important; padding:9px 12px !important; border-radius:12px !important;
+  font-weight:700 !important; font-size:.95rem !important; letter-spacing:.1px;
 }
-.topnav .nav-btn>button:hover{background:#f6f7ff !important; filter:none !important;}
+.topnav .nav-btn>button:hover{background:#ffffff !important; filter:none !important;}
 .topnav .active>button{
-  background:#f4f3ff !important;
-  border:2px solid #7d74ff !important;
+  background:#f4f3ff !important; border:2px solid #7d74ff !important;
 }
-.nav-hint{font-size:.78rem; color:#9aa; margin:0 2px 4px 2px}
+.nav-hint{font-size:.78rem; color:#aeb2df; margin:0 2px 6px 2px}
 
-/* ======================= 選択UI（感情/きっかけ/チップ） ======================= */
+/* --- 選択ピル（グラデ） --- */
+.stButton>button,.stDownloadButton>button{
+  width:100%; padding:14px 16px; border-radius:999px; border:1px solid var(--chip-brd);
+  background:linear-gradient(180deg,var(--grad-from),var(--grad-to)); color:#fff; font-weight:900; font-size:1.04rem;
+  box-shadow:0 14px 28px rgba(255,120,162,.22);
+}
+.stButton>button:hover{filter:brightness(.98)}
+
+/* Chips (一言など) */
 .chips{display:flex; gap:8px; flex-wrap:wrap; margin:8px 0 10px}
 .chips .chip-btn>button{
-  background:linear-gradient(180deg,#ffd8e9,#ffc4e1); color:#523a6a;
+  background:linear-gradient(180deg,#ffbcd2,#ff99bc); color:#3a2144;
   border:1px solid var(--chip-brd)!important; padding:10px 14px; height:auto;
-  border-radius:999px!important; font-weight:900; box-shadow:0 10px 20px rgba(60,45,90,.08)
+  border-radius:999px!important; font-weight:900; box-shadow:0 10px 20px rgba(255,153,188,.12)
 }
 
-/* Emoji grid（選択ピルとは別テイスト） */
+/* Emoji grid（白タイル） */
 .emoji-grid{display:grid; grid-template-columns:repeat(8,1fr); gap:10px; margin:8px 0 6px}
 .emoji-btn>button{
   width:100%!important; aspect-ratio:1/1; border-radius:18px!important;
-  font-size:1.55rem!important; background:#fff; border:1px solid #eadfff!important;
-  box-shadow:0 8px 16px rgba(60,45,90,.06);
+  font-size:1.55rem!important; background:#fff; color:#111;
+  border:1px solid #eadfff!important; box-shadow:0 8px 16px rgba(12,13,30,.28);
 }
 .emoji-on>button{
   background:linear-gradient(180deg,#ffc6a3,#ff9fbe)!important;
   border:1px solid #ff80b0!important;
 }
 
-/* ホームのタイル */
+/* 入力欄の暗色スキン */
+textarea, input, .stTextInput>div>div>input{
+  border-radius:14px!important; background:#0f0f23; color:#f0eeff; border:1px solid #3a3d66;
+}
+.stSlider,.stRadio>div{color:var(--text)}
+
+/* ホームのタイル（明るめ） */
 .tile-grid{display:grid; grid-template-columns:1fr 1fr; gap:18px; margin-top:8px}
 .tile .stButton>button{
   aspect-ratio:1/1; min-height:220px; border-radius:28px;
   text-align:left; padding:20px; white-space:normal; line-height:1.2;
   border:none; font-weight:900; font-size:1.18rem; color:#2d2a33;
-  box-shadow:0 20px 36px rgba(60,45,90,.18);
+  box-shadow:0 20px 36px rgba(8,8,22,.45);
   display:flex; align-items:flex-end; justify-content:flex-start;
 }
 .tile .stButton>button:after{content:"";}
@@ -205,12 +235,12 @@ def ensure_reflection_defaults():
 st.session_state.setdefault("view","INTRO")
 ensure_cbt_defaults(); ensure_reflection_defaults()
 
-# ---------------- Gentle companion ----------------
+# ---------------- Helpers ----------------
 def companion(emoji: str, text: str, sub: Optional[str]=None):
     st.markdown(
         f"""
 <div class="card">
-  <div style="font-weight:900; color:#2f2a3b">{emoji} {text}</div>
+  <div style="font-weight:900; color:var(--accent1)">{emoji} {text}</div>
   {f"<div class='small' style='margin-top:4px; color:var(--muted)'>{sub}</div>" if sub else ""}
 </div>
         """,
@@ -223,13 +253,12 @@ def support(distress: Optional[int]=None, lonely: Optional[int]=None):
     elif lonely is not None and lonely >= 7:
         companion("🤝","この瞬間、ひとりではありません。","深呼吸をひとつして、ゆっくり進めましょう。")
     else:
-        companion("🌟","ここまで入力いただけて十分です。","短くても大丈夫です。")
+        companion("🌟","ここまで入力いただけて十分です。","空欄があっても大丈夫です。")
 
-# ---------------- 小さなハプティクス（対応端末限定） ----------------
 def vibrate(ms=12):
     st.markdown("<script>try{navigator.vibrate&&navigator.vibrate(%d)}catch(e){{}}</script>"%ms, unsafe_allow_html=True)
 
-# ---------------- ナビ（白ゴースト・スティッキー） ----------------
+# ---------------- ナビ（白ゴースト） ----------------
 def top_nav():
     st.markdown('<div class="topbar">', unsafe_allow_html=True)
     st.markdown('<div class="nav-hint">ページ移動</div>', unsafe_allow_html=True)
@@ -246,7 +275,7 @@ def top_nav():
             st.markdown('</div>', unsafe_allow_html=True)
     st.markdown('</div></div>', unsafe_allow_html=True)
 
-# ---------------- Emoji & chips (toggle UI) ----------------
+# ---------------- Emoji & Chips ----------------
 EMOJIS = ["😟","😡","😢","😔","😤","😴","🙂","🤷‍♀️"]
 
 def emoji_toggle_grid(selected: List[str]) -> List[str]:
@@ -265,7 +294,8 @@ def emoji_toggle_grid(selected: List[str]) -> List[str]:
                 vibrate(10)
             st.markdown('</div>', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
-    st.caption("選択中：" + (" ".join(list(chosen)) if chosen else "（未選択）"))
+    sel = " ".join(list(chosen)) if chosen else "（未選択）"
+    st.caption(f"選択中：{sel}")
     return list(chosen)
 
 TRIGGER_DEFS = [
@@ -293,13 +323,12 @@ def trigger_chip_row(selected: List[str]) -> List[str]:
     st.markdown('</div>', unsafe_allow_html=True)
     return list(chosen)
 
-# ---------------- 一言の挿入ヘルパー ----------------
+# ---------------- 一言挿入（あなたの文言をそのまま） ----------------
 def append_to_textarea(ss_key: str, phrase: str):
     cur = st.session_state.cbt.get(ss_key, "") or ""
     glue = "" if (cur.strip() == "" or cur.strip().endswith(("。","!","！"))) else " "
     st.session_state.cbt[ss_key] = (cur + glue + phrase).strip()
 
-# あなたの指定そのまま（固定一言）
 CHECK_LABELS = {
     "bw":          "0/100で考えていたかも",
     "catastrophe": "最悪の状態を想定していたかも",
@@ -340,21 +369,42 @@ def render_checks_and_tips():
                 st.markdown('</div>', unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
 
-# ---------------- INTRO ----------------
+# ---------------- INTRO（ポスター調） ----------------
 def view_intro():
+    # ヒーロー
     st.markdown("""
-<div class="card" style="padding:22px;">
-  <h2 style="margin:.1rem 0 .6rem; color:#2f2a3b;">
-    いま感じていることを、<b>いっしょに静かに整えます。</b>
-  </h2>
-  <ul style="margin:.4rem 0 .6rem;">
-    <li>⏱ <b>所要</b>：約2分 ／ <b>3ステップ</b></li>
-    <li>🎯 <b>内容</b>：気持ち → きっかけ → 見方の仮置き</li>
-    <li>🔒 <b>安心</b>：この端末のみ保存／途中でやめてもOK／医療・診断ではありません</li>
-  </ul>
-  <p style="margin:.2rem 0 .2rem; color:#6f7180">
-    空欄があっても大丈夫です。
-  </p>
+<div class="hero">
+  <h1>夜、考えすぎてしんどくなるときに。</h1>
+  <div class="lead">たった <span style="font-size:2.2rem;color:#ffffff">3</span> ステップで<br>気持ちを整理して、少し落ち着こう。</div>
+
+  <div class="box">
+    <div style="font-weight:900; color:var(--accent1); margin-bottom:6px;">これは何？</div>
+    <div>しんどい夜に、短時間で“見方”を整えるノート。<br>正解探しではなく、気持ちを整える時間を届けます。</div>
+  </div>
+
+  <div class="badges">
+    <div class="badge">
+      <div>🕒</div>
+      <div class="big">約 2 分</div>
+    </div>
+    <div class="badge">
+      <div>👣</div>
+      <div class="big">3 STEP</div>
+    </div>
+    <div class="badge">
+      <div>🔒</div>
+      <div style="font-size:.95rem;line-height:1.2">この端末のみ保存<br>途中でやめてもOK<br>医療・診断ではありません</div>
+    </div>
+  </div>
+
+  <div class="list">
+    <div style="font-weight:900; color:var(--accent1); margin-bottom:6px;">内容</div>
+    <ol style="margin:0 0 0 1.2rem">
+      <li>気持ちの整理</li>
+      <li>きっかけの整理</li>
+      <li>見方の仮置き</li>
+    </ol>
+  </div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -364,14 +414,7 @@ def view_intro():
             st.session_state.view = "CBT"
     with cta2:
         if st.button("ホームを見る", use_container_width=True):
-            st.session_state.view = "HOME"
-
-    st.markdown("""
-<div class="card">
-  <h3 style="margin:.2rem 0 .6rem;">これは何？（短く）</h3>
-  <p>しんどい夜に、短時間で“見方”を整えるノートです。正解探しではなく、整える時間。</p>
-</div>
-""", unsafe_allow_html=True)
+            st.session_state.view = "HOME")
 
 # ---------------- HOME ----------------
 def view_home():
@@ -431,7 +474,7 @@ def view_cbt():
     support(distress=st.session_state.cbt["distress_before"])
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # Step2 考えを整理（いまの見方 ↔ ほかの見方）
+    # Step2 見方の整理
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.subheader("考えを整理する（いまの見方 ↔ ほかの見方）")
     st.caption("片方だけでも大丈夫です。短くてOK。")
@@ -451,7 +494,6 @@ def view_cbt():
             height=108
         )
 
-    st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
     st.subheader("視界をひろげる小さなチェック")
     st.caption("当てはまるものだけ軽くオンに。合わなければスルーで大丈夫です。")
     render_checks_and_tips()
@@ -605,13 +647,13 @@ def view_history():
             if r.get("emotion",False): tags.append("感情先行")
             if r.get("decide",False): tags.append("言い切り")
             if tags:
-                st.markdown(" " .join([f"<span class='tag'>{t}</span>" for t in tags]), unsafe_allow_html=True)
+                st.markdown(" " .join([f"<span class='tag' style='display:inline-block;padding:6px 12px;border:1px solid #3a3d66;border-radius:999px;background:#21224a;color:#ffdfef;font-weight:800;margin-right:6px'>{t}</span>" for t in tags]), unsafe_allow_html=True)
             st.markdown('</div>', unsafe_allow_html=True)
         try:
             chart = df[["ts","distress_before","distress_after"]].copy()
             chart["ts"] = pd.to_datetime(chart["ts"])
             chart = chart.sort_values("ts").set_index("ts")
-            st.line_chart(chart.rename(columns={"distress_before":"しんどさ(前)","distress_after":"しんどさ(後)"}))
+            st.line_chart(chart.rename(columns={"distress_before":"しんどさ(前)","しんどさ(後)":"しんどさ(後)"}))
         except Exception:
             pass
     st.markdown('</div>', unsafe_allow_html=True)
