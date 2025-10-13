@@ -1,8 +1,4 @@
-# app.py — Sora 2分ノート（やさしい伴走トーン）
-# ・上部ナビは「グレーのゴーストボタン」＝ページ移動用（見た目ですぐ区別）
-# ・選択UI（感情・きっかけ・一言）はパステルのグラデーションピル
-# ・チェック→あなたの“一言”をそのまま提示、タップで「ほかの見方」に挿入
-# ・医療/診断ではありません。行動は決めさせません。
+# app.py — Sora 2分ノート（やさしい伴走トーン・フル実装）
 
 from datetime import datetime, date
 from pathlib import Path
@@ -74,7 +70,7 @@ small{color:var(--muted)}
 }
 .stButton>button:hover{filter:brightness(.98)}
 
-/* ======================= ここからナビ専用 ======================= */
+/* ======================= ナビ専用（白いゴースト） ======================= */
 .topbar{
   position:sticky; top:0; z-index:10;
   background:rgba(255,255,255,.7); backdrop-filter:blur(8px);
@@ -83,7 +79,6 @@ small{color:var(--muted)}
 }
 .topnav{display:flex; gap:8px; flex-wrap:wrap; margin:4px 0 2px}
 .topnav .nav-btn>button{
-  /* グローバルのグラデを完全に上書き */
   background:#ffffff !important;
   color:#2d2a33 !important;
   border:1px solid #d9dbe8 !important;
@@ -100,7 +95,6 @@ small{color:var(--muted)}
   background:#f4f3ff !important;
   border:2px solid #7d74ff !important;
 }
-/* ナビの説明タグ（小さく薄く） */
 .nav-hint{font-size:.78rem; color:#9aa; margin:0 2px 4px 2px}
 
 /* ======================= 選択UI（感情/きっかけ/チップ） ======================= */
@@ -124,106 +118,6 @@ small{color:var(--muted)}
 }
 
 /* ホームのタイル */
-.tile-grid{display:grid; grid-template-columns:1fr 1fr; gap:18px; margin-top:8px}
-.tile .stButton>button{
-  aspect-ratio:1/1; min-height:220px; border-radius:28px;
-  text-align:left; padding:20px; white-space:normal; line-height:1.2;
-  border:none; font-weight:900; font-size:1.18rem; color:#2d2a33;
-  box-shadow:0 20px 36px rgba(60,45,90,.18);
-  display:flex; align-items:flex-end; justify-content:flex-start;
-}
-.tile .stButton>button:after{content:"";}
-.tile-a .stButton>button{background:linear-gradient(160deg,var(--tile-a),var(--tile-b))}
-.tile-b .stButton>button{background:linear-gradient(160deg,var(--tile-c),var(--tile-d))}
-.tile-c .stButton>button{background:linear-gradient(160deg,var(--tile-e),var(--tile-f))}
-.tile-d .stButton>button{background:linear-gradient(160deg,var(--tile-g),var(--tile-h))}
-
-/* モバイル */
-@media (max-width: 840px){ .emoji-grid{grid-template-columns:repeat(6,1fr)} }
-@media (max-width: 640px){
-  .emoji-grid{grid-template-columns:repeat(4,1fr)}
-  .tile-grid{grid-template-columns:1fr}
-  .tile .stButton>button{min-height:180px}
-  .block-container{padding-left:1rem; padding-right:1rem}
-}
-</style>
-""", unsafe_allow_html=True)
-
-}
-
-.stApp{
-  background:
-    radial-gradient(820px 520px at 0% -10%,  rgba(255,226,200,.55) 0%, transparent 60%),
-    radial-gradient(780px 480px at 100% -8%, rgba(255,215,242,.55) 0%, transparent 60%),
-    radial-gradient(960px 560px at -10% 98%, rgba(232,216,255,.45) 0%, transparent 60%),
-    radial-gradient(960px 560px at 110% 100%, rgba(217,245,255,.46) 0%, transparent 60%),
-    linear-gradient(180deg, #fffefd 0%, #fff8fb 28%, #f7f3ff 58%, #f2fbff 100%);
-}
-/* 控えめな静止の星 */
-.stApp:before{
-  content:""; position:fixed; inset:0; pointer-events:none; z-index:0;
-  background-image:
-    radial-gradient(circle, rgba(255,255,255,.65) 0.6px, transparent 1px),
-    radial-gradient(circle, rgba(255,255,255,.35) 0.5px, transparent 1px);
-  background-size: 22px 22px, 34px 34px;
-  background-position: 0 0, 10px 12px;
-  opacity:.18;
-}
-
-.block-container{max-width:960px; padding-top:1rem; padding-bottom:2rem; position:relative; z-index:1}
-h1,h2,h3{color:var(--text); letter-spacing:.2px}
-p,label,.stMarkdown,.stTextInput,.stTextArea{color:var(--text); font-size:1.06rem}
-small{color:var(--muted)}
-
-.card{
-  background:var(--glass); border:1px solid var(--glass-brd);
-  border-radius:20px; padding:16px; margin-bottom:14px;
-  box-shadow:0 18px 36px rgba(80,70,120,.14); backdrop-filter:blur(8px);
-}
-.hr{height:1px; background:linear-gradient(to right,transparent,#c7b8ff,transparent); margin:12px 0 10px}
-
-textarea, input, .stTextInput>div>div>input{
-  border-radius:14px!important; background:#ffffff; color:#2a2731; border:1px solid var(--outline);
-}
-.stSlider,.stRadio>div{color:var(--text)}
-.stButton>button,.stDownloadButton>button{
-  width:100%; padding:14px 16px; border-radius:999px; border:1px solid var(--outline);
-  background:linear-gradient(180deg,var(--grad-from),var(--grad-to)); color:#fff; font-weight:900; font-size:1.04rem;
-  box-shadow:0 12px 26px rgba(255,145,175,.22);
-}
-.stButton>button:hover{filter:brightness(.98)}
-
-/* ---------------- ナビ：ゴースト（グレー）で明確に別物 ---------------- */
-.topnav{display:flex; gap:8px; flex-wrap:wrap; margin:8px 0 18px}
-.topnav .nav-btn>button{
-  background:#ffffffb8; color:#2d2a33; border:1px solid #d9dbe8!important;
-  box-shadow:none; height:auto; padding:10px 12px; border-radius:999px!important;
-  font-weight:700; font-size:.98rem;
-}
-.topnav .nav-btn>button:hover{background:#fff}
-.topnav .active>button{border:2px solid #7d74ff!important;}
-
-/* ---------------- 選択UI（感情・きっかけ・ヒント）：パステル ---------------- */
-.chips{display:flex; gap:8px; flex-wrap:wrap; margin:8px 0 10px}
-.chips .chip-btn>button{
-  background:linear-gradient(180deg,#ffd8e9,#ffc4e1); color:#523a6a;
-  border:1px solid var(--chip-brd)!important; padding:10px 14px; height:auto;
-  border-radius:999px!important; font-weight:900; box-shadow:0 10px 20px rgba(60,45,90,.08)
-}
-
-/* Emoji grid */
-.emoji-grid{display:grid; grid-template-columns:repeat(8,1fr); gap:10px; margin:8px 0 6px}
-.emoji-btn>button{
-  width:100%!important; aspect-ratio:1/1; border-radius:18px!important;
-  font-size:1.55rem!important; background:#fff; border:1px solid #eadfff!important;
-  box-shadow:0 8px 16px rgba(60,45,90,.06);
-}
-.emoji-on>button{
-  background:linear-gradient(180deg,#ffc6a3,#ff9fbe)!important;
-  border:1px solid #ff80b0!important;
-}
-
-/* タイル（ホーム用カード） */
 .tile-grid{display:grid; grid-template-columns:1fr 1fr; gap:18px; margin-top:8px}
 .tile .stButton>button{
   aspect-ratio:1/1; min-height:220px; border-radius:28px;
@@ -282,7 +176,6 @@ def ensure_cbt_defaults():
     cbt.setdefault("trigger_free","")
     cbt.setdefault("fact","")      # いまの見方
     cbt.setdefault("alt","")       # ほかの見方
-    # チェック（あなたの指定5つ）
     checks = cbt.setdefault("checks", {})
     checks.setdefault("bw", False)           # 0/100で考えていたかも
     checks.setdefault("catastrophe", False)  # 最悪の状態を想定していたかも
@@ -336,7 +229,7 @@ def support(distress: Optional[int]=None, lonely: Optional[int]=None):
 def vibrate(ms=12):
     st.markdown("<script>try{navigator.vibrate&&navigator.vibrate(%d)}catch(e){{}}</script>"%ms, unsafe_allow_html=True)
 
-# ---------------- ナビ（見た目を完全分離） ----------------
+# ---------------- ナビ（白ゴースト・スティッキー） ----------------
 def top_nav():
     st.markdown('<div class="topbar">', unsafe_allow_html=True)
     st.markdown('<div class="nav-hint">ページ移動</div>', unsafe_allow_html=True)
@@ -456,7 +349,7 @@ def view_intro():
   </h2>
   <ul style="margin:.4rem 0 .6rem;">
     <li>⏱ <b>所要</b>：約2分 ／ <b>3ステップ</b></li>
-    <li>🎯 <b>内容</b>：気持ち→きっかけ→見方の仮置き</li>
+    <li>🎯 <b>内容</b>：気持ち → きっかけ → 見方の仮置き</li>
     <li>🔒 <b>安心</b>：この端末のみ保存／途中でやめてもOK／医療・診断ではありません</li>
   </ul>
   <p style="margin:.2rem 0 .2rem; color:#6f7180">
@@ -505,7 +398,7 @@ def view_home():
         st.markdown('</div>', unsafe_allow_html=True)
     st.markdown('</div></div>', unsafe_allow_html=True)
 
-# ---------------- CBT（2分ノート：行動なし） ----------------
+# ---------------- CBT（2分ノート） ----------------
 def view_cbt():
     ensure_cbt_defaults()
     top_nav()
