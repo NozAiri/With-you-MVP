@@ -1,7 +1,7 @@
 # app.py — Companion tone / 2min note / no action-forcing
-# 入口は絵文字のみ → 「きっかけ」→「手がかり」→「一言で言い直す」
-# 医療/診断ではない前提。行動は決めさせない。やさしい敬語＋短い説明。
-# パステル（オレンジ/ピンク/紫/水色）＋静止の星。ページ移動なし（内部切替）。
+# 入口：絵文字（ラベルなし）→ きっかけ → 手がかり → 一言で言い直す
+# トグルUI（選択状態が残る）＋簡易バイブ（対応端末のみ）。
+# 医療/診断ではありません。行動は決めさせません。
 
 from datetime import datetime, date
 from pathlib import Path
@@ -65,7 +65,7 @@ small{color:var(--muted)}
 .hr{height:1px; background:linear-gradient(to right,transparent,#c7b8ff,transparent); margin:10px 0 6px}
 
 .tag{display:inline-block; padding:6px 12px; border-radius:999px;
-  background:#f7f2ff; color:#3a2a5a; font-weight:800; margin:0 6px 6px 0; border:1px solid(var(--outline))}
+  background:#f7f2ff; color:#3a2a5a; font-weight:800; margin:0 6px 6px 0; border:1px solid var(--outline)}
 
 textarea, input, .stTextInput>div>div>input{
   border-radius:14px!important; background:#ffffff; color:#2a2731; border:1px solid #e9ddff;
@@ -105,7 +105,11 @@ textarea, input, .stTextInput>div>div>input{
   font-size:1.55rem!important; background:#fff; border:1px solid #eadfff!important;
   box-shadow:0 8px 16px rgba(60,45,90,.06);
 }
-.emoji-btn>button:hover{filter:brightness(.99)}
+/* 選択中は少し濃く・縁取り */
+.emoji-on>button{
+  background:linear-gradient(180deg,#ffc6a3,#ff9fbe)!important;
+  border:1px solid #ff80b0!important;
+}
 
 @media (max-width: 840px){ .emoji-grid{grid-template-columns:repeat(6,1fr)} }
 @media (max-width: 640px){
@@ -160,7 +164,6 @@ def ensure_cbt_defaults():
         "prob_after":40,
         "distress_after":4
     }
-    # deep set
     for k,v in flat_defaults.items():
         if isinstance(v, dict):
             cbt.setdefault(k,{})
@@ -182,7 +185,7 @@ def ensure_reflection_defaults():
         except Exception: d = date.today()
     r["date"] = d
 
-st.session_state.setdefault("view","INTRO")  # ← 最初は必ずイントロ
+st.session_state.setdefault("view","INTRO")
 ensure_cbt_defaults(); ensure_reflection_defaults()
 
 # ---------------- Gentle companion ----------------
@@ -205,7 +208,20 @@ def support(distress: Optional[int]=None, lonely: Optional[int]=None):
     else:
         companion("🌟","ここまで入力いただけて十分です。","短くても大丈夫です。")
 
-# ---------------- INTRO（伴走トーン） ----------------
+# ---------------- 小さなハプティクス（対応端末限定） ----------------
+def vibrate(ms=12):
+    st.markdown(
+        f"""
+<script>
+  if ('vibrate' in navigator) {{
+    try {{ navigator.vibrate({ms}); }} catch(e) {{}}
+  }}
+</script>
+""",
+        unsafe_allow_html=True,
+    )
+
+# ---------------- INTRO ----------------
 def view_intro():
     st.markdown("""
 <div class="card" style="padding:22px;">
@@ -294,62 +310,78 @@ def view_home():
         st.markdown('</div>', unsafe_allow_html=True)
     st.markdown('</div></div>', unsafe_allow_html=True)
 
-# ---------------- CBT（2分ノート：行動なし） ----------------
+# ---------------- Emoji & chips (toggle UI) ----------------
 EMOJIS = ["😟","😡","😢","😔","😤","😴","🙂","🤷‍♀️"]
 
-def emoji_toggle_row(selected: List[str]) -> List[str]:
+def emoji_toggle_grid(selected: List[str]) -> List[str]:
     st.caption("いまの気持ちをタップ（複数OK／途中でやめてもOK）")
     st.markdown('<div class="emoji-grid">', unsafe_allow_html=True)
-    new_selected = set(selected)
-    cols = st.columns(8) if len(EMOJIS)>=8 else st.columns(len(EMOJIS))
-    # 配置をフラットに
-    idx = 0
-    for e in EMOJIS:
-        with cols[idx % len(cols)]:
-            key = f"emo_{e}_{idx}"
-            pressed = st.button(e, key=key, use_container_width=True)
-            if pressed:
-                if e in new_selected:
-                    new_selected.remove(e)
-                else:
-                    new_selected.add(e)
-        idx += 1
-    st.markdown('</div>', unsafe_allow_html=True)
-    return list(new_selected)
 
+    chosen = set(selected)
+    cols = st.columns(8 if len(EMOJIS) >= 8 else len(EMOJIS))
+
+    for i, e in enumerate(EMOJIS):
+        with cols[i % len(cols)]:
+            on = e in chosen
+            cls = "emoji-btn emoji-on" if on else "emoji-btn"
+            # CSSクラスを当てるために空divでラップ
+            st.markdown(f'<div class="{cls}">', unsafe_allow_html=True)
+            if st.button(f"{e}", key=f"emo_btn_{i}", use_container_width=True):
+                if on: chosen.remove(e)
+                else: chosen.add(e)
+                vibrate(12)
+            st.markdown('</div>', unsafe_allow_html=True)
+
+    st.markdown('</div>', unsafe_allow_html=True)
+    picked = " ".join(list(chosen)) or "（未選択）"
+    st.caption(f"選択中：{picked}")
+    return list(chosen)
+
+TRIGGER_DEFS = [
+    ("⏱️ さっきの出来事", "time"),
+    ("🧠 浮かんだ一言", "thought_line"),
+    ("🤝 人との関係", "relationship"),
+    ("🫀 体のサイン", "body"),
+    ("🌀 うまく言えない", "unknown"),
+]
+
+def trigger_chip_row(selected: List[str]) -> List[str]:
+    st.caption("言葉にしづらい時は、近いものだけタップで結構です。")
+    st.markdown('<div class="chips">', unsafe_allow_html=True)
+    cols = st.columns(len(TRIGGER_DEFS))
+    chosen = set(selected)
+    for i,(label,val) in enumerate(TRIGGER_DEFS):
+        with cols[i]:
+            on = val in chosen
+            lbl = f"{label}{' ✓' if on else ''}"
+            if st.button(lbl, key=f"trg_{val}", use_container_width=True):
+                if on: chosen.remove(val)
+                else: chosen.add(val)
+                vibrate(10)
+    st.markdown('</div>', unsafe_allow_html=True)
+    human = [lbl for (lbl, v) in TRIGGER_DEFS if v in chosen]
+    st.caption("選択中：" + (" / ".join(human) if human else "（未選択）"))
+    return list(chosen)
+
+# ---------------- CBT（2分ノート：行動なし） ----------------
 def view_cbt():
     ensure_cbt_defaults()
     quick_switch()
 
-    # Step0 絵文字選択（ラベルなし）
+    # Step0 絵文字
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.subheader("いまの気持ち")
-    st.session_state.cbt["emotions"] = emoji_toggle_row(st.session_state.cbt.get("emotions", []))
+    st.session_state.cbt["emotions"] = emoji_toggle_grid(
+        st.session_state.cbt.get("emotions", [])
+    )
     st.markdown('</div>', unsafe_allow_html=True)
 
     # Step1 きっかけ
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.subheader("この気持ち、近かったきっかけは？")
-    st.caption("言葉にしづらい時は、近いものだけタップで結構です。")
-    # チップ（複数選択をボタンで擬似実装）
-    chip_defs = [
-        ("⏱️ さっきの出来事", "time"),
-        ("🧠 浮かんだ一言", "thought_line"),
-        ("🤝 人との関係", "relationship"),
-        ("🫀 体のサイン", "body"),
-        ("🌀 うまく言えない", "unknown"),
-    ]
-    chosen = set(st.session_state.cbt.get("trigger_tags", []))
-    st.markdown('<div class="chips">', unsafe_allow_html=True)
-    cols = st.columns(len(chip_defs))
-    for i,(label,val) in enumerate(chip_defs):
-        with cols[i]:
-            if st.button(label, key=f"chip_{val}"):
-                if val in chosen: chosen.remove(val)
-                else: chosen.add(val)
-    st.markdown('</div>', unsafe_allow_html=True)
-    st.session_state.cbt["trigger_tags"] = list(chosen)
-
+    st.session_state.cbt["trigger_tags"] = trigger_chip_row(
+        st.session_state.cbt.get("trigger_tags", [])
+    )
     st.session_state.cbt["trigger_free"] = st.text_area(
         "任意の一言（なくて大丈夫です）",
         value=st.session_state.cbt.get("trigger_free",""),
@@ -370,11 +402,13 @@ def view_cbt():
     st.caption("片方だけでも構いません。思いついた分だけで結構です。")
     cols = st.columns(2)
     with cols[0]:
-        st.session_state.cbt["fact"] = st.text_area("見えている手がかり（事実）",
+        st.session_state.cbt["fact"] = st.text_area(
+            "見えている手がかり（事実）",
             value=st.session_state.cbt.get("fact",""),
             placeholder="例）返信がまだ来ていない／明日が提出日 など", height=96)
     with cols[1]:
-        st.session_state.cbt["alt"] = st.text_area("ほかの手がかり（別の説明・例外）",
+        st.session_state.cbt["alt"] = st.text_area(
+            "ほかの手がかり（別の説明・例外）",
             value=st.session_state.cbt.get("alt",""),
             placeholder="例）移動中かも／前も夜に返ってきた など", height=96)
 
@@ -391,10 +425,9 @@ def view_cbt():
         g["fortune"] = st.checkbox("先の展開を決め打ちしたかも", value=bool(g.get("fortune",False)))
     with c4:
         g["catastrophe"] = st.checkbox("最悪だけを優先したかも", value=bool(g.get("catastrophe",False)))
-
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # Step3 一言で言い直す（= 今の見方を更新）
+    # Step3 一言で言い直す
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.subheader("いまの考えを、一言で言い直す")
     st.caption("分からない部分は保留で大丈夫です。選んでから編集いただけます。")
@@ -434,8 +467,8 @@ def view_cbt():
                 "fact":st.session_state.cbt.get("fact",""),
                 "alt":st.session_state.cbt.get("alt",""),
                 "extreme":st.session_state.cbt["checks"].get("extreme",False),
-                "mind_read":st.session_state.cbt["checks"] .get("mind_read",False),
-                "fortune":st.session_state.cbt["checks"]  .get("fortune",False),
+                "mind_read":st.session_state.cbt["checks"].get("mind_read",False),
+                "fortune":st.session_state.cbt["checks"].get("fortune",False),
                 "catastrophe":st.session_state.cbt["checks"].get("catastrophe",False),
                 "distress_before":st.session_state.cbt.get("distress_before",0),
                 "prob_before":st.session_state.cbt.get("prob_before",0),
