@@ -1,10 +1,4 @@
-# app.py — Sora 2分ノート（言葉で分かるUI版／ガイドつき）
-# 変更点：
-# ・上部ナビ＝「アイコン＋見出し＋小さな説明」のボタン（絵文字だけにしない）
-# ・INTROの3バッジ＝「大きな見出し」つき（例：はじめる／3ステップで進む／この端末のみ保存）
-# ・HOMEや各画面の遷移ボタンにも必ずラベルを付与
-# ・CBTはガイドONがデフォルト。1/3→2/3→3/3の進捗と「前へ／次へ／完了」
-# ・アクセシビリティ：aria-label, helpを多用
+# app.py — Sora 2分ノート（言葉で分かるUI／ガイド付き・完全版）
 
 from datetime import datetime, date
 from pathlib import Path
@@ -20,10 +14,11 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# ---------------- Theme / CSS ----------------
+# ---------------- Theme ----------------
 PINK = "#FBDDD3"
 NAVY = "#19114B"
 
+# ---------------- CSS ----------------
 def inject_css():
     css = """
 <style>
@@ -54,10 +49,9 @@ small {{ color:var(--muted); }}
 .navbtn > button {{
   background:#FFFFFF !important; color:#1b1742 !important;
   border:1px solid rgba(0,0,0,.06) !important;
-  border-radius:14px !important; padding:10px 10px !important; height:auto !important;
-  text-align:left !important; box-shadow:none !important;
+  border-radius:14px !important; padding:10px !important; height:auto !important;
+  text-align:left !important; box-shadow:none !important; font-weight:800 !important;
 }}
-.navbtn .label {{ display:block; font-weight:900; font-size:.96rem; }}
 .navbtn .sub   {{ display:block; color:#5b5b8a; font-size:.78rem; margin-top:2px; }}
 .navbtn.active > button {{ background:#F4F4FF !important; border:2px solid #8A84FF !important; }}
 
@@ -131,7 +125,7 @@ textarea, input, .stTextInput>div>div>input{{
 }}
 .emoji-on>button{{ background:linear-gradient(180deg,#ffc6a3,#ff9fbe)!important; border:1px solid #ff80b0!important; }}
 
-/* ▼ メディアクエリ（ここは全部 {{ }} でエスケープ） */
+/* ---------- Responsive ---------- */
 @media (max-width: 980px) {{
   .topnav {{ grid-template-columns: repeat(3,1fr); }}
 }}
@@ -145,6 +139,94 @@ textarea, input, .stTextInput>div>div>input{{
 """.format(navy=NAVY, pink=PINK)
     st.markdown(css, unsafe_allow_html=True)
 
+inject_css()
+
+# ---------------- Data helpers ----------------
+DATA_DIR = Path("data"); DATA_DIR.mkdir(exist_ok=True)
+CBT_CSV = DATA_DIR / "cbt_entries.csv"
+REFLECT_CSV = DATA_DIR / "daily_reflections.csv"
+
+def _load_csv(p: Path) -> pd.DataFrame:
+    if p.exists():
+        try:
+            return pd.read_csv(p)
+        except Exception:
+            return pd.DataFrame()
+    return pd.DataFrame()
+
+def _append_csv(p: Path, row: dict):
+    df = _load_csv(p)
+    df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
+    df.to_csv(p, index=False)
+
+def _download_button(df: pd.DataFrame, label: str, filename: str):
+    if df.empty:
+        st.caption("（まだデータはございません）")
+        return
+    st.download_button(label, df.to_csv(index=False).encode("utf-8"),
+                       file_name=filename, mime="text/csv")
+
+# ---------------- Session defaults ----------------
+def ensure_cbt_defaults():
+    if "cbt" not in st.session_state or not isinstance(st.session_state.cbt, dict):
+        st.session_state.cbt = {}
+    cbt = st.session_state.cbt
+    cbt.setdefault("emotions", [])
+    cbt.setdefault("trigger_tags", [])
+    cbt.setdefault("trigger_free","")
+    cbt.setdefault("fact","")
+    cbt.setdefault("alt","")
+    checks = cbt.setdefault("checks", {})
+    checks.setdefault("bw", False)
+    checks.setdefault("catastrophe", False)
+    checks.setdefault("fortune", False)
+    checks.setdefault("emotion", False)
+    checks.setdefault("decide", False)
+    cbt.setdefault("distress_before",5)
+    cbt.setdefault("prob_before",50)
+    cbt.setdefault("rephrase","")
+    cbt.setdefault("prob_after",40)
+    cbt.setdefault("distress_after",4)
+
+def ensure_reflection_defaults():
+    if "reflection" not in st.session_state or not isinstance(st.session_state.reflection, dict):
+        st.session_state.reflection = {}
+    r = st.session_state.reflection
+    r.setdefault("today_small_win","")
+    r.setdefault("self_message","")
+    r.setdefault("note_for_tomorrow","")
+    r.setdefault("loneliness",5)
+    d = r.get("date", date.today())
+    if isinstance(d, str):
+        try:
+            d = date.fromisoformat(d)
+        except Exception:
+            d = date.today()
+    r["date"] = d
+
+st.session_state.setdefault("view","INTRO")
+st.session_state.setdefault("cbt_step", 1)      # 1..3
+st.session_state.setdefault("cbt_guided", True) # ガイドON
+ensure_cbt_defaults(); ensure_reflection_defaults()
+
+# ---------------- Helpers ----------------
+def vibrate(ms=10):
+    st.markdown(
+        "<script>try{navigator.vibrate&&navigator.vibrate(%d)}catch(e){{}}</script>" % ms,
+        unsafe_allow_html=True,
+    )
+
+def companion(emoji: str, text: str, sub: Optional[str]=None):
+    st.markdown(
+        f"""
+<div class="card">
+  <div style="font-weight:900; color:var(--pink)">{emoji} {text}</div>
+  {f"<div class='small' style='margin-top:4px; color:var(--muted)'>{sub}</div>" if sub else ""}
+</div>
+        """,
+        unsafe_allow_html=True,
+    )
+
 def support(distress: Optional[int]=None, lonely: Optional[int]=None):
     if distress is not None and distress >= 7:
         companion("🫶","ここでは、がんばらなくて大丈夫です。","ご自身のペースで進めていただければ十分です。")
@@ -154,24 +236,25 @@ def support(distress: Optional[int]=None, lonely: Optional[int]=None):
         companion("🌟","ここまで入力いただけて十分です。","空欄があっても大丈夫です。")
 
 # ---------------- Top Nav（言葉つき） ----------------
-def nav_button(key: str, title: str, sub: str, icon: str):
-    cls = "navbtn active" if st.session_state.view==key else "navbtn"
-    st.markdown(f'<div class="{cls}">', unsafe_allow_html=True)
-    label = f"{icon}  {title}\n<span class='sub'>{sub}</span>"
-    if st.button(f"{icon}  {title}\n{sub}", key=f"nav_{key}", use_container_width=True,
-                 help=sub, args=None, kwargs=None):
-        st.session_state.view = key
-    st.markdown("</div>", unsafe_allow_html=True)
-
 def top_nav():
     st.markdown('<div class="topbar"><div class="topnav">', unsafe_allow_html=True)
-    cols = st.columns(6)
-    with cols[0]: nav_button("INTRO","はじめに","最初の説明","👋")
-    with cols[1]: nav_button("HOME","ホーム","用途の入口","🏠")
-    with cols[2]: nav_button("CBT","2分ノート","3ステップで整理","📓")
-    with cols[3]: nav_button("REFLECT","1日のふり返り","今日を短く記録","📝")
-    with cols[4]: nav_button("HISTORY","記録を見る","保存した一覧","📚")
-    with cols[5]: nav_button("EXPORT","エクスポート","CSV出力・設定","⬇️")
+    pages = [
+        ("INTRO","👋 はじめに","最初の説明"),
+        ("HOME","🏠 ホーム","用途の入口"),
+        ("CBT","📓 2分ノート","3ステップで整理"),
+        ("REFLECT","📝 1日のふり返り","今日を短く記録"),
+        ("HISTORY","📚 記録を見る","保存した一覧"),
+        ("EXPORT","⬇️ エクスポート","CSV・設定"),
+    ]
+    cols = st.columns(len(pages))
+    for i,(key,title,sub) in enumerate(pages):
+        active = (st.session_state.view==key)
+        cls = "navbtn active" if active else "navbtn"
+        with cols[i]:
+            st.markdown(f'<div class="{cls}">', unsafe_allow_html=True)
+            if st.button(f"{title}\n{sub}", key=f"nav_{key}", use_container_width=True, help=sub):
+                st.session_state.view = key
+            st.markdown("</div>", unsafe_allow_html=True)
     st.markdown('</div></div>', unsafe_allow_html=True)
 
 # ---------------- Emoji & Chips ----------------
@@ -187,8 +270,7 @@ def emoji_toggle_grid(selected: List[str]) -> List[str]:
             on = e in chosen
             cls = "emoji-btn emoji-on" if on else "emoji-btn"
             st.markdown(f'<div class="{cls}">', unsafe_allow_html=True)
-            if st.button(f"{e}", key=f"emo_{i}", use_container_width=True,
-                         help="タップで選択／もう一度で解除", kwargs=None):
+            if st.button(f"{e}", key=f"emo_{i}", use_container_width=True, help="タップで選択／もう一度で解除"):
                 if on: chosen.remove(e)
                 else: chosen.add(e)
                 vibrate(8)
@@ -215,8 +297,7 @@ def trigger_chip_row(selected: List[str]) -> List[str]:
         with cols[i]:
             on = val in chosen
             st.markdown('<div class="chip-btn">', unsafe_allow_html=True)
-            if st.button(label + (" ✓" if on else ""), key=f"trg_{val}", use_container_width=True,
-                         help="タップで選択／もう一度で解除"):
+            if st.button(label + (" ✓" if on else ""), key=f"trg_{val}", use_container_width=True, help="タップで選択／もう一度で解除"):
                 if on: chosen.remove(val)
                 else: chosen.add(val)
                 vibrate(6)
@@ -289,15 +370,13 @@ def view_intro():
     c1, c2, c3 = st.columns(3)
     with c1:
         st.markdown('<div class="badge-btn">', unsafe_allow_html=True)
-        if st.button("▶ はじめる\n— 約2分で完了 —", key="go_start", use_container_width=True,
-                     help="最短ルートで1問目へ移動します"):
+        if st.button("▶ はじめる\n— 約2分で完了 —", key="go_start", use_container_width=True, help="最短ルートで1問目へ移動します"):
             st.session_state.view="CBT"; st.session_state.cbt_step=1; st.session_state.cbt_guided=True
         st.caption("※ はじめての方はここ")
         st.markdown('</div>', unsafe_allow_html=True)
     with c2:
         st.markdown('<div class="badge-btn">', unsafe_allow_html=True)
-        if st.button("👣 3ステップで進む\n— 案内つき —", key="go_3step", use_container_width=True,
-                     help="1/3→2/3→3/3と順番に進みます"):
+        if st.button("👣 3ステップで進む\n— 案内つき —", key="go_3step", use_container_width=True, help="1/3→2/3→3/3と順番に進みます"):
             st.session_state.view="CBT"; st.session_state.cbt_step=1; st.session_state.cbt_guided=True
         st.caption("迷わず順番に進めます")
         st.markdown('</div>', unsafe_allow_html=True)
@@ -339,12 +418,10 @@ def view_home():
     st.markdown("#### 本日、どのように進めますか？")
     c1,c2 = st.columns(2)
     with c1:
-        if st.button("📓 2分ノートへ（おすすめ）", use_container_width=True,
-                     help="3ステップで気持ちを整えます"):
+        if st.button("📓 2分ノートへ（おすすめ）", use_container_width=True, help="3ステップで気持ちを整えます"):
             st.session_state.view="CBT"; st.session_state.cbt_step=1; st.session_state.cbt_guided=True
     with c2:
-        if st.button("📝 1日のふり返りへ", use_container_width=True,
-                     help="今日の小さなできたこと等を記録"):
+        if st.button("📝 1日のふり返りへ", use_container_width=True, help="今日の小さなできたこと等を記録"):
             st.session_state.view="REFLECT"
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -356,8 +433,7 @@ def _cbt_step_header():
     st.progress(step/total)
     left, right = st.columns(2)
     with left:
-        st.session_state.cbt_guided = st.toggle("かんたんガイド（オン＝順番に表示）",
-                                                value=st.session_state.cbt_guided)
+        st.session_state.cbt_guided = st.toggle("かんたんガイド（オン＝順番に表示）", value=st.session_state.cbt_guided)
     with right:
         st.caption("オフにすると全項目を一括表示します。")
     st.markdown('</div>', unsafe_allow_html=True)
@@ -424,6 +500,7 @@ def _cbt_step3():
         st.session_state.cbt["distress_after"] = st.slider("いまのしんどさ（まとめた後）", 0, 10, int(st.session_state.cbt.get("distress_after",4)))
     st.markdown('</div>', unsafe_allow_html=True)
 
+    # 保存（ガイド時はここだけ）
     st.markdown('<div class="card">', unsafe_allow_html=True)
     c1,c2 = st.columns(2)
     with c1:
@@ -475,13 +552,12 @@ def view_cbt():
     _cbt_step_header()
 
     if not st.session_state.cbt_guided:
-        # --- 全部まとめて表示 ---
-        # Step1
+        # まとめて表示
         st.markdown('<div class="card">', unsafe_allow_html=True)
         st.subheader("いまの気持ちをえらぶ")
         st.session_state.cbt["emotions"] = emoji_toggle_grid(st.session_state.cbt.get("emotions", []))
         st.markdown('</div>', unsafe_allow_html=True)
-        # Step2
+
         st.markdown('<div class="card">', unsafe_allow_html=True)
         st.subheader("この気持ち、近かったきっかけは？")
         st.session_state.cbt["trigger_tags"] = trigger_chip_row(st.session_state.cbt.get("trigger_tags", []))
@@ -496,10 +572,10 @@ def view_cbt():
             st.session_state.cbt["prob_before"] = st.slider("この考えはどのくらい“ありえそう”？（%）", 0, 100, int(st.session_state.cbt.get("prob_before",50)))
         support(distress=st.session_state.cbt["distress_before"])
         st.markdown('</div>', unsafe_allow_html=True)
-        # Step3
+
         _cbt_step3()
     else:
-        # --- ガイド表示 ---
+        # ガイド表示
         step = st.session_state.cbt_step
         if step == 1: _cbt_step1()
         if step == 2: _cbt_step2()
@@ -555,11 +631,11 @@ def view_history():
         for c in text_cols:
             if c in view.columns: view[c] = view[c].astype(str)
         if q.strip():
-            q = q.strip().lower()
+            q2 = q.strip().lower()
             mask = False
             for c in text_cols:
                 if c in view.columns:
-                    mask = mask | view[c].str.lower().str.contains(q)
+                    mask = mask | view[c].str.lower().str.contains(q2)
             view = view[mask]
         if "ts" in view.columns:
             view = view.sort_values("ts", ascending=False)
