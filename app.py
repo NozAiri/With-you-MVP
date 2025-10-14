@@ -1,9 +1,5 @@
-# app.py — Sora 2分ノート（濃紺×ピンク／ポスター寄せ・フル機能版）
+# app.py — Sora 2分ノート（濃紺×ピンク／ポスター寄せ・フル機能版｜ガイド付き）
 # 背景: #19114B / アクセント: #FBDDD3
-# ・INTROは画像ポスターに寄せた1ページ完結
-# ・「約 2 分」「3 STEP」は見た目そのままボタン（タップでCBTへ）
-# ・ナビは“白ゴースト”で混同しない見た目
-# ・CBT/ふり返り/履歴/エクスポートは元の機能を維持
 
 from datetime import datetime, date
 from pathlib import Path
@@ -33,8 +29,8 @@ def inject_css():
   --text:#FFFFFF;
   --muted:rgba(255,255,255,.75);
   --pink:{PINK};
-  --panel:#221A63;              /* カード地 */
-  --line:rgba(251,221,211,.55); /* ピンク枠線 */
+  --panel:#221A63;
+  --line:rgba(251,221,211,.55);
 }}
 
 html, body, .stApp {{ background:var(--bg); }}
@@ -89,7 +85,6 @@ small {{ color:var(--muted); }}
 .hero .what {{ margin:12px 0 16px; border:2px solid var(--line); border-radius:18px; padding:14px; background:rgba(0,0,0,.12); }}
 .hero .what .title {{ font-weight:900; color:var(--pink); margin-bottom:6px; }}
 
-/* バッジ列 */
 .hero .badges {{ display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin: 10px 0 8px; }}
 
 .badge, .badge-btn > button {{
@@ -98,14 +93,12 @@ small {{ color:var(--muted); }}
 }}
 .badge .big {{ display:block; color:#fff; font-weight:900; font-size:1.6rem; margin-top:2px; }}
 
-/* st.button をバッジ風に（改行テキストをそのまま表示） */
 .badge-btn > button {{
-  width:100%; box-shadow:none !important; white-space: pre-line;  /* ←改行を生かす */
+  width:100%; box-shadow:none !important; white-space: pre-line;
   line-height:1.25; font-size:1.15rem;
 }}
 .badge-btn > button:hover {{ filter:brightness(1.06); }}
 
-/* 内容ボックス */
 .hero .list {{ border:2px solid var(--line); border-radius:18px; padding:12px 14px; background:rgba(0,0,0,.10); }}
 .hero .list .title {{ font-weight:900; color:var(--pink); margin-bottom:6px; }}
 
@@ -183,17 +176,17 @@ def ensure_cbt_defaults():
     cbt.setdefault("emotions", [])
     cbt.setdefault("trigger_tags", [])
     cbt.setdefault("trigger_free","")
-    cbt.setdefault("fact","")      # いまの見方
-    cbt.setdefault("alt","")       # ほかの見方
+    cbt.setdefault("fact","")
+    cbt.setdefault("alt","")
     checks = cbt.setdefault("checks", {})
-    checks.setdefault("bw", False)           # 0/100で考えていたかも
-    checks.setdefault("catastrophe", False)  # 最悪の状態を想定していたかも
-    checks.setdefault("fortune", False)      # 先の展開を一つに決めていたかも
-    checks.setdefault("emotion", False)      # 感情が先に走っているかも
-    checks.setdefault("decide", False)       # 決めつけてしまっていたかも
+    checks.setdefault("bw", False)
+    checks.setdefault("catastrophe", False)
+    checks.setdefault("fortune", False)
+    checks.setdefault("emotion", False)
+    checks.setdefault("decide", False)
     cbt.setdefault("distress_before",5)
     cbt.setdefault("prob_before",50)
-    cbt.setdefault("rephrase","")  # 仮の見方
+    cbt.setdefault("rephrase","")
     cbt.setdefault("prob_after",40)
     cbt.setdefault("distress_after",4)
 
@@ -212,6 +205,8 @@ def ensure_reflection_defaults():
     r["date"] = d
 
 st.session_state.setdefault("view","INTRO")
+st.session_state.setdefault("cbt_step", 1)        # ★ 1〜3
+st.session_state.setdefault("cbt_guided", True)    # ★ ガイド表示ON
 ensure_cbt_defaults(); ensure_reflection_defaults()
 
 # ---------------- Helpers ----------------
@@ -247,7 +242,13 @@ def top_nav():
         cls = "nav-btn active" if st.session_state.view==key else "nav-btn"
         with cols[i]:
             st.markdown(f'<div class="{cls}">', unsafe_allow_html=True)
-            if st.button(label, key=f"nav_{key}", use_container_width=True):
+            if st.button(label, key=f"nav_{key}", use_container_width=True,
+                         help={ "INTRO":"最初の説明へ",
+                                "HOME":"用途別の入口",
+                                "CBT":"約2分の3ステップ",
+                                "REFLECT":"1日のやさしい振り返り",
+                                "HISTORY":"記録の一覧",
+                                "EXPORT":"CSVの出力"}[key]):
                 st.session_state.view = key
             st.markdown('</div>', unsafe_allow_html=True)
     st.markdown('</div></div>', unsafe_allow_html=True)
@@ -265,7 +266,7 @@ def emoji_toggle_grid(selected: List[str]) -> List[str]:
             on = e in chosen
             cls = "emoji-btn emoji-on" if on else "emoji-btn"
             st.markdown(f'<div class="{cls}">', unsafe_allow_html=True)
-            if st.button(f"{e}", key=f"emo_{i}", use_container_width=True):
+            if st.button(f"{e}", key=f"emo_{i}", use_container_width=True, help="タップで選択／もう一度で解除"):
                 if on: chosen.remove(e)
                 else: chosen.add(e)
                 vibrate(10)
@@ -292,7 +293,7 @@ def trigger_chip_row(selected: List[str]) -> List[str]:
         with cols[i]:
             on = val in chosen
             st.markdown('<div class="chip-btn">', unsafe_allow_html=True)
-            if st.button(label + (" ✓" if on else ""), key=f"trg_{val}", use_container_width=True):
+            if st.button(label + (" ✓" if on else ""), key=f"trg_{val}", use_container_width=True, help="タップで選択／もう一度で解除"):
                 if on: chosen.remove(val)
                 else: chosen.add(val)
                 vibrate(8)
@@ -367,14 +368,18 @@ def view_intro():
     c1, c2, c3 = st.columns(3)
     with c1:
         st.markdown('<div class="badge-btn">', unsafe_allow_html=True)
-        if st.button("🕒\n約 2 分", key="go_cbt_2min", use_container_width=True):
-            st.session_state.view = "CBT"
+        if st.button("🕒\n約 2 分\n（① スタート）", key="go_cbt_2min", use_container_width=True,
+                    help="タップで2分ノートの1問目へ移動します"):
+            st.session_state.view = "CBT"; st.session_state.cbt_step = 1; st.session_state.cbt_guided = True
+        st.caption("※ はじめての方はここ")
         st.markdown('</div>', unsafe_allow_html=True)
 
     with c2:
         st.markdown('<div class="badge-btn">', unsafe_allow_html=True)
-        if st.button("👣\n3 STEP", key="go_cbt_3step", use_container_width=True):
-            st.session_state.view = "CBT"
+        if st.button("👣\n3 STEP\n（② 順番に）", key="go_cbt_3step", use_container_width=True,
+                    help="3つのステップを順番に案内します"):
+            st.session_state.view = "CBT"; st.session_state.cbt_step = 1; st.session_state.cbt_guided = True
+        st.caption("順番に案内します")
         st.markdown('</div>', unsafe_allow_html=True)
 
     with c3:
@@ -402,8 +407,9 @@ def view_intro():
     cta1, cta2 = st.columns([3,2])
     with cta1:
         st.markdown('<div class="cta-primary">', unsafe_allow_html=True)
-        if st.button("今すぐはじめる（約2分）", use_container_width=True):
-            st.session_state.view = "CBT"
+        if st.button("① 今すぐはじめる（約2分）", use_container_width=True,
+                     help="最短ルートで1問目へ移動します"):
+            st.session_state.view = "CBT"; st.session_state.cbt_step = 1; st.session_state.cbt_guided = True
         st.markdown('</div>', unsafe_allow_html=True)
     with cta2:
         st.markdown('<div class="cta-ghost">', unsafe_allow_html=True)
@@ -417,34 +423,37 @@ def view_home():
     st.markdown("#### 本日、どのように進められますか？")
     c1,c2 = st.columns(2)
     with c1:
-        if st.button("📓 2分ノートへ", use_container_width=True): st.session_state.view="CBT"
+        if st.button("📓 2分ノートへ（おすすめ）", use_container_width=True, help="3ステップで気持ちを整えます"):
+            st.session_state.view="CBT"; st.session_state.cbt_step = 1; st.session_state.cbt_guided = True
     with c2:
-        if st.button("📝 1日のふり返りへ", use_container_width=True): st.session_state.view="REFLECT"
+        if st.button("📝 1日のふり返りへ", use_container_width=True, help="今日の小さなできたこと等を記録"):
+            st.session_state.view="REFLECT"
     st.markdown('</div>', unsafe_allow_html=True)
 
-# ---------------- CBT（2分ノート：元のフルUI） ----------------
-def view_cbt():
-    ensure_cbt_defaults()
-    top_nav()
-
+# ---------------- CBT（ガイド表示／従来表示の両対応） ----------------
+def _cbt_step_header():
+    # 進捗と表示切替
+    total = 3
+    step = st.session_state.cbt_step
     st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.subheader("いまの気持ち")
-    st.session_state.cbt["emotions"] = emoji_toggle_grid(
-        st.session_state.cbt.get("emotions", [])
-    )
+    st.write(f"**3 STEP｜現在：{step} / {total}**")
+    st.progress(step/total)
+    left, right = st.columns(2)
+    with left:
+        st.session_state.cbt_guided = st.toggle("かんたんガイド（おすすめ）", value=st.session_state.cbt_guided, help="オン：順番に1画面ずつ案内／オフ：全部まとめて表示")
+    with right:
+        st.caption("オンだと迷いにくく、2分で終わります。")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+def _cbt_step1():
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.subheader("① いまの気持ち")
+    st.caption("当てはまる顔をタップ（複数OK／途中でやめてもOK）")
+    st.session_state.cbt["emotions"] = emoji_toggle_grid(st.session_state.cbt.get("emotions", []))
     st.markdown('</div>', unsafe_allow_html=True)
 
     st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.subheader("この気持ち、近かったきっかけは？")
-    st.session_state.cbt["trigger_tags"] = trigger_chip_row(
-        st.session_state.cbt.get("trigger_tags", [])
-    )
-    st.session_state.cbt["trigger_free"] = st.text_area(
-        "任意の一言（なくて大丈夫です）",
-        value=st.session_state.cbt.get("trigger_free",""),
-        placeholder="例）返信がまだ／『また失敗する』と浮かんだ など",
-        height=72
-    )
+    st.subheader("しんどさ・確からしさ（ざっくりでOK）")
     cols = st.columns(2)
     with cols[0]:
         st.session_state.cbt["distress_before"] = st.slider("いまのしんどさ（0〜10）", 0, 10, int(st.session_state.cbt.get("distress_before",5)))
@@ -453,32 +462,33 @@ def view_cbt():
     support(distress=st.session_state.cbt["distress_before"])
     st.markdown('</div>', unsafe_allow_html=True)
 
+def _cbt_step2():
     st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.subheader("考えを整理する（いまの見方 ↔ ほかの見方）")
-    st.caption("片方だけでも大丈夫です。短くてOK。")
-    cols2 = st.columns(2)
-    with cols2[0]:
-        st.session_state.cbt["fact"] = st.text_area(
-            "いまの見方",
-            value=st.session_state.cbt.get("fact",""),
-            placeholder="例）返事が遅い＝嫌われたかも など",
-            height=108
-        )
-    with cols2[1]:
-        st.session_state.cbt["alt"] = st.text_area(
-            "ほかの見方（別の説明・例外）",
-            value=st.session_state.cbt.get("alt",""),
-            placeholder="例）移動中かも／前も夜に返ってきた など",
-            height=108
-        )
-
-    st.subheader("視界をひろげる小さなチェック")
-    st.caption("当てはまるものだけ軽くオンに。合わなければスルーで大丈夫です。")
-    render_checks_and_tips()
+    st.subheader("② 近かった“きっかけ”")
+    st.session_state.cbt["trigger_tags"] = trigger_chip_row(st.session_state.cbt.get("trigger_tags", []))
+    st.session_state.cbt["trigger_free"] = st.text_area(
+        "任意の一言（なくて大丈夫です）",
+        value=st.session_state.cbt.get("trigger_free",""),
+        placeholder="例）返信がまだ／『また失敗する』と浮かんだ など",
+        height=72
+    )
     st.markdown('</div>', unsafe_allow_html=True)
 
+def _cbt_step3():
     st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.subheader("いま採用しておく“仮の見方”を1行で")
+    st.subheader("③ 見方の仮置き（短くでOK）")
+    st.caption("左＝いまの見方／右＝ほかの見方（片方だけでもOK）")
+    cols2 = st.columns(2)
+    with cols2[0]:
+        st.session_state.cbt["fact"] = st.text_area("いまの見方", value=st.session_state.cbt.get("fact",""),
+                                                   placeholder="例）返事が遅い＝嫌われたかも など", height=108)
+    with cols2[1]:
+        st.session_state.cbt["alt"] = st.text_area("ほかの見方（別の説明・例外）", value=st.session_state.cbt.get("alt",""),
+                                                  placeholder="例）移動中かも／前も夜に返ってきた など", height=108)
+    st.subheader("視界をひろげる小さなチェック")
+    st.caption("当てはまるものだけ軽くオンに。合わなければスルーでOK。")
+    render_checks_and_tips()
+
     starters = [
         "分からない部分は保留にします。",
         "可能性は一つじゃないかもしれない。",
@@ -488,11 +498,8 @@ def view_cbt():
     idx = st.radio("候補（編集可）", options=list(range(len(starters))),
                    format_func=lambda i: starters[i], index=0, horizontal=False)
     seed = starters[idx] if 0 <= idx < len(starters) else ""
-    st.session_state.cbt["rephrase"] = st.text_area(
-        "仮の見方（1行）",
-        value=st.session_state.cbt.get("rephrase","") or seed,
-        height=84
-    )
+    st.session_state.cbt["rephrase"] = st.text_area("仮の見方（1行）",
+                                                    value=st.session_state.cbt.get("rephrase","") or seed, height=84)
     ccols = st.columns(2)
     with ccols[0]:
         st.session_state.cbt["prob_after"] = st.slider("この“仮の見方”のしっくり度（%）", 0, 100, int(st.session_state.cbt.get("prob_after",40)))
@@ -500,9 +507,11 @@ def view_cbt():
         st.session_state.cbt["distress_after"] = st.slider("いまのしんどさ（まとめた後）", 0, 10, int(st.session_state.cbt.get("distress_after",4)))
     st.markdown('</div>', unsafe_allow_html=True)
 
+    # 保存ボタン（ガイド時はここだけに出す）
+    st.markdown('<div class="card">', unsafe_allow_html=True)
     c1,c2 = st.columns(2)
     with c1:
-        if st.button("💾 保存して完了（入力欄を初期化）"):
+        if st.button("💾 保存して完了（入力欄を初期化）", help="ここで完了。行動は決めなくてOK。"):
             now = datetime.now().isoformat(timespec="seconds")
             g = st.session_state.cbt["checks"]
             row = {
@@ -524,14 +533,121 @@ def view_cbt():
                 "distress_after":st.session_state.cbt.get("distress_after",0),
             }
             _append_csv(CBT_CSV,row)
-            st.session_state.cbt = {}
-            ensure_cbt_defaults()
+            st.session_state.cbt = {}; ensure_cbt_defaults()
+            st.session_state.cbt_step = 1
             st.success("保存いたしました。ここで完了です。行動は決めなくて大丈夫です。")
     with c2:
         if st.button("🧼 入力欄のみ初期化（未保存分は消去）"):
-            st.session_state.cbt = {}
-            ensure_cbt_defaults()
+            st.session_state.cbt = {}; ensure_cbt_defaults()
             st.info("入力欄を初期化いたしました（記録は残っています）。")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+def _cbt_nav_buttons():
+    step = st.session_state.cbt_step
+    total = 3
+    prev_col, next_col = st.columns(2)
+    with prev_col:
+        if st.button("← 前へ", disabled=(step<=1)):
+            st.session_state.cbt_step = max(1, step-1); vibrate(6)
+    with next_col:
+        if st.button(("完了へ →" if step==total else "次へ →")):
+            st.session_state.cbt_step = min(total, step+1); vibrate(8)
+
+def view_cbt():
+    ensure_cbt_defaults()
+    top_nav()
+
+    _cbt_step_header()
+
+    if not st.session_state.cbt_guided:
+        # ---- 従来のフル表示（そのまま） ----
+        # Step1
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.subheader("いまの気持ち")
+        st.session_state.cbt["emotions"] = emoji_toggle_grid(st.session_state.cbt.get("emotions", []))
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.subheader("この気持ち、近かったきっかけは？")
+        st.session_state.cbt["trigger_tags"] = trigger_chip_row(st.session_state.cbt.get("trigger_tags", []))
+        st.session_state.cbt["trigger_free"] = st.text_area("任意の一言（なくて大丈夫です）",
+                                                            value=st.session_state.cbt.get("trigger_free",""),
+                                                            placeholder="例）返信がまだ／『また失敗する』と浮かんだ など", height=72)
+        cols = st.columns(2)
+        with cols[0]:
+            st.session_state.cbt["distress_before"] = st.slider("いまのしんどさ（0〜10）", 0, 10, int(st.session_state.cbt.get("distress_before",5)))
+        with cols[1]:
+            st.session_state.cbt["prob_before"] = st.slider("いまの考えは、どのくらい“ありえそう”？（%）", 0, 100, int(st.session_state.cbt.get("prob_before",50)))
+        support(distress=st.session_state.cbt["distress_before"])
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        # Step2+3
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.subheader("考えを整理する（いまの見方 ↔ ほかの見方）")
+        st.caption("片方だけでも大丈夫です。短くてOK。")
+        cols2 = st.columns(2)
+        with cols2[0]:
+            st.session_state.cbt["fact"] = st.text_area("いまの見方", value=st.session_state.cbt.get("fact",""),
+                                                        placeholder="例）返事が遅い＝嫌われたかも など", height=108)
+        with cols2[1]:
+            st.session_state.cbt["alt"] = st.text_area("ほかの見方（別の説明・例外）", value=st.session_state.cbt.get("alt",""),
+                                                       placeholder="例）移動中かも／前も夜に返ってきた など", height=108)
+        st.subheader("視界をひろげる小さなチェック")
+        st.caption("当てはまるものだけ軽くオンに。合わなければスルーで大丈夫です。")
+        render_checks_and_tips()
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.subheader("いま採用しておく“仮の見方”を1行で")
+        starters = ["分からない部分は保留にします。","可能性は一つじゃないかもしれない。","今ある事実の範囲で受け止めます。","決め打ちはいったん止めておきます。"]
+        idx = st.radio("候補（編集可）", options=list(range(len(starters))), format_func=lambda i: starters[i], index=0, horizontal=False)
+        seed = starters[idx] if 0 <= idx < len(starters) else ""
+        st.session_state.cbt["rephrase"] = st.text_area("仮の見方（1行）", value=st.session_state.cbt.get("rephrase","") or seed, height=84)
+        ccols = st.columns(2)
+        with ccols[0]:
+            st.session_state.cbt["prob_after"] = st.slider("この“仮の見方”のしっくり度（%）", 0, 100, int(st.session_state.cbt.get("prob_after",40)))
+        with ccols[1]:
+            st.session_state.cbt["distress_after"] = st.slider("いまのしんどさ（まとめた後）", 0, 10, int(st.session_state.cbt.get("distress_after",4)))
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        c1,c2 = st.columns(2)
+        with c1:
+            if st.button("💾 保存して完了（入力欄を初期化）", help="ここで完了。行動は決めなくてOK。"):
+                now = datetime.now().isoformat(timespec="seconds")
+                g = st.session_state.cbt["checks"]
+                row = {
+                    "id":f"cbt-{now}","ts":now,
+                    "emotions":" ".join(st.session_state.cbt.get("emotions",[])),
+                    "trigger_tags":" ".join(st.session_state.cbt.get("trigger_tags",[])),
+                    "trigger_free":st.session_state.cbt.get("trigger_free",""),
+                    "fact":st.session_state.cbt.get("fact",""),
+                    "alt":st.session_state.cbt.get("alt",""),
+                    "bw":g.get("bw",False),
+                    "catastrophe":g.get("catastrophe",False),
+                    "fortune":g.get("fortune",False),
+                    "emotion":g.get("emotion",False),
+                    "decide":g.get("decide",False),
+                    "distress_before":st.session_state.cbt.get("distress_before",0),
+                    "prob_before":st.session_state.cbt.get("prob_before",0),
+                    "rephrase":st.session_state.cbt.get("rephrase",""),
+                    "prob_after":st.session_state.cbt.get("prob_after",0),
+                    "distress_after":st.session_state.cbt.get("distress_after",0),
+                }
+                _append_csv(CBT_CSV,row)
+                st.session_state.cbt = {}; ensure_cbt_defaults()
+                st.success("保存いたしました。ここで完了です。行動は決めなくて大丈夫です。")
+        with c2:
+            if st.button("🧼 入力欄のみ初期化（未保存分は消去）"):
+                st.session_state.cbt = {}; ensure_cbt_defaults()
+                st.info("入力欄を初期化いたしました（記録は残っています）。")
+
+    else:
+        # ---- ガイド表示（1画面ずつ） ----
+        step = st.session_state.cbt_step
+        if step == 1: _cbt_step1()
+        if step == 2: _cbt_step2()
+        if step == 3: _cbt_step3()
+        _cbt_nav_buttons()
 
 # ---------------- Reflection ----------------
 def view_reflect():
@@ -541,20 +657,10 @@ def view_reflect():
     st.subheader("本日をやさしくふり返る")
     st.caption("点数ではなく、心が少しやわらぐ表現で短くご記入ください。")
     st.session_state.reflection["date"] = st.date_input("日付", value=st.session_state.reflection["date"])
-    st.session_state.reflection["today_small_win"] = st.text_area(
-        "本日できたことを1つだけ：",
-        value=st.session_state.reflection.get("today_small_win",""), height=76
-    )
-    st.session_state.reflection["self_message"] = st.text_area(
-        "いまのご自身へ一言：",
-        value=st.session_state.reflection.get("self_message",""), height=76
-    )
-    st.session_state.reflection["note_for_tomorrow"] = st.text_area(
-        "明日のご自身へのメモ（任意）：",
-        value=st.session_state.reflection.get("note_for_tomorrow",""), height=76
-    )
-    st.session_state.reflection["loneliness"] = st.slider(
-        "いまの孤独感（0〜10）", 0, 10, int(st.session_state.reflection.get("loneliness",5)))
+    st.session_state.reflection["today_small_win"] = st.text_area("本日できたことを1つだけ：", value=st.session_state.reflection.get("today_small_win",""), height=76)
+    st.session_state.reflection["self_message"] = st.text_area("いまのご自身へ一言：", value=st.session_state.reflection.get("self_message",""), height=76)
+    st.session_state.reflection["note_for_tomorrow"] = st.text_area("明日のご自身へのメモ（任意）：", value=st.session_state.reflection.get("note_for_tomorrow",""), height=76)
+    st.session_state.reflection["loneliness"] = st.slider("いまの孤独感（0〜10）", 0, 10, int(st.session_state.reflection.get("loneliness",5)))
     support(lonely=st.session_state.reflection["loneliness"])
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -570,13 +676,11 @@ def view_reflect():
                    "note_for_tomorrow":st.session_state.reflection.get("note_for_tomorrow",""),
                    "loneliness":st.session_state.reflection.get("loneliness",0)}
             _append_csv(REFLECT_CSV,row)
-            st.session_state.reflection = {}
-            ensure_reflection_defaults()
+            st.session_state.reflection = {}; ensure_reflection_defaults()
             st.success("保存いたしました。")
     with c2:
         if st.button("🧼 入力欄のみ初期化（未保存分は消去）"):
-            st.session_state.reflection = {}
-            ensure_reflection_defaults()
+            st.session_state.reflection = {}; ensure_reflection_defaults()
             st.info("入力欄を初期化いたしました（記録は残っています）。")
 
 # ---------------- History ----------------
