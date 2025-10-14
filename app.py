@@ -1,11 +1,12 @@
-# app.py — Sora 2分ノート（白空白ゼロ&上端欠け修正／完全版）
+# app.py — Sora 2分ノート（白空白ゼロ & ナビ白四角修正 & 絵文字/チップ安定版）
+
 from datetime import datetime, date
 from pathlib import Path
 from typing import Optional, List
 import pandas as pd
 import streamlit as st
 
-# ---------- Page config ----------
+# ---------------- Page config ----------------
 st.set_page_config(
     page_title="Sora — しんどい夜の2分ノート",
     page_icon="🌙",
@@ -13,11 +14,11 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# ---------- Theme ----------
+# ---------------- Theme ----------------
 PINK = "#FBDDD3"
 NAVY = "#19114B"
 
-# ---------- CSS ----------
+# ---------------- CSS ----------------
 def inject_css():
     css = f"""
 <style>
@@ -39,13 +40,11 @@ html, body, .stApp {{ background:var(--bg); }}
 h1,h2,h3,p,li,label,.stMarkdown,.stTextInput,.stTextArea {{ color:var(--text); }}
 small {{ color:var(--muted); }}
 
-/* ---- “白い空白”排除：空要素・余白ダミーを潰す ---- */
+/* ---- 余計な白空白の根絶 ---- */
 .stMarkdown p:empty, .stMarkdown div:empty {{ display:none !important; }}
 section.main > div:empty {{ display:none !important; }}
-/* column内に生まれる高さ0のゴースト要素 */
-.css-ocqkz7, .e1f1d6gn5 {{ min-height:0 !important; }}  /* 実クラスは環境ごとに変わるが無害 */
 
-/* ---- 既定ボタンの白塗りを禁止（グローバル） ---- */
+/* ---- 既定ボタンは濃紺。白はCTAだけに限定 ---- */
 .stButton > button {{
   background: rgba(0,0,0,.10) !important;
   color:#ffffff !important;
@@ -55,10 +54,9 @@ section.main > div:empty {{ display:none !important; }}
   font-weight:800 !important;
   box-shadow: 0 8px 18px rgba(0,0,0,.18) !important;
 }}
-/* 文字色を勝手に薄くしない */
 .stButton span {{ color:#ffffff !important; }}
 
-/* ---- 入力（TextInput/TextArea/NumberInput）を濃紺に強制 ---- */
+/* ---- 入力（TextInput/TextArea/NumberInput） ---- */
 textarea, .stTextArea textarea,
 .stTextInput input,
 div[data-baseweb="input"] input,
@@ -68,7 +66,6 @@ div[data-baseweb="textarea"] textarea {{
   border:1px solid #3a3d66 !important;
   border-radius:14px !important;
 }}
-/* フォーカス可視化 */
 div[data-baseweb="input"] input:focus,
 div[data-baseweb="textarea"] textarea:focus,
 .stTextInput input:focus, .stTextArea textarea:focus {{
@@ -107,16 +104,15 @@ div[data-baseweb="textarea"] textarea:focus,
 .hero .list {{ border:2px solid var(--line); border-radius:18px; padding:10px 12px; background:rgba(0,0,0,.10); }}
 .hero .list .title {{ font-weight:900; color:var(--pink); margin-bottom:4px; }}
 
-/* ---- バッジ／案内ボタン ---- */
-.badgebox, .badge-btn > button {{
+/* ---- 案内バッジ／CTA ---- */
+.badgebox, .badge-btn .stButton > button {{
   border:2px solid var(--line); border-radius:18px; background:rgba(0,0,0,.08) !important;
   padding:12px; color:#fff !important; width:100%;
 }}
 .badge-title {{ display:block; font-weight:900; font-size:1rem; }}
 .badge-desc  {{ display:block; color:var(--pink); font-weight:700; margin-top:4px; }}
-.badge-btn > button {{ white-space:normal !important; line-height:1.25; text-align:left; }}
+.badge-btn .stButton > button {{ white-space:normal !important; line-height:1.25; text-align:left; }}
 
-/* ---- CTA（必要箇所のみ白ボタンを許可） ---- */
 .cta-primary .stButton > button {{
   width:100%; border-radius:999px; padding:12px 16px !important;
   background:#FFFFFF !important; color:#18123F !important;
@@ -128,19 +124,23 @@ div[data-baseweb="textarea"] textarea:focus,
   border:2px solid var(--line) !important; font-weight:900; box-shadow:none !important;
 }}
 
-/* ---- Emoji/Chips ---- */
+/* ---- Emoji/Chips（子孫セレクタに変更して確実に適用） ---- */
 .chips{{display:flex; gap:8px; flex-wrap:wrap; margin:8px 0 4px}}
-.chips .chip-btn>button{{
+.chip-btn .stButton > button{{
   background:linear-gradient(180deg,#ffbcd2,#ff99bc) !important; color:#3a2144 !important;
   border:1px solid rgba(255,189,222,.35)!important; padding:8px 12px !important; height:auto;
   border-radius:999px!important; font-weight:900; box-shadow:0 10px 20px rgba(255,153,188,.12)!important;
+  white-space:normal !important; line-height:1.25; text-align:left;
 }}
 .emoji-grid{{display:grid; grid-template-columns:repeat(8,1fr); gap:10px; margin:8px 0 2px}}
-.emoji-btn>button{{ width:100%!important; aspect-ratio:1/1; border-radius:18px!important;
+.emoji-btn .stButton > button{{
+  width:100%!important; aspect-ratio:1/1; border-radius:18px!important;
   font-size:1.55rem!important; background:#fff !important; color:#111 !important;
   border:1px solid #eadfff!important; box-shadow:0 8px 16px rgba(12,13,30,.28)!important;
 }}
-.emoji-on>button{{ background:linear-gradient(180deg,#ffc6a3,#ff9fbe)!important; border:1px solid #ff80b0!important; }}
+.emoji-on .stButton > button{{
+  background:linear-gradient(180deg,#ffc6a3,#ff9fbe)!important; border:1px solid #ff80b0!important;
+}}
 
 /* ---- Sticky Navbar（上端欠け・重なり対策） ---- */
 .navbar {{
@@ -149,10 +149,6 @@ div[data-baseweb="textarea"] textarea:focus,
   margin: 0 0 10px 0; padding: 10px 12px;
   border-bottom: 1px solid rgba(255,255,255,.08);
 }}
-/* 安全マージン：ページ最上部に十分な余白 */
-.block-container::before {{
-  content:""; display:block; height:0px;
-}}
 .navbar .stRadio [role="radiogroup"] {{ gap: 8px; flex-wrap: wrap; }}
 .navbar label {{
   background:#fff; color:#1b1742; border:1px solid rgba(0,0,0,.06);
@@ -160,6 +156,17 @@ div[data-baseweb="textarea"] textarea:focus,
 }}
 .navbar input:checked + div label {{
   background:#F4F4FF; border:2px solid #8A84FF;
+}}
+
+/* ---- ナビ（前へ/次へ）白四角対策：専用クラスで固定 ---- */
+.nav-btn .stButton > button{{
+  background:rgba(0,0,0,.10) !important;
+  color:#ffffff !important;
+  border:2px solid var(--line) !important;
+  border-radius:14px !important;
+  padding:10px 18px !important;
+  font-weight:900 !important;
+  box-shadow:0 8px 18px rgba(0,0,0,.18) !important;
 }}
 
 /* ---- Responsive ---- */
@@ -175,7 +182,7 @@ div[data-baseweb="textarea"] textarea:focus,
 
 inject_css()
 
-# ---------- Data helpers ----------
+# ---------------- Data helpers ----------------
 DATA_DIR = Path("data"); DATA_DIR.mkdir(exist_ok=True)
 CBT_CSV = DATA_DIR / "cbt_entries.csv"
 REFLECT_CSV = DATA_DIR / "daily_reflections.csv"
@@ -198,7 +205,7 @@ def _download_button(df: pd.DataFrame, label: str, filename: str):
     st.download_button(label, df.to_csv(index=False).encode("utf-8"),
                        file_name=filename, mime="text/csv")
 
-# ---------- Session defaults ----------
+# ---------------- Session defaults ----------------
 def ensure_cbt_defaults():
     if "cbt" not in st.session_state or not isinstance(st.session_state.cbt, dict):
         st.session_state.cbt = {}
@@ -236,7 +243,7 @@ st.session_state.setdefault("cbt_step", 1)      # 1..3
 st.session_state.setdefault("cbt_guided", True) # ガイドON
 ensure_cbt_defaults(); ensure_reflection_defaults()
 
-# ---------- Helpers ----------
+# ---------------- Helpers ----------------
 def vibrate(ms=8):
     st.markdown("<script>try{navigator.vibrate&&navigator.vibrate(%d)}catch(e){{}}</script>"%ms, unsafe_allow_html=True)
 
@@ -259,9 +266,10 @@ def support(distress: Optional[int]=None, lonely: Optional[int]=None):
     else:
         companion("🌟","ここまで入力いただけて十分です。","空欄があっても大丈夫です。")
 
-# ---------- Top Nav ----------
+# ---------------- Top Nav（文字つきタブ） ----------------
 def top_nav():
     st.markdown('<div class="navbar">', unsafe_allow_html=True)
+
     keys = ["INTRO","HOME","CBT","REFLECT","HISTORY","EXPORT"]
     labels = {
         "INTRO":   "👋 はじめに — 最初の説明",
@@ -271,8 +279,10 @@ def top_nav():
         "HISTORY": "📚 記録を見る — 保存した一覧",
         "EXPORT":  "⬇️ エクスポート — CSV・設定",
     }
+
     current = st.session_state.get("view","INTRO")
     idx = keys.index(current) if current in keys else 0
+
     choice = st.radio(
         "移動先",
         options=keys,
@@ -285,7 +295,7 @@ def top_nav():
     st.session_state.view = choice
     st.markdown('</div>', unsafe_allow_html=True)
 
-# ---------- Emoji & Chips ----------
+# ---------------- Emoji & Chips ----------------
 EMOJIS = ["😟","😡","😢","😔","😤","😴","🙂","🤷‍♀️"]
 
 def emoji_toggle_grid(selected: List[str]) -> List[str]:
@@ -333,7 +343,7 @@ def trigger_chip_row(selected: List[str]) -> List[str]:
     st.markdown('</div>', unsafe_allow_html=True)
     return list(chosen)
 
-# ---------- 一言挿入 ----------
+# ---------------- 一言挿入 ----------------
 def append_to_textarea(ss_key: str, phrase: str):
     cur = st.session_state.cbt.get(ss_key, "") or ""
     glue = "" if (cur.strip() == "" or cur.strip().endswith(("。","!","！"))) else " "
@@ -378,7 +388,7 @@ def render_checks_and_tips():
                 st.markdown('</div>', unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
 
-# ---------- INTRO ----------
+# ---------------- INTRO ----------------
 def view_intro():
     top_nav()
     st.markdown("""
@@ -440,7 +450,7 @@ def view_intro():
             st.session_state.view="HOME"
         st.markdown('</div>', unsafe_allow_html=True)
 
-# ---------- HOME ----------
+# ---------------- HOME ----------------
 def view_home():
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.markdown("#### 本日、どのように進めますか？")
@@ -453,7 +463,7 @@ def view_home():
             st.session_state.view="REFLECT"
     st.markdown('</div>', unsafe_allow_html=True)
 
-# ---------- CBT ----------
+# ---------------- CBT（ガイド／フル表示） ----------------
 def _cbt_step_header():
     total = 3; step = st.session_state.cbt_step
     st.markdown('<div class="card">', unsafe_allow_html=True)
@@ -566,12 +576,16 @@ def _cbt_nav_buttons():
     step = st.session_state.cbt_step; total = 3
     prev_col, next_col = st.columns(2)
     with prev_col:
+        st.markdown('<div class="nav-btn">', unsafe_allow_html=True)
         if st.button("← 前へ", disabled=(step<=1), help="ひとつ前のステップへ戻る"):
             st.session_state.cbt_step = max(1, step-1); vibrate(5)
+        st.markdown('</div>', unsafe_allow_html=True)
     with next_col:
+        st.markdown('<div class="nav-btn">', unsafe_allow_html=True)
         if st.button(("完了へ →" if step==total else "次へ →"),
                      help=("保存して完了します" if step==total else "次のステップへ進む")):
             st.session_state.cbt_step = min(total, step+1); vibrate(7)
+        st.markdown('</div>', unsafe_allow_html=True)
 
 def view_cbt():
     ensure_cbt_defaults()
@@ -608,7 +622,7 @@ def view_cbt():
         if step == 3: _cbt_step3()
         _cbt_nav_buttons()
 
-# ---------- Reflection ----------
+# ---------------- Reflection ----------------
 def view_reflect():
     ensure_reflection_defaults()
     top_nav()
@@ -642,7 +656,7 @@ def view_reflect():
             st.session_state.reflection = {}; ensure_reflection_defaults()
             st.info("入力欄を初期化いたしました（記録は残っています）。")
 
-# ---------- History ----------
+# ---------------- History ----------------
 def view_history():
     top_nav()
     st.markdown('<div class="card">', unsafe_allow_html=True)
@@ -731,7 +745,7 @@ def view_history():
             pass
     st.markdown('</div>', unsafe_allow_html=True)
 
-# ---------- Export / Settings ----------
+# ---------------- Export / Settings ----------------
 def view_export():
     top_nav()
     st.subheader("⬇️ エクスポート & 設定")
@@ -760,7 +774,7 @@ def view_export():
                 st.error(f"削除時にエラーが発生しました: {e}")
     st.markdown('</div>', unsafe_allow_html=True)
 
-# ---------- Router ----------
+# ---------------- Router ----------------
 view = st.session_state.view
 if view == "INTRO":
     view_intro()
@@ -775,7 +789,7 @@ elif view == "HISTORY":
 else:
     view_export()
 
-# ---------- Footer ----------
+# ---------------- Footer ----------------
 st.markdown("""
 <div style="text-align:center; color:var(--muted); margin-top:10px;">
   <small>※ 個人名や連絡先は記入しないでください。<br>
