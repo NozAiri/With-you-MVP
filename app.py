@@ -141,87 +141,125 @@ textarea, input, .stTextInput>div>div>input{{
 </style>
 """, unsafe_allow_html=True)
 
-inject_css()
+def inject_css():
+    st.markdown(f"""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;600;700;900&display=swap');
 
-# ---------------- Data helpers ----------------
-DATA_DIR = Path("data"); DATA_DIR.mkdir(exist_ok=True)
-CBT_CSV = DATA_DIR / "cbt_entries.csv"
-REFLECT_CSV = DATA_DIR / "daily_reflections.csv"
+:root {{
+  --bg:{NAVY};
+  --text:#FFFFFF;
+  --muted:rgba(255,255,255,.75);
+  --pink:{PINK};
+  --panel:#221A63;
+  --line:rgba(251,221,211,.55);
+}}
+html, body, .stApp {{ background:var(--bg); }}
+.block-container {{ max-width:980px; padding-top:.6rem; padding-bottom:3.2rem; }}
+* {{ font-family:"Zen Maru Gothic", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }}
+h1,h2,h3,p,li,label,.stMarkdown,.stTextInput,.stTextArea {{ color:var(--text); }}
+small {{ color:var(--muted); }}
 
-def _load_csv(p: Path) -> pd.DataFrame:
-    if p.exists():
-        try: return pd.read_csv(p)
-        except Exception: return pd.DataFrame()
-    return pd.DataFrame()
+/* Top Nav（言葉つき） */
+.topbar {{
+  position:sticky; top:0; z-index:10;
+  background: rgba(25,17,75,.55); backdrop-filter: blur(8px);
+  border-bottom: 1px solid rgba(255,255,255,.08);
+  margin: 0 -12px 12px; padding: 8px 12px 10px;
+}}
+.topnav {{ display:grid; grid-template-columns: repeat(6,1fr); gap:8px; }}
+.navbtn > button {{
+  background:#FFFFFF !important; color:#1b1742 !important;
+  border:1px solid rgba(0,0,0,.06) !important;
+  border-radius:14px !important; padding:10px 10px !important; height:auto !important;
+  text-align:left !important; box-shadow:none !important;
+}}
+.navbtn .label {{ display:block; font-weight:900; font-size:.96rem; }}
+.navbtn .sub   {{ display:block; color:#5b5b8a; font-size:.78rem; margin-top:2px; }}
+.navbtn.active > button {{ background:#F4F4FF !important; border:2px solid #8A84FF !important; }}
 
-def _append_csv(p: Path, row: dict):
-    df = _load_csv(p)
-    df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
-    df.to_csv(p, index=False)
+/* Card */
+.card {{
+  background: var(--panel);
+  border: 2px solid var(--line);
+  border-radius: 22px;
+  padding: 18px;
+  box-shadow: 0 22px 44px rgba(0,0,0,.25);
+}}
 
-def _download_button(df: pd.DataFrame, label: str, filename: str):
-    if df.empty:
-        st.caption("（まだデータはございません）")
-        return
-    st.download_button(label, df.to_csv(index=False).encode("utf-8"),
-                       file_name=filename, mime="text/csv")
+/* HERO */
+.hero {{
+  border: 2px solid var(--line);
+  border-radius: 24px;
+  padding: 26px 22px;
+  background: linear-gradient(180deg, rgba(255,255,255,.02), rgba(0,0,0,.06));
+}}
+.hero .topline {{
+  text-align:center; font-weight:900; font-size:1.14rem; letter-spacing:.08em;
+  color: var(--pink); margin-bottom: 14px;
+}}
+.hero .maincopy {{
+  text-align:center; font-weight:900; font-size:1.9rem; line-height:1.4;
+  margin: .2rem 0 1.1rem;
+}}
+.hero .maincopy .big3 {{ font-size:3.2rem; color:#fff; display:inline-block; transform:translateY(.06em); }}
+.hero .what {{ margin:12px 0 16px; border:2px solid var(--line); border-radius:18px; padding:14px; background:rgba(0,0,0,.12); }}
+.hero .what .title {{ font-weight:900; color:var(--pink); margin-bottom:6px; }}
+.hero .badges {{ display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin:10px 0 8px; }}
+.badgebox, .badge-btn > button {{
+  border:2px solid var(--line); border-radius:18px; background:rgba(0,0,0,.08);
+  padding:12px 12px; color:#fff;
+}}
+.badge-title {{ display:block; font-weight:900; font-size:1.02rem; }}
+.badge-desc  {{ display:block; color:var(--pink); font-weight:700; margin-top:4px; }}
+.badge-btn > button {{ width:100%; white-space:normal !important; line-height:1.25; text-align:left; }}
+.hero .list {{ border:2px solid var(--line); border-radius:18px; padding:12px 14px; background:rgba(0,0,0,.10); }}
+.hero .list .title {{ font-weight:900; color:var(--pink); margin-bottom:6px; }}
 
-# ---------------- Session defaults ----------------
-def ensure_cbt_defaults():
-    if "cbt" not in st.session_state or not isinstance(st.session_state.cbt, dict):
-        st.session_state.cbt = {}
-    cbt = st.session_state.cbt
-    cbt.setdefault("emotions", [])
-    cbt.setdefault("trigger_tags", [])
-    cbt.setdefault("trigger_free","")
-    cbt.setdefault("fact","")
-    cbt.setdefault("alt","")
-    checks = cbt.setdefault("checks", {})
-    checks.setdefault("bw", False)
-    checks.setdefault("catastrophe", False)
-    checks.setdefault("fortune", False)
-    checks.setdefault("emotion", False)
-    checks.setdefault("decide", False)
-    cbt.setdefault("distress_before",5)
-    cbt.setdefault("prob_before",50)
-    cbt.setdefault("rephrase","")
-    cbt.setdefault("prob_after",40)
-    cbt.setdefault("distress_after",4)
+/* CTA */
+.cta-primary .stButton > button {{
+  width:100%; border-radius:999px; padding:14px 16px;
+  background:#FFFFFF !important; color:#18123F !important;
+  font-weight:900; border:0 !important; box-shadow:0 16px 28px rgba(0,0,0,.25);
+}}
+.cta-ghost .stButton > button {{
+  width:100%; border-radius:999px; padding:14px 16px;
+  background:transparent !important; color:#FFFFFF !important;
+  border:2px solid var(--line) !important; font-weight:900; box-shadow:none !important;
+}}
 
-def ensure_reflection_defaults():
-    if "reflection" not in st.session_state or not isinstance(st.session_state.reflection, dict):
-        st.session_state.reflection = {}
-    r = st.session_state.reflection
-    r.setdefault("today_small_win","")
-    r.setdefault("self_message","")
-    r.setdefault("note_for_tomorrow","")
-    r.setdefault("loneliness",5)
-    d = r.get("date", date.today())
-    if isinstance(d, str):
-        try: d = date.fromisoformat(d)
-        except Exception: d = date.today()
-    r["date"] = d
+/* 入力系 */
+textarea, input, .stTextInput>div>div>input{{
+  border-radius:14px!important; background:#0f0f23; color:#f0eeff; border:1px solid #3a3d66;
+}}
+.stSlider,.stRadio>div{{ color:var(--text) }}
 
-st.session_state.setdefault("view","INTRO")
-st.session_state.setdefault("cbt_step", 1)        # 1..3
-st.session_state.setdefault("cbt_guided", True)   # ガイドON
-ensure_cbt_defaults(); ensure_reflection_defaults()
+/* Chips / Emoji */
+.chips{{display:flex; gap:8px; flex-wrap:wrap; margin:8px 0 10px}}
+.chips .chip-btn>button{{
+  background:linear-gradient(180deg,#ffbcd2,#ff99bc); color:#3a2144;
+  border:1px solid rgba(255,189,222,.35)!important; padding:10px 14px; height:auto;
+  border-radius:999px!important; font-weight:900; box-shadow:0 10px 20px rgba(255,153,188,.12)
+}}
+.emoji-grid{{display:grid; grid-template-columns:repeat(8,1fr); gap:10px; margin:8px 0 6px}}
+.emoji-btn>button{{ width:100%!important; aspect-ratio:1/1; border-radius:18px!important;
+  font-size:1.55rem!important; background:#fff; color:#111;
+  border:1px solid #eadfff!important; box-shadow:0 8px 16px rgba(12,13,30,.28);
+}}
+.emoji-on>button{{ background:linear-gradient(180deg,#ffc6a3,#ff9fbe)!important; border:1px solid #ff80b0!important; }}
 
-# ---------------- Helpers ----------------
-def vibrate(ms=12):
-    st.markdown("<script>try{{navigator.vibrate&&navigator.vibrate({ms})}}catch(e){{}}</script>".format(ms=ms),
-                unsafe_allow_html=True)
-
-def companion(emoji: str, text: str, sub: Optional[str]=None):
-    st.markdown(
-        f"""
-<div class="card">
-  <div style="font-weight:900; color:var(--pink)">{emoji} {text}</div>
-  {f"<div class='small' style='margin-top:4px; color:var(--muted)'>{sub}</div>" if sub else ""}
-</div>
-        """,
-        unsafe_allow_html=True,
-    )
+/* ▼▼ ここが修正ポイント：f-stringの波かっこは2重にする ▼▼ */
+@media (max-width: 980px){{ 
+  .topnav{{ grid-template-columns: repeat(3,1fr); }}
+}}
+@media (max-width: 640px){{ 
+  .emoji-grid{{grid-template-columns:repeat(4,1fr)}}
+  .block-container{{padding-left:1rem; padding-right:1rem}}
+  .hero .maincopy{{ font-size:1.7rem; }}
+  .hero .maincopy .big3{{ font-size:2.8rem; }}
+}}
+</style>
+""", unsafe_allow_html=True)
 
 def support(distress: Optional[int]=None, lonely: Optional[int]=None):
     if distress is not None and distress >= 7:
