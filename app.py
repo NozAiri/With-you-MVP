@@ -1,4 +1,4 @@
-# app.py — Sora 2分ノート（白空白ゼロ & ナビ白四角修正 & 絵文字/チップ安定版）
+# app.py — Sora 2分ノート（白空白ゼロ / ボタン識別CSS 安定版）
 
 from datetime import datetime, date
 from pathlib import Path
@@ -44,7 +44,7 @@ small {{ color:var(--muted); }}
 .stMarkdown p:empty, .stMarkdown div:empty {{ display:none !important; }}
 section.main > div:empty {{ display:none !important; }}
 
-/* ---- 既定ボタンは濃紺。白はCTAだけに限定 ---- */
+/* ---- 既定ボタンは濃紺。白は明示的にだけ ---- */
 .stButton > button {{
   background: rgba(0,0,0,.10) !important;
   color:#ffffff !important;
@@ -124,25 +124,57 @@ div[data-baseweb="textarea"] textarea:focus,
   border:2px solid var(--line) !important; font-weight:900; box-shadow:none !important;
 }}
 
-/* ---- Emoji/Chips（子孫セレクタに変更して確実に適用） ---- */
-.chips{{display:flex; gap:8px; flex-wrap:wrap; margin:8px 0 4px}}
-.chip-btn .stButton > button{{
-  background:linear-gradient(180deg,#ffbcd2,#ff99bc) !important; color:#3a2144 !important;
-  border:1px solid rgba(255,189,222,.35)!important; padding:8px 12px !important; height:auto;
-  border-radius:999px!important; font-weight:900; box-shadow:0 10px 20px rgba(255,153,188,.12)!important;
-  white-space:normal !important; line-height:1.25; text-align:left;
+/* =========================================================
+   ここが肝：help属性(title)で完全に振り分けてスタイル適用
+   ========================================================= */
+
+/* --- EMOJI: 絵文字グリッド（白い正方形） --- */
+button[title="EMOJI"] {{
+  width:100% !important;
+  aspect-ratio:1/1 !important;
+  border-radius:18px !important;
+  font-size:1.55rem !important;
+  background:#fff !important; color:#111 !important;
+  border:1px solid #eadfff !important;
+  box-shadow:0 8px 16px rgba(12,13,30,.28) !important;
 }}
-.emoji-grid{{display:grid; grid-template-columns:repeat(8,1fr); gap:10px; margin:8px 0 2px}}
-.emoji-btn .stButton > button{{
-  width:100%!important; aspect-ratio:1/1; border-radius:18px!important;
-  font-size:1.55rem!important; background:#fff !important; color:#111 !important;
-  border:1px solid #eadfff!important; box-shadow:0 8px 16px rgba(12,13,30,.28)!important;
-}}
-.emoji-on .stButton > button{{
-  background:linear-gradient(180deg,#ffc6a3,#ff9fbe)!important; border:1px solid #ff80b0!important;
+/* 選択ONの見た目（キーカラー）*/
+button[title="EMOJI"].on, .emoji-on .stButton > button {{
+  background:linear-gradient(180deg,#ffc6a3,#ff9fbe)!important;
+  border:1px solid #ff80b0!important;
 }}
 
-/* ---- Sticky Navbar（上端欠け・重なり対策） ---- */
+/* --- TRIGGER: きっかけチップ（絵文字＋日本語を1枚に） --- */
+button[title="TRIGGER"] {{
+  display:flex !important; align-items:center !important; justify-content:flex-start !important;
+  gap:.55rem !important;
+  background:linear-gradient(180deg,#ffbcd2,#ff99bc) !important;
+  color:#3a2144 !important;
+  border:1px solid rgba(255,189,222,.35)!important;
+  padding:10px 14px !important; height:auto !important;
+  border-radius:999px!important; font-weight:900 !important;
+  box-shadow:0 10px 20px rgba(255,153,188,.12)!important;
+  white-space:nowrap !important;
+}}
+/* アイコンを少し大きく */
+button[title="TRIGGER"] span:first-child {{ font-size:1.1rem; }}
+/* 押下状態 */
+button[title="TRIGGER"]:active {{
+  transform: translateY(1px);
+}}
+
+/* --- NAV: 前へ／次へ（濃紺固定＝白四角を根絶） --- */
+button[title="NAV"] {{
+  background:rgba(0,0,0,.10) !important;
+  color:#ffffff !important;
+  border:2px solid var(--line) !important;
+  border-radius:14px !important;
+  padding:10px 18px !important;
+  font-weight:900 !important;
+  box-shadow:0 8px 18px rgba(0,0,0,.18) !important;
+}}
+
+/* ---- Sticky Navbar ---- */
 .navbar {{
   position: sticky; top: 0; z-index: 1000;
   background: rgba(25,17,75,.82); backdrop-filter: blur(10px);
@@ -158,20 +190,8 @@ div[data-baseweb="textarea"] textarea:focus,
   background:#F4F4FF; border:2px solid #8A84FF;
 }}
 
-/* ---- ナビ（前へ/次へ）白四角対策：専用クラスで固定 ---- */
-.nav-btn .stButton > button{{
-  background:rgba(0,0,0,.10) !important;
-  color:#ffffff !important;
-  border:2px solid var(--line) !important;
-  border-radius:14px !important;
-  padding:10px 18px !important;
-  font-weight:900 !important;
-  box-shadow:0 8px 18px rgba(0,0,0,.18) !important;
-}}
-
 /* ---- Responsive ---- */
 @media (max-width: 640px) {{
-  .emoji-grid {{ grid-template-columns: repeat(4,1fr); }}
   .block-container {{ padding-left:1rem; padding-right:1rem; }}
   .hero .maincopy {{ font-size:1.6rem; }}
   .hero .maincopy .big3 {{ font-size:2.6rem; }}
@@ -266,7 +286,7 @@ def support(distress: Optional[int]=None, lonely: Optional[int]=None):
     else:
         companion("🌟","ここまで入力いただけて十分です。","空欄があっても大丈夫です。")
 
-# ---------------- Top Nav（文字つきタブ） ----------------
+# ---------------- Top Nav ----------------
 def top_nav():
     st.markdown('<div class="navbar">', unsafe_allow_html=True)
 
@@ -300,20 +320,16 @@ EMOJIS = ["😟","😡","😢","😔","😤","😴","🙂","🤷‍♀️"]
 
 def emoji_toggle_grid(selected: List[str]) -> List[str]:
     st.caption("いまの気持ちをタップ（複数OK／途中でやめてもOK）")
-    st.markdown('<div class="emoji-grid">', unsafe_allow_html=True)
     chosen = set(selected)
     cols = st.columns(8 if len(EMOJIS) >= 8 else len(EMOJIS))
     for i, e in enumerate(EMOJIS):
         with cols[i % len(cols)]:
             on = e in chosen
-            cls = "emoji-btn emoji-on" if on else "emoji-btn"
-            st.markdown(f'<div class="{cls}">', unsafe_allow_html=True)
-            if st.button(f"{e}", key=f"emo_{i}", use_container_width=True, help="タップで選択／もう一度で解除"):
+            # ボタン本体（title=EMOJI で確実にスタイル適用）
+            if st.button(f"{e}", key=f"emo_{i}", use_container_width=True, help="EMOJI"):
                 if on: chosen.remove(e)
                 else: chosen.add(e)
                 vibrate(8)
-            st.markdown('</div>', unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)
     sel = " ".join(list(chosen)) if chosen else "（未選択）"
     st.caption(f"選択中：{sel}")
     return list(chosen)
@@ -328,19 +344,16 @@ TRIGGER_DEFS = [
 
 def trigger_chip_row(selected: List[str]) -> List[str]:
     st.caption("言葉にしづらい時は、近いものだけタップで結構です。")
-    st.markdown('<div class="chips">', unsafe_allow_html=True)
     cols = st.columns(len(TRIGGER_DEFS))
     chosen = set(selected)
     for i,(label,val) in enumerate(TRIGGER_DEFS):
         with cols[i]:
             on = val in chosen
-            st.markdown('<div class="chip-btn">', unsafe_allow_html=True)
-            if st.button(label + (" ✓" if on else ""), key=f"trg_{val}", use_container_width=True, help="タップで選択／もう一度で解除"):
+            # title=TRIGGER を使って「絵文字＋日本語」が同じ1枚のピルに必ず表示される
+            if st.button(label + (" ✓" if on else ""), key=f"trg_{val}", use_container_width=True, help="TRIGGER"):
                 if on: chosen.remove(val)
                 else: chosen.add(val)
                 vibrate(6)
-            st.markdown('</div>', unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)
     return list(chosen)
 
 # ---------------- 一言挿入 ----------------
@@ -376,17 +389,13 @@ def render_checks_and_tips():
     on_keys = [k for k,v in g.items() if v]
     if on_keys:
         st.write("💡 タップで“ほかの見方”に挿入できます")
-        st.markdown('<div class="chips">', unsafe_allow_html=True)
         tip_cols = st.columns(min(4, len(on_keys)))
         for i, k in enumerate(on_keys):
             tip = TIP_MAP.get(k, "")
             if not tip: continue
             with tip_cols[i % len(tip_cols)]:
-                st.markdown('<div class="chip-btn">', unsafe_allow_html=True)
-                if st.button(tip, key=f"tip_{k}", use_container_width=True):
+                if st.button(tip, key=f"tip_{k}", use_container_width=True, help="TRIGGER"):
                     append_to_textarea("alt", tip); vibrate(6)
-                st.markdown('</div>', unsafe_allow_html=True)
-        st.markdown("</div>", unsafe_allow_html=True)
 
 # ---------------- INTRO ----------------
 def view_intro():
@@ -403,6 +412,7 @@ def view_intro():
     <div>しんどい夜に、短時間で“見方”を整えるノート。<br>
     正解探しではなく、気持ちを整える時間を届けます。</div>
   </div>
+</div>
 """, unsafe_allow_html=True)
 
     c1, c2, c3 = st.columns(3)
@@ -423,18 +433,6 @@ def view_intro():
 <div class="badgebox">
   <span class="badge-title">🔒 この端末のみ保存</span>
   <span class="badge-desc">途中でやめてもOK／医療・診断ではありません</span>
-</div>
-""", unsafe_allow_html=True)
-
-    st.markdown("""
-  <div class="list">
-    <div class="title">内容</div>
-    <ol style="margin:0 0 0 1.2rem">
-      <li>気持ちの整理</li>
-      <li>きっかけの整理</li>
-      <li>見方の仮置き</li>
-    </ol>
-  </div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -463,7 +461,7 @@ def view_home():
             st.session_state.view="REFLECT"
     st.markdown('</div>', unsafe_allow_html=True)
 
-# ---------------- CBT（ガイド／フル表示） ----------------
+# ---------------- CBT ----------------
 def _cbt_step_header():
     total = 3; step = st.session_state.cbt_step
     st.markdown('<div class="card">', unsafe_allow_html=True)
@@ -541,7 +539,7 @@ def _cbt_step3():
     st.markdown('<div class="card">', unsafe_allow_html=True)
     c1,c2 = st.columns(2)
     with c1:
-        if st.button("💾 保存して完了（入力欄を初期化）", help="ここで完了。行動は決めなくてOK。"):
+        if st.button("💾 保存して完了（入力欄を初期化）", help="NAV"):
             now = datetime.now().isoformat(timespec="seconds")
             g = st.session_state.cbt["checks"]
             row = {
@@ -567,7 +565,7 @@ def _cbt_step3():
             st.session_state.cbt_step = 1
             st.success("保存いたしました。ここで完了です。行動は決めなくて大丈夫です。")
     with c2:
-        if st.button("🧼 入力欄のみ初期化（未保存分は消去）"):
+        if st.button("🧼 入力欄のみ初期化（未保存分は消去）", help="NAV"):
             st.session_state.cbt = {}; ensure_cbt_defaults()
             st.info("入力欄を初期化いたしました（記録は残っています）。")
     st.markdown('</div>', unsafe_allow_html=True)
@@ -576,16 +574,11 @@ def _cbt_nav_buttons():
     step = st.session_state.cbt_step; total = 3
     prev_col, next_col = st.columns(2)
     with prev_col:
-        st.markdown('<div class="nav-btn">', unsafe_allow_html=True)
-        if st.button("← 前へ", disabled=(step<=1), help="ひとつ前のステップへ戻る"):
+        if st.button("← 前へ", disabled=(step<=1), help="NAV"):
             st.session_state.cbt_step = max(1, step-1); vibrate(5)
-        st.markdown('</div>', unsafe_allow_html=True)
     with next_col:
-        st.markdown('<div class="nav-btn">', unsafe_allow_html=True)
-        if st.button(("完了へ →" if step==total else "次へ →"),
-                     help=("保存して完了します" if step==total else "次のステップへ進む")):
+        if st.button(("完了へ →" if step==total else "次へ →"), help="NAV"):
             st.session_state.cbt_step = min(total, step+1); vibrate(7)
-        st.markdown('</div>', unsafe_allow_html=True)
 
 def view_cbt():
     ensure_cbt_defaults()
@@ -639,7 +632,7 @@ def view_reflect():
 
     c1,c2 = st.columns(2)
     with c1:
-        if st.button("💾 保存（入力欄を初期化）"):
+        if st.button("💾 保存（入力欄を初期化）", help="NAV"):
             now = datetime.now().isoformat(timespec="seconds")
             dv = st.session_state.reflection["date"]
             date_str = dv.isoformat() if isinstance(dv,(date,datetime)) else str(dv)
@@ -652,7 +645,7 @@ def view_reflect():
             st.session_state.reflection = {}; ensure_reflection_defaults()
             st.success("保存いたしました。")
     with c2:
-        if st.button("🧼 入力欄のみ初期化（未保存分は消去）"):
+        if st.button("🧼 入力欄のみ初期化（未保存分は消去）", help="NAV"):
             st.session_state.reflection = {}; ensure_reflection_defaults()
             st.info("入力欄を初期化いたしました（記録は残っています）。")
 
@@ -759,13 +752,13 @@ def view_export():
     st.markdown("**入力欄の初期化 / データの管理**")
     c1,c2 = st.columns(2)
     with c1:
-        if st.button("🧼 入力欄のみすべて初期化（記録は残ります）"):
+        if st.button("🧼 入力欄のみすべて初期化（記録は残ります）", help="NAV"):
             st.session_state.cbt = {}; st.session_state.reflection = {}
             ensure_cbt_defaults(); ensure_reflection_defaults()
             st.success("入力欄を初期化いたしました。記録は残っています。")
     with c2:
         danger = st.checkbox("⚠️ すべての保存データ（CSV）を削除することに同意します")
-        if st.button("🗑️ すべての保存データを削除（取り消し不可）", disabled=not danger):
+        if st.button("🗑️ すべての保存データを削除（取り消し不可）", disabled=not danger, help="NAV"):
             try:
                 if CBT_CSV.exists(): CBT_CSV.unlink()
                 if REFLECT_CSV.exists(): REFLECT_CSV.unlink()
