@@ -1,8 +1,8 @@
-# app.py — Sora 2分ノート（白空白ゼロ / ボタン識別CSS 安定版）
+# app.py — Sora 2分ノート（安定版：白空白ゼロ／絵文字＋文字のピル表示）
 
 from datetime import datetime, date
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Tuple
 import pandas as pd
 import streamlit as st
 
@@ -18,7 +18,7 @@ st.set_page_config(
 PINK = "#FBDDD3"
 NAVY = "#19114B"
 
-# ---------------- CSS ----------------
+# ---------------- CSS（最低限。Streamlit側のDOM変更に強い） ----------------
 def inject_css():
     css = f"""
 <style>
@@ -40,40 +40,20 @@ html, body, .stApp {{ background:var(--bg); }}
 h1,h2,h3,p,li,label,.stMarkdown,.stTextInput,.stTextArea {{ color:var(--text); }}
 small {{ color:var(--muted); }}
 
-/* ---- 余計な白空白の根絶 ---- */
+/* 余計な空白を消す */
 .stMarkdown p:empty, .stMarkdown div:empty {{ display:none !important; }}
 section.main > div:empty {{ display:none !important; }}
 
-/* ---- 既定ボタンは濃紺。白は明示的にだけ ---- */
-.stButton > button {{
-  background: rgba(0,0,0,.10) !important;
-  color:#ffffff !important;
-  border:1px solid rgba(255,255,255,.18) !important;
-  border-radius:14px !important;
-  padding:10px 14px !important;
-  font-weight:800 !important;
-  box-shadow: 0 8px 18px rgba(0,0,0,.18) !important;
-}}
-.stButton span {{ color:#ffffff !important; }}
-
-/* ---- 入力（TextInput/TextArea/NumberInput） ---- */
+/* 入力 */
 textarea, .stTextArea textarea,
-.stTextInput input,
-div[data-baseweb="input"] input,
-div[data-baseweb="textarea"] textarea {{
+.stTextInput input {{
   background: var(--ink) !important;
   color:#f0eeff !important;
   border:1px solid #3a3d66 !important;
   border-radius:14px !important;
 }}
-div[data-baseweb="input"] input:focus,
-div[data-baseweb="textarea"] textarea:focus,
-.stTextInput input:focus, .stTextArea textarea:focus {{
-  outline: 2px solid #8A84FF !important;
-  border-color:#8A84FF !important;
-}}
 
-/* ---- カード ---- */
+/* カード */
 .card {{
   background: var(--panel);
   border: 2px solid var(--line);
@@ -83,98 +63,24 @@ div[data-baseweb="textarea"] textarea:focus,
   margin-bottom: 14px;
 }}
 
-/* ---- HERO ---- */
-.hero {{
-  border: 2px solid var(--line);
-  border-radius: 24px;
-  padding: 22px;
-  background: linear-gradient(180deg, rgba(255,255,255,.02), rgba(0,0,0,.06));
-  margin-bottom: 16px;
-}}
-.hero .topline {{
-  text-align:center; font-weight:900; font-size:1.08rem; letter-spacing:.06em;
-  color: var(--pink); margin-bottom: 10px;
-}}
-.hero .maincopy {{
-  text-align:center; font-weight:900; font-size:1.8rem; line-height:1.35; margin:.2rem 0 .9rem;
-}}
-.hero .maincopy .big3 {{ font-size:3rem; color:#fff; display:inline-block; transform:translateY(.04em); }}
-.hero .what {{ margin:10px 0 12px; border:2px solid var(--line); border-radius:18px; padding:12px; background:rgba(0,0,0,.12); }}
-.hero .what .title {{ font-weight:900; color:var(--pink); margin-bottom:4px; }}
-.hero .list {{ border:2px solid var(--line); border-radius:18px; padding:10px 12px; background:rgba(0,0,0,.10); }}
-.hero .list .title {{ font-weight:900; color:var(--pink); margin-bottom:4px; }}
+/* セクション内の multiselect を“ピル”に見せる */
+.stMultiSelect > div > div {{               /* コンテナ */
+  background: rgba(0,0,0,.10);
+  border: 1px solid rgba(255,255,255,.18);
+  border-radius: 16px;
+}
+.stMultiSelect [data-baseweb="tag"] {{      /* 選択済みピル */
+  background: linear-gradient(180deg,#ffbcd2,#ff99bc);
+  color:#3a2144;
+  border-radius: 999px;
+  font-weight: 900;
+}
+.stMultiSelect [data-baseweb="tag"] span {{ color:#3a2144; }}
 
-/* ---- 案内バッジ／CTA ---- */
-.badgebox, .badge-btn .stButton > button {{
-  border:2px solid var(--line); border-radius:18px; background:rgba(0,0,0,.08) !important;
-  padding:12px; color:#fff !important; width:100%;
-}}
-.badge-title {{ display:block; font-weight:900; font-size:1rem; }}
-.badge-desc  {{ display:block; color:var(--pink); font-weight:700; margin-top:4px; }}
-.badge-btn .stButton > button {{ white-space:normal !important; line-height:1.25; text-align:left; }}
+/* スライダーの文字色 */
+[data-baseweb="slider"] * {{ color:var(--text) !important; }}
 
-.cta-primary .stButton > button {{
-  width:100%; border-radius:999px; padding:12px 16px !important;
-  background:#FFFFFF !important; color:#18123F !important;
-  font-weight:900; border:0 !important; box-shadow:0 14px 26px rgba(0,0,0,.22) !important;
-}}
-.cta-ghost .stButton > button {{
-  width:100%; border-radius:999px; padding:12px 16px !important;
-  background:transparent !important; color:#FFFFFF !important;
-  border:2px solid var(--line) !important; font-weight:900; box-shadow:none !important;
-}}
-
-/* =========================================================
-   ここが肝：help属性(title)で完全に振り分けてスタイル適用
-   ========================================================= */
-
-/* --- EMOJI: 絵文字グリッド（白い正方形） --- */
-button[title="EMOJI"] {{
-  width:100% !important;
-  aspect-ratio:1/1 !important;
-  border-radius:18px !important;
-  font-size:1.55rem !important;
-  background:#fff !important; color:#111 !important;
-  border:1px solid #eadfff !important;
-  box-shadow:0 8px 16px rgba(12,13,30,.28) !important;
-}}
-/* 選択ONの見た目（キーカラー）*/
-button[title="EMOJI"].on, .emoji-on .stButton > button {{
-  background:linear-gradient(180deg,#ffc6a3,#ff9fbe)!important;
-  border:1px solid #ff80b0!important;
-}}
-
-/* --- TRIGGER: きっかけチップ（絵文字＋日本語を1枚に） --- */
-button[title="TRIGGER"] {{
-  display:flex !important; align-items:center !important; justify-content:flex-start !important;
-  gap:.55rem !important;
-  background:linear-gradient(180deg,#ffbcd2,#ff99bc) !important;
-  color:#3a2144 !important;
-  border:1px solid rgba(255,189,222,.35)!important;
-  padding:10px 14px !important; height:auto !important;
-  border-radius:999px!important; font-weight:900 !important;
-  box-shadow:0 10px 20px rgba(255,153,188,.12)!important;
-  white-space:nowrap !important;
-}}
-/* アイコンを少し大きく */
-button[title="TRIGGER"] span:first-child {{ font-size:1.1rem; }}
-/* 押下状態 */
-button[title="TRIGGER"]:active {{
-  transform: translateY(1px);
-}}
-
-/* --- NAV: 前へ／次へ（濃紺固定＝白四角を根絶） --- */
-button[title="NAV"] {{
-  background:rgba(0,0,0,.10) !important;
-  color:#ffffff !important;
-  border:2px solid var(--line) !important;
-  border-radius:14px !important;
-  padding:10px 18px !important;
-  font-weight:900 !important;
-  box-shadow:0 8px 18px rgba(0,0,0,.18) !important;
-}}
-
-/* ---- Sticky Navbar ---- */
+/* Sticky Navbar */
 .navbar {{
   position: sticky; top: 0; z-index: 1000;
   background: rgba(25,17,75,.82); backdrop-filter: blur(10px);
@@ -190,11 +96,50 @@ button[title="NAV"] {{
   background:#F4F4FF; border:2px solid #8A84FF;
 }}
 
-/* ---- Responsive ---- */
+/* ヒーロー */
+.hero {{
+  border: 2px solid var(--line);
+  border-radius: 24px;
+  padding: 22px;
+  background: linear-gradient(180deg, rgba(255,255,255,.02), rgba(0,0,0,.06));
+  margin-bottom: 16px;
+}}
+.hero .topline {{
+  text-align:center; font-weight:900; font-size:1.08rem; letter-spacing:.06em;
+  color: var(--pink); margin-bottom: 10px;
+}}
+.hero .maincopy {{
+  text-align:center; font-weight:900; font-size:1.8rem; line-height:1.35; margin:.2rem 0 .9rem;
+}}
+.hero .maincopy .big3 {{ font-size:3rem; color:#fff; display:inline-block; transform:translateY(.04em); }}
+
+/* CTA */
+.cta-primary .stButton > button {{
+  width:100%; border-radius:999px; padding:12px 16px !important;
+  background:#FFFFFF !important; color:#18123F !important;
+  font-weight:900; border:0 !important; box-shadow:0 14px 26px rgba(0,0,0,.22) !important;
+}}
+.cta-ghost .stButton > button {{
+  width:100%; border-radius:999px; padding:12px 16px !important;
+  background:transparent !important; color:#FFFFFF !important;
+  border:2px solid var(--line) !important; font-weight:900; box-shadow:none !important;
+}}
+
+/* デフォルトボタン（前へ/次へ/保存）は濃紺 */
+.stButton > button {{
+  background: rgba(0,0,0,.10) !important;
+  color:#ffffff !important;
+  border:1px solid rgba(255,255,255,.18) !important;
+  border-radius:14px !important;
+  padding:10px 14px !important;
+  font-weight:800 !important;
+  box-shadow: 0 8px 18px rgba(0,0,0,.18) !important;
+}}
+.stButton span {{ color:#ffffff !important; }}
+
+/* レスポンシブ */
 @media (max-width: 640px) {{
   .block-container {{ padding-left:1rem; padding-right:1rem; }}
-  .hero .maincopy {{ font-size:1.6rem; }}
-  .hero .maincopy .big3 {{ font-size:2.6rem; }}
 }}
 </style>
 """
@@ -265,31 +210,29 @@ ensure_cbt_defaults(); ensure_reflection_defaults()
 
 # ---------------- Helpers ----------------
 def vibrate(ms=8):
-    st.markdown("<script>try{navigator.vibrate&&navigator.vibrate(%d)}catch(e){{}}</script>"%ms, unsafe_allow_html=True)
+    st.markdown("<script>try{{navigator.vibrate&&navigator.vibrate({ms})}}catch(e){{}}</script>", unsafe_allow_html=True)
 
-def companion(emoji: str, text: str, sub: Optional[str]=None):
-    st.markdown(
-        f"""
+def support(distress: Optional[int]=None, lonely: Optional[int]=None):
+    def card(emoji: str, text: str, sub: Optional[str]=None):
+        st.markdown(
+            f"""
 <div class="card" style="margin-top:6px;margin-bottom:8px">
   <div style="font-weight:900; color:var(--pink)">{emoji} {text}</div>
   {f"<div class='small' style='margin-top:2px; color:var(--muted)'>{sub}</div>" if sub else ""}
 </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-def support(distress: Optional[int]=None, lonely: Optional[int]=None):
+            """,
+            unsafe_allow_html=True,
+        )
     if distress is not None and distress >= 7:
-        companion("🫶","ここでは、がんばらなくて大丈夫です。","ご自身のペースで進めていただければ十分です。")
+        card("🫶","ここでは、がんばらなくて大丈夫です。","ご自身のペースで進めていただければ十分です。")
     elif lonely is not None and lonely >= 7:
-        companion("🤝","この瞬間、ひとりではありません。","深呼吸をひとつして、ゆっくり進めましょう。")
+        card("🤝","この瞬間、ひとりではありません。","深呼吸をひとつして、ゆっくり進めましょう。")
     else:
-        companion("🌟","ここまで入力いただけて十分です。","空欄があっても大丈夫です。")
+        card("🌟","ここまで入力いただけて十分です。","空欄があっても大丈夫です。")
 
 # ---------------- Top Nav ----------------
 def top_nav():
     st.markdown('<div class="navbar">', unsafe_allow_html=True)
-
     keys = ["INTRO","HOME","CBT","REFLECT","HISTORY","EXPORT"]
     labels = {
         "INTRO":   "👋 はじめに — 最初の説明",
@@ -299,103 +242,68 @@ def top_nav():
         "HISTORY": "📚 記録を見る — 保存した一覧",
         "EXPORT":  "⬇️ エクスポート — CSV・設定",
     }
-
     current = st.session_state.get("view","INTRO")
     idx = keys.index(current) if current in keys else 0
-
-    choice = st.radio(
-        "移動先",
-        options=keys,
-        index=idx,
-        format_func=lambda k: labels[k],
-        horizontal=True,
-        label_visibility="collapsed",
-        key="nav_radio",
-    )
+    choice = st.radio("移動先", options=keys, index=idx,
+                      format_func=lambda k: labels[k], horizontal=True,
+                      label_visibility="collapsed", key="nav_radio")
     st.session_state.view = choice
     st.markdown('</div>', unsafe_allow_html=True)
 
-# ---------------- Emoji & Chips ----------------
-EMOJIS = ["😟","😡","😢","😔","😤","😴","🙂","🤷‍♀️"]
-
-def emoji_toggle_grid(selected: List[str]) -> List[str]:
-    st.caption("いまの気持ちをタップ（複数OK／途中でやめてもOK）")
-    chosen = set(selected)
-    cols = st.columns(8 if len(EMOJIS) >= 8 else len(EMOJIS))
-    for i, e in enumerate(EMOJIS):
-        with cols[i % len(cols)]:
-            on = e in chosen
-            # ボタン本体（title=EMOJI で確実にスタイル適用）
-            if st.button(f"{e}", key=f"emo_{i}", use_container_width=True, help="EMOJI"):
-                if on: chosen.remove(e)
-                else: chosen.add(e)
-                vibrate(8)
-    sel = " ".join(list(chosen)) if chosen else "（未選択）"
-    st.caption(f"選択中：{sel}")
-    return list(chosen)
-
-TRIGGER_DEFS = [
-    ("⏱️ さっきの出来事", "time"),
-    ("🧠 浮かんだ一言", "thought_line"),
-    ("🤝 人との関係", "relationship"),
-    ("🫀 体のサイン", "body"),
-    ("🌀 うまく言えない", "unknown"),
+# ------------- 安定版UI：multiselectでチップを表現 -------------
+EMOJIS: List[Tuple[str,str]] = [
+    ("😟","不安"),("😡","怒り"),("😢","悲しみ"),("😔","落ち込み"),
+    ("😤","イライラ"),("😴","疲れ"),("🙂","安心"),("🤷‍♀️","戸惑い"),
 ]
 
-def trigger_chip_row(selected: List[str]) -> List[str]:
-    st.caption("言葉にしづらい時は、近いものだけタップで結構です。")
-    cols = st.columns(len(TRIGGER_DEFS))
-    chosen = set(selected)
-    for i,(label,val) in enumerate(TRIGGER_DEFS):
-        with cols[i]:
-            on = val in chosen
-            # title=TRIGGER を使って「絵文字＋日本語」が同じ1枚のピルに必ず表示される
-            if st.button(label + (" ✓" if on else ""), key=f"trg_{val}", use_container_width=True, help="TRIGGER"):
-                if on: chosen.remove(val)
-                else: chosen.add(val)
-                vibrate(6)
-    return list(chosen)
+TRIGGER_DEFS: List[Tuple[str,str]] = [
+    ("⏱️","さっきの出来事"),
+    ("🧠","浮かんだ一言"),
+    ("🤝","人との関係"),
+    ("🫀","体のサイン"),
+    ("🌀","うまく言えない"),
+]
 
-# ---------------- 一言挿入 ----------------
-def append_to_textarea(ss_key: str, phrase: str):
-    cur = st.session_state.cbt.get(ss_key, "") or ""
-    glue = "" if (cur.strip() == "" or cur.strip().endswith(("。","!","！"))) else " "
-    st.session_state.cbt[ss_key] = (cur + glue + phrase).strip()
+def emoji_selector(selected: List[str]) -> List[str]:
+    # 表示用ラベル（"😟 不安" など）
+    options = [f"{e} {t}" for e,t in EMOJIS]
+    default_labels = [f"{e} {t}" for e,t in EMOJIS if e in selected]
+    picked = st.multiselect("いまの気持ちをタップ（複数OK／途中でやめてもOK）",
+                            options=options, default=default_labels)
+    # 返却は絵文字のみ
+    out = []
+    for p in picked:
+        emo = p.split(" ",1)[0]
+        out.append(emo)
+    st.caption(f"選択中：{' '.join(out) if out else '（未選択）'}")
+    return out
 
-CHECK_LABELS = {
-    "bw":          "0/100で考えていたかも",
-    "catastrophe": "最悪の状態を想定していたかも",
-    "fortune":     "先の展開を一つに決めていたかも",
-    "emotion":     "感情が先に走っているかも",
-    "decide":      "決めつけてしまっていたかも",
-}
-TIP_MAP = {
-    "bw":          "🌷 部分的にOKも、あるかもしれません。",
-    "catastrophe": "☁️ 他の展開もあるかもしれません。",
-    "fortune":     "🎈 他の展開になればラッキーですね。",
-    "emotion":     "🫶 気持ちはそのまま、事実はそっと分けておくのもありかもしれません。",
-    "decide":      "🌿 分からない場合はいったん保留にするのもありですね。",
-}
-
-def render_checks_and_tips():
-    g = st.session_state.cbt.setdefault("checks", {})
-    cols = st.columns(2)
-    keys = list(CHECK_LABELS.keys())
-    for i, k in enumerate(keys):
-        with cols[i % 2]:
-            g[k] = st.checkbox(CHECK_LABELS[k], value=bool(g.get(k, False)))
-    st.session_state.cbt["checks"] = g
-
-    on_keys = [k for k,v in g.items() if v]
-    if on_keys:
-        st.write("💡 タップで“ほかの見方”に挿入できます")
-        tip_cols = st.columns(min(4, len(on_keys)))
-        for i, k in enumerate(on_keys):
-            tip = TIP_MAP.get(k, "")
-            if not tip: continue
-            with tip_cols[i % len(tip_cols)]:
-                if st.button(tip, key=f"tip_{k}", use_container_width=True, help="TRIGGER"):
-                    append_to_textarea("alt", tip); vibrate(6)
+def trigger_selector(selected: List[str]) -> List[str]:
+    options = [f"{e} {t}" for e,t in TRIGGER_DEFS]
+    default_labels = []
+    # selected は valueキー（"time" など）ではなく既存の表示名に合わせる
+    val_map = {
+        "time":"⏱️ さっきの出来事",
+        "thought_line":"🧠 浮かんだ一言",
+        "relationship":"🤝 人との関係",
+        "body":"🫀 体のサイン",
+        "unknown":"🌀 うまく言えない"
+    }
+    for v in selected:
+        if v in val_map: default_labels.append(val_map[v])
+    picked = st.multiselect("言葉にしづらい時は、近いものだけタップで結構です。",
+                            options=options, default=default_labels)
+    back = []
+    label_to_value = {
+        "⏱️ さっきの出来事":"time",
+        "🧠 浮かんだ一言":"thought_line",
+        "🤝 人との関係":"relationship",
+        "🫀 体のサイン":"body",
+        "🌀 うまく言えない":"unknown",
+    }
+    for p in picked:
+        if p in label_to_value: back.append(label_to_value[p])
+    return back
 
 # ---------------- INTRO ----------------
 def view_intro():
@@ -407,32 +315,11 @@ def view_intro():
     たった <span class="big3">3</span> ステップで<br>
     気持ちを整理して、少し落ち着こう。
   </div>
-  <div class="what">
+  <div class="what" style="margin-top:10px">
     <div class="title">これは何？</div>
     <div>しんどい夜に、短時間で“見方”を整えるノート。<br>
     正解探しではなく、気持ちを整える時間を届けます。</div>
   </div>
-</div>
-""", unsafe_allow_html=True)
-
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.markdown('<div class="badge-btn">', unsafe_allow_html=True)
-        if st.button("▶ はじめる\n— 約2分で完了 —", key="go_start", use_container_width=True):
-            st.session_state.view="CBT"; st.session_state.cbt_step=1; st.session_state.cbt_guided=True
-        st.caption("※ はじめての方はここ")
-        st.markdown('</div>', unsafe_allow_html=True)
-    with c2:
-        st.markdown('<div class="badge-btn">', unsafe_allow_html=True)
-        if st.button("👣 3ステップで進む\n— 案内つき —", key="go_3step", use_container_width=True):
-            st.session_state.view="CBT"; st.session_state.cbt_step=1; st.session_state.cbt_guided=True
-        st.caption("迷わず順番に進めます")
-        st.markdown('</div>', unsafe_allow_html=True)
-    with c3:
-        st.markdown("""
-<div class="badgebox">
-  <span class="badge-title">🔒 この端末のみ保存</span>
-  <span class="badge-desc">途中でやめてもOK／医療・診断ではありません</span>
 </div>
 """, unsafe_allow_html=True)
 
@@ -477,8 +364,7 @@ def _cbt_step_header():
 def _cbt_step1():
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.subheader("① いまの気持ちをえらぶ")
-    st.caption("当てはまる顔をタップ（複数OK／途中でやめてもOK）")
-    st.session_state.cbt["emotions"] = emoji_toggle_grid(st.session_state.cbt.get("emotions", []))
+    st.session_state.cbt["emotions"] = emoji_selector(st.session_state.cbt.get("emotions", []))
     st.markdown('</div>', unsafe_allow_html=True)
 
     st.markdown('<div class="card">', unsafe_allow_html=True)
@@ -494,7 +380,7 @@ def _cbt_step1():
 def _cbt_step2():
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.subheader("② きっかけをえらぶ（近いものでOK）")
-    st.session_state.cbt["trigger_tags"] = trigger_chip_row(st.session_state.cbt.get("trigger_tags", []))
+    st.session_state.cbt["trigger_tags"] = trigger_selector(st.session_state.cbt.get("trigger_tags", []))
     st.session_state.cbt["trigger_free"] = st.text_area(
         "任意の一言（なくてOK）",
         value=st.session_state.cbt.get("trigger_free",""),
@@ -516,7 +402,16 @@ def _cbt_step3():
                                                   placeholder="例）移動中かも／前も夜に返ってきた など", height=108)
     st.subheader("視界をひろげる小さなチェック")
     st.caption("当てはまるものだけ軽くオンに。合わなければスルーでOK。")
-    render_checks_and_tips()
+    g = st.session_state.cbt.setdefault("checks", {})
+    c1,c2 = st.columns(2)
+    with c1:
+        g["bw"] = st.checkbox("0/100で考えていたかも", value=bool(g.get("bw", False)))
+        g["fortune"] = st.checkbox("先の展開を一つに決めていたかも", value=bool(g.get("fortune", False)))
+        g["decide"] = st.checkbox("決めつけてしまっていたかも", value=bool(g.get("decide", False)))
+    with c2:
+        g["catastrophe"] = st.checkbox("最悪の状態を想定していたかも", value=bool(g.get("catastrophe", False)))
+        g["emotion"] = st.checkbox("感情が先に走っているかも", value=bool(g.get("emotion", False)))
+    st.session_state.cbt["checks"] = g
 
     starters = [
         "分からない部分は保留にします。",
@@ -539,7 +434,7 @@ def _cbt_step3():
     st.markdown('<div class="card">', unsafe_allow_html=True)
     c1,c2 = st.columns(2)
     with c1:
-        if st.button("💾 保存して完了（入力欄を初期化）", help="NAV"):
+        if st.button("💾 保存して完了（入力欄を初期化）"):
             now = datetime.now().isoformat(timespec="seconds")
             g = st.session_state.cbt["checks"]
             row = {
@@ -565,7 +460,7 @@ def _cbt_step3():
             st.session_state.cbt_step = 1
             st.success("保存いたしました。ここで完了です。行動は決めなくて大丈夫です。")
     with c2:
-        if st.button("🧼 入力欄のみ初期化（未保存分は消去）", help="NAV"):
+        if st.button("🧼 入力欄のみ初期化（未保存分は消去）"):
             st.session_state.cbt = {}; ensure_cbt_defaults()
             st.info("入力欄を初期化いたしました（記録は残っています）。")
     st.markdown('</div>', unsafe_allow_html=True)
@@ -574,10 +469,10 @@ def _cbt_nav_buttons():
     step = st.session_state.cbt_step; total = 3
     prev_col, next_col = st.columns(2)
     with prev_col:
-        if st.button("← 前へ", disabled=(step<=1), help="NAV"):
+        if st.button("← 前へ", disabled=(step<=1)):
             st.session_state.cbt_step = max(1, step-1); vibrate(5)
     with next_col:
-        if st.button(("完了へ →" if step==total else "次へ →"), help="NAV"):
+        if st.button(("完了へ →" if step==total else "次へ →")):
             st.session_state.cbt_step = min(total, step+1); vibrate(7)
 
 def view_cbt():
@@ -588,13 +483,12 @@ def view_cbt():
     if not st.session_state.cbt_guided:
         st.markdown('<div class="card">', unsafe_allow_html=True)
         st.subheader("いまの気持ちをえらぶ")
-        st.caption("当てはまる顔をタップ（複数OK／途中でやめてもOK）")
-        st.session_state.cbt["emotions"] = emoji_toggle_grid(st.session_state.cbt.get("emotions", []))
+        st.session_state.cbt["emotions"] = emoji_selector(st.session_state.cbt.get("emotions", []))
         st.markdown('</div>', unsafe_allow_html=True)
 
         st.markdown('<div class="card">', unsafe_allow_html=True)
         st.subheader("この気持ち、近かったきっかけは？")
-        st.session_state.cbt["trigger_tags"] = trigger_chip_row(st.session_state.cbt.get("trigger_tags", []))
+        st.session_state.cbt["trigger_tags"] = trigger_selector(st.session_state.cbt.get("trigger_tags", []))
         st.session_state.cbt["trigger_free"] = st.text_area(
             "任意の一言（なくてOK）", value=st.session_state.cbt.get("trigger_free",""),
             placeholder="例）返信がまだ／『また失敗する』と浮かんだ など", height=72
@@ -632,7 +526,7 @@ def view_reflect():
 
     c1,c2 = st.columns(2)
     with c1:
-        if st.button("💾 保存（入力欄を初期化）", help="NAV"):
+        if st.button("💾 保存（入力欄を初期化）"):
             now = datetime.now().isoformat(timespec="seconds")
             dv = st.session_state.reflection["date"]
             date_str = dv.isoformat() if isinstance(dv,(date,datetime)) else str(dv)
@@ -645,7 +539,7 @@ def view_reflect():
             st.session_state.reflection = {}; ensure_reflection_defaults()
             st.success("保存いたしました。")
     with c2:
-        if st.button("🧼 入力欄のみ初期化（未保存分は消去）", help="NAV"):
+        if st.button("🧼 入力欄のみ初期化（未保存分は消去）"):
             st.session_state.reflection = {}; ensure_reflection_defaults()
             st.info("入力欄を初期化いたしました（記録は残っています）。")
 
@@ -686,15 +580,6 @@ def view_history():
                 st.caption(f"しんどさ: {b} → {a} ／ 体感の確からしさ: {pb}% → {pa}%")
             except Exception:
                 pass
-            tags=[]
-            if r.get("bw",False): tags.append("0/100")
-            if r.get("catastrophe",False): tags.append("最悪想定")
-            if r.get("fortune",False): tags.append("結末決め打ち")
-            if r.get("emotion",False): tags.append("感情先行")
-            if r.get("decide",False): tags.append("言い切り")
-            if tags:
-                st.markdown(" " .join([f"<span class='tag' style='display:inline-block;padding:6px 12px;border:1px solid #3a3d66;border-radius:999px;background:#21224a;color:#ffdfef;font-weight:800;margin-right:6px'>{t}</span>" for t in tags]), unsafe_allow_html=True)
-            st.markdown('</div>', unsafe_allow_html=True)
         try:
             chart = df[["ts","distress_before","distress_after"]].copy()
             chart["ts"] = pd.to_datetime(chart["ts"])
@@ -752,13 +637,13 @@ def view_export():
     st.markdown("**入力欄の初期化 / データの管理**")
     c1,c2 = st.columns(2)
     with c1:
-        if st.button("🧼 入力欄のみすべて初期化（記録は残ります）", help="NAV"):
+        if st.button("🧼 入力欄のみすべて初期化（記録は残ります）"):
             st.session_state.cbt = {}; st.session_state.reflection = {}
             ensure_cbt_defaults(); ensure_reflection_defaults()
             st.success("入力欄を初期化いたしました。記録は残っています。")
     with c2:
         danger = st.checkbox("⚠️ すべての保存データ（CSV）を削除することに同意します")
-        if st.button("🗑️ すべての保存データを削除（取り消し不可）", disabled=not danger, help="NAV"):
+        if st.button("🗑️ すべての保存データを削除（取り消し不可）", disabled=not danger):
             try:
                 if CBT_CSV.exists(): CBT_CSV.unlink()
                 if REFLECT_CSV.exists(): REFLECT_CSV.unlink()
