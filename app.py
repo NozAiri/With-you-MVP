@@ -25,15 +25,15 @@ PINK = "#FBDDD3"
 NAVY = "#19114B"
 
 def inject_css():
-    st.markdown(f"""
+    css = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;600;700;900&display=swap');
 
 :root {{
-  --bg:{NAVY};
+  --bg:{navy};
   --text:#FFFFFF;
   --muted:rgba(255,255,255,.75);
-  --pink:{PINK};
+  --pink:{pink};
   --panel:#221A63;
   --line:rgba(251,221,211,.55);
 }}
@@ -131,135 +131,19 @@ textarea, input, .stTextInput>div>div>input{{
 }}
 .emoji-on>button{{ background:linear-gradient(180deg,#ffc6a3,#ff9fbe)!important; border:1px solid #ff80b0!important; }}
 
-@media (max-width: 980px){{ .topnav{{grid-template-columns: repeat(3,1fr);} } }
-@media (max-width: 640px){{
-  .emoji-grid{{grid-template-columns:repeat(4,1fr)}}
-  .block-container{{padding-left:1rem; padding-right:1rem}}
-  .hero .maincopy{{ font-size:1.7rem; }}
-  .hero .maincopy .big3{{ font-size:2.8rem; }}
+/* ▼ メディアクエリ（ここは全部 {{ }} でエスケープ） */
+@media (max-width: 980px) {{
+  .topnav {{ grid-template-columns: repeat(3,1fr); }}
+}}
+@media (max-width: 640px) {{
+  .emoji-grid {{ grid-template-columns: repeat(4,1fr); }}
+  .block-container {{ padding-left:1rem; padding-right:1rem; }}
+  .hero .maincopy {{ font-size:1.7rem; }}
+  .hero .maincopy .big3 {{ font-size:2.8rem; }}
 }}
 </style>
-""", unsafe_allow_html=True)
-
-def inject_css():
-    st.markdown(f"""
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;600;700;900&display=swap');
-
-:root {{
-  --bg:{NAVY};
-  --text:#FFFFFF;
-  --muted:rgba(255,255,255,.75);
-  --pink:{PINK};
-  --panel:#221A63;
-  --line:rgba(251,221,211,.55);
-}}
-html, body, .stApp {{ background:var(--bg); }}
-.block-container {{ max-width:980px; padding-top:.6rem; padding-bottom:3.2rem; }}
-* {{ font-family:"Zen Maru Gothic", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }}
-h1,h2,h3,p,li,label,.stMarkdown,.stTextInput,.stTextArea {{ color:var(--text); }}
-small {{ color:var(--muted); }}
-
-/* Top Nav（言葉つき） */
-.topbar {{
-  position:sticky; top:0; z-index:10;
-  background: rgba(25,17,75,.55); backdrop-filter: blur(8px);
-  border-bottom: 1px solid rgba(255,255,255,.08);
-  margin: 0 -12px 12px; padding: 8px 12px 10px;
-}}
-.topnav {{ display:grid; grid-template-columns: repeat(6,1fr); gap:8px; }}
-.navbtn > button {{
-  background:#FFFFFF !important; color:#1b1742 !important;
-  border:1px solid rgba(0,0,0,.06) !important;
-  border-radius:14px !important; padding:10px 10px !important; height:auto !important;
-  text-align:left !important; box-shadow:none !important;
-}}
-.navbtn .label {{ display:block; font-weight:900; font-size:.96rem; }}
-.navbtn .sub   {{ display:block; color:#5b5b8a; font-size:.78rem; margin-top:2px; }}
-.navbtn.active > button {{ background:#F4F4FF !important; border:2px solid #8A84FF !important; }}
-
-/* Card */
-.card {{
-  background: var(--panel);
-  border: 2px solid var(--line);
-  border-radius: 22px;
-  padding: 18px;
-  box-shadow: 0 22px 44px rgba(0,0,0,.25);
-}}
-
-/* HERO */
-.hero {{
-  border: 2px solid var(--line);
-  border-radius: 24px;
-  padding: 26px 22px;
-  background: linear-gradient(180deg, rgba(255,255,255,.02), rgba(0,0,0,.06));
-}}
-.hero .topline {{
-  text-align:center; font-weight:900; font-size:1.14rem; letter-spacing:.08em;
-  color: var(--pink); margin-bottom: 14px;
-}}
-.hero .maincopy {{
-  text-align:center; font-weight:900; font-size:1.9rem; line-height:1.4;
-  margin: .2rem 0 1.1rem;
-}}
-.hero .maincopy .big3 {{ font-size:3.2rem; color:#fff; display:inline-block; transform:translateY(.06em); }}
-.hero .what {{ margin:12px 0 16px; border:2px solid var(--line); border-radius:18px; padding:14px; background:rgba(0,0,0,.12); }}
-.hero .what .title {{ font-weight:900; color:var(--pink); margin-bottom:6px; }}
-.hero .badges {{ display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin:10px 0 8px; }}
-.badgebox, .badge-btn > button {{
-  border:2px solid var(--line); border-radius:18px; background:rgba(0,0,0,.08);
-  padding:12px 12px; color:#fff;
-}}
-.badge-title {{ display:block; font-weight:900; font-size:1.02rem; }}
-.badge-desc  {{ display:block; color:var(--pink); font-weight:700; margin-top:4px; }}
-.badge-btn > button {{ width:100%; white-space:normal !important; line-height:1.25; text-align:left; }}
-.hero .list {{ border:2px solid var(--line); border-radius:18px; padding:12px 14px; background:rgba(0,0,0,.10); }}
-.hero .list .title {{ font-weight:900; color:var(--pink); margin-bottom:6px; }}
-
-/* CTA */
-.cta-primary .stButton > button {{
-  width:100%; border-radius:999px; padding:14px 16px;
-  background:#FFFFFF !important; color:#18123F !important;
-  font-weight:900; border:0 !important; box-shadow:0 16px 28px rgba(0,0,0,.25);
-}}
-.cta-ghost .stButton > button {{
-  width:100%; border-radius:999px; padding:14px 16px;
-  background:transparent !important; color:#FFFFFF !important;
-  border:2px solid var(--line) !important; font-weight:900; box-shadow:none !important;
-}}
-
-/* 入力系 */
-textarea, input, .stTextInput>div>div>input{{
-  border-radius:14px!important; background:#0f0f23; color:#f0eeff; border:1px solid #3a3d66;
-}}
-.stSlider,.stRadio>div{{ color:var(--text) }}
-
-/* Chips / Emoji */
-.chips{{display:flex; gap:8px; flex-wrap:wrap; margin:8px 0 10px}}
-.chips .chip-btn>button{{
-  background:linear-gradient(180deg,#ffbcd2,#ff99bc); color:#3a2144;
-  border:1px solid rgba(255,189,222,.35)!important; padding:10px 14px; height:auto;
-  border-radius:999px!important; font-weight:900; box-shadow:0 10px 20px rgba(255,153,188,.12)
-}}
-.emoji-grid{{display:grid; grid-template-columns:repeat(8,1fr); gap:10px; margin:8px 0 6px}}
-.emoji-btn>button{{ width:100%!important; aspect-ratio:1/1; border-radius:18px!important;
-  font-size:1.55rem!important; background:#fff; color:#111;
-  border:1px solid #eadfff!important; box-shadow:0 8px 16px rgba(12,13,30,.28);
-}}
-.emoji-on>button{{ background:linear-gradient(180deg,#ffc6a3,#ff9fbe)!important; border:1px solid #ff80b0!important; }}
-
-/* ▼▼ ここが修正ポイント：f-stringの波かっこは2重にする ▼▼ */
-@media (max-width: 980px){{ 
-  .topnav{{ grid-template-columns: repeat(3,1fr); }}
-}}
-@media (max-width: 640px){{ 
-  .emoji-grid{{grid-template-columns:repeat(4,1fr)}}
-  .block-container{{padding-left:1rem; padding-right:1rem}}
-  .hero .maincopy{{ font-size:1.7rem; }}
-  .hero .maincopy .big3{{ font-size:2.8rem; }}
-}}
-</style>
-""", unsafe_allow_html=True)
+""".format(navy=NAVY, pink=PINK)
+    st.markdown(css, unsafe_allow_html=True)
 
 def support(distress: Optional[int]=None, lonely: Optional[int]=None):
     if distress is not None and distress >= 7:
