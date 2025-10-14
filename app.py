@@ -1,4 +1,4 @@
-# app.py — Sora 2分ノート（言葉で分かるUI／タブ式ナビ・完全版）
+# app.py — Sora 2分ノート（空白除去＆文字つきUI／完全版）
 
 from datetime import datetime, date
 from pathlib import Path
@@ -33,57 +33,62 @@ def inject_css():
   --line:rgba(251,221,211,.55);
 }}
 html, body, .stApp {{ background:var(--bg); }}
-.block-container {{ max-width:980px; padding-top:.6rem; padding-bottom:3.2rem; }}
+.block-container {{ max-width:980px; padding-top:.6rem; padding-bottom:2.2rem; }}
 * {{ font-family:"Zen Maru Gothic", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }}
 h1,h2,h3,p,li,label,.stMarkdown,.stTextInput,.stTextArea {{ color:var(--text); }}
 small {{ color:var(--muted); }}
+
+/* 余計な空白を消す */
+.stMarkdown p:empty, .stMarkdown div:empty {{ display:none !important; }}
+section.main > div:empty {{ display:none !important; }}
 
 /* ---------- Card ---------- */
 .card {{
   background: var(--panel);
   border: 2px solid var(--line);
   border-radius: 22px;
-  padding: 18px;
-  box-shadow: 0 22px 44px rgba(0,0,0,.25);
+  padding: 16px 18px;
+  box-shadow: 0 18px 40px rgba(0,0,0,.22);
+  margin-bottom: 14px;
 }}
 
-/* ---------- HERO（ポスター） ---------- */
+/* ---------- HERO（導入） ---------- */
 .hero {{
   border: 2px solid var(--line);
   border-radius: 24px;
-  padding: 26px 22px;
+  padding: 22px;
   background: linear-gradient(180deg, rgba(255,255,255,.02), rgba(0,0,0,.06));
+  margin-bottom: 16px;
 }}
 .hero .topline {{
-  text-align:center; font-weight:900; font-size:1.14rem; letter-spacing:.08em;
-  color: var(--pink); margin-bottom: 14px;
+  text-align:center; font-weight:900; font-size:1.08rem; letter-spacing:.06em;
+  color: var(--pink); margin-bottom: 10px;
 }}
 .hero .maincopy {{
-  text-align:center; font-weight:900; font-size:1.9rem; line-height:1.4;
-  margin: .2rem 0 1.1rem;
+  text-align:center; font-weight:900; font-size:1.8rem; line-height:1.35; margin:.2rem 0 .9rem;
 }}
-.hero .maincopy .big3 {{ font-size:3.2rem; color:#fff; display:inline-block; transform:translateY(.06em); }}
-.hero .what {{ margin:12px 0 16px; border:2px solid var(--line); border-radius:18px; padding:14px; background:rgba(0,0,0,.12); }}
-.hero .what .title {{ font-weight:900; color:var(--pink); margin-bottom:6px; }}
-.hero .badges {{ display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin:10px 0 8px; }}
+.hero .maincopy .big3 {{ font-size:3rem; color:#fff; display:inline-block; transform:translateY(.04em); }}
+.hero .what {{ margin:10px 0 12px; border:2px solid var(--line); border-radius:18px; padding:12px; background:rgba(0,0,0,.12); }}
+.hero .what .title {{ font-weight:900; color:var(--pink); margin-bottom:4px; }}
+.hero .badges {{ display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin:8px 0 6px; }}
 .badgebox, .badge-btn > button {{
   border:2px solid var(--line); border-radius:18px; background:rgba(0,0,0,.08);
-  padding:12px 12px; color:#fff;
+  padding:12px; color:#fff;
 }}
-.badge-title {{ display:block; font-weight:900; font-size:1.02rem; }}
+.badge-title {{ display:block; font-weight:900; font-size:1rem; }}
 .badge-desc  {{ display:block; color:var(--pink); font-weight:700; margin-top:4px; }}
 .badge-btn > button {{ width:100%; white-space:normal !important; line-height:1.25; text-align:left; }}
-.hero .list {{ border:2px solid var(--line); border-radius:18px; padding:12px 14px; background:rgba(0,0,0,.10); }}
-.hero .list .title {{ font-weight:900; color:var(--pink); margin-bottom:6px; }}
+.hero .list {{ border:2px solid var(--line); border-radius:18px; padding:10px 12px; background:rgba(0,0,0,.10); }}
+.hero .list .title {{ font-weight:900; color:var(--pink); margin-bottom:4px; }}
 
 /* ---------- CTA ---------- */
 .cta-primary .stButton > button {{
-  width:100%; border-radius:999px; padding:14px 16px;
+  width:100%; border-radius:999px; padding:12px 16px;
   background:#FFFFFF !important; color:#18123F !important;
-  font-weight:900; border:0 !important; box-shadow:0 16px 28px rgba(0,0,0,.25);
+  font-weight:900; border:0 !important; box-shadow:0 14px 26px rgba(0,0,0,.22);
 }}
 .cta-ghost .stButton > button {{
-  width:100%; border-radius:999px; padding:14px 16px;
+  width:100%; border-radius:999px; padding:12px 16px;
   background:transparent !important; color:#FFFFFF !important;
   border:2px solid var(--line) !important; font-weight:900; box-shadow:none !important;
 }}
@@ -95,13 +100,13 @@ textarea, input, .stTextInput>div>div>input{{
 .stSlider,.stRadio>div{{ color:var(--text) }}
 
 /* ---------- Chips / Emoji ---------- */
-.chips{{display:flex; gap:8px; flex-wrap:wrap; margin:8px 0 10px}}
+.chips{{display:flex; gap:8px; flex-wrap:wrap; margin:8px 0 4px}}
 .chips .chip-btn>button{{
   background:linear-gradient(180deg,#ffbcd2,#ff99bc); color:#3a2144;
-  border:1px solid rgba(255,189,222,.35)!important; padding:10px 14px; height:auto;
+  border:1px solid rgba(255,189,222,.35)!important; padding:8px 12px; height:auto;
   border-radius:999px!important; font-weight:900; box-shadow:0 10px 20px rgba(255,153,188,.12)
 }}
-.emoji-grid{{display:grid; grid-template-columns:repeat(8,1fr); gap:10px; margin:8px 0 6px}}
+.emoji-grid{{display:grid; grid-template-columns:repeat(8,1fr); gap:10px; margin:8px 0 2px}}
 .emoji-btn>button{{ width:100%!important; aspect-ratio:1/1; border-radius:18px!important;
   font-size:1.55rem!important; background:#fff; color:#111;
   border:1px solid #eadfff!important; box-shadow:0 8px 16px rgba(12,13,30,.28);
@@ -112,15 +117,14 @@ textarea, input, .stTextInput>div>div>input{{
 .navbar {{
   position: sticky; top: 0; z-index: 10;
   background: rgba(25,17,75,.72); backdrop-filter: blur(8px);
-  margin: 0 -12px 12px; padding: 8px 12px 10px;
+  margin: 0 -12px 10px; padding: 8px 12px 8px;
   border-bottom: 1px solid rgba(255,255,255,.08);
 }}
 .navbar .stRadio [role="radiogroup"] {{ gap: 8px; flex-wrap: wrap; }}
 .navbar label {{
   background:#fff; color:#1b1742; border:1px solid rgba(0,0,0,.06);
-  border-radius:12px; padding:10px 12px; font-weight:800;
+  border-radius:12px; padding:8px 10px; font-weight:800;
 }}
-/* checked state */
 .navbar input:checked + div label {{
   background:#F4F4FF; border:2px solid #8A84FF;
 }}
@@ -129,8 +133,8 @@ textarea, input, .stTextInput>div>div>input{{
 @media (max-width: 640px) {{
   .emoji-grid {{ grid-template-columns: repeat(4,1fr); }}
   .block-container {{ padding-left:1rem; padding-right:1rem; }}
-  .hero .maincopy {{ font-size:1.7rem; }}
-  .hero .maincopy .big3 {{ font-size:2.8rem; }}
+  .hero .maincopy {{ font-size:1.6rem; }}
+  .hero .maincopy .big3 {{ font-size:2.6rem; }}
 }}
 </style>
 """.format(navy=NAVY, pink=PINK)
@@ -145,10 +149,8 @@ REFLECT_CSV = DATA_DIR / "daily_reflections.csv"
 
 def _load_csv(p: Path) -> pd.DataFrame:
     if p.exists():
-        try:
-            return pd.read_csv(p)
-        except Exception:
-            return pd.DataFrame()
+        try: return pd.read_csv(p)
+        except Exception: return pd.DataFrame()
     return pd.DataFrame()
 
 def _append_csv(p: Path, row: dict):
@@ -157,8 +159,8 @@ def _append_csv(p: Path, row: dict):
     df.to_csv(p, index=False)
 
 def _download_button(df: pd.DataFrame, label: str, filename: str):
-    if df.empty:
-        st.caption("（まだデータはございません）")
+    if df.empty: 
+        st.caption("（まだデータはございません）"); 
         return
     st.download_button(label, df.to_csv(index=False).encode("utf-8"),
                        file_name=filename, mime="text/csv")
@@ -195,10 +197,8 @@ def ensure_reflection_defaults():
     r.setdefault("loneliness",5)
     d = r.get("date", date.today())
     if isinstance(d, str):
-        try:
-            d = date.fromisoformat(d)
-        except Exception:
-            d = date.today()
+        try: d = date.fromisoformat(d)
+        except Exception: d = date.today()
     r["date"] = d
 
 st.session_state.setdefault("view","INTRO")
@@ -207,18 +207,15 @@ st.session_state.setdefault("cbt_guided", True) # ガイドON
 ensure_cbt_defaults(); ensure_reflection_defaults()
 
 # ---------------- Helpers ----------------
-def vibrate(ms=10):
-    st.markdown(
-        "<script>try{navigator.vibrate&&navigator.vibrate(%d)}catch(e){{}}</script>" % ms,
-        unsafe_allow_html=True,
-    )
+def vibrate(ms=8):
+    st.markdown("<script>try{navigator.vibrate&&navigator.vibrate(%d)}catch(e){{}}</script>"%ms, unsafe_allow_html=True)
 
 def companion(emoji: str, text: str, sub: Optional[str]=None):
     st.markdown(
         f"""
-<div class="card">
+<div class="card" style="margin-top:6px;margin-bottom:8px">
   <div style="font-weight:900; color:var(--pink)">{emoji} {text}</div>
-  {f"<div class='small' style='margin-top:4px; color:var(--muted)'>{sub}</div>" if sub else ""}
+  {f"<div class='small' style='margin-top:2px; color:var(--muted)'>{sub}</div>" if sub else ""}
 </div>
         """,
         unsafe_allow_html=True,
@@ -374,13 +371,13 @@ def view_intro():
     c1, c2, c3 = st.columns(3)
     with c1:
         st.markdown('<div class="badge-btn">', unsafe_allow_html=True)
-        if st.button("▶ はじめる\n— 約2分で完了 —", key="go_start", use_container_width=True, help="最短ルートで1問目へ移動します"):
+        if st.button("▶ はじめる\n— 約2分で完了 —", key="go_start", use_container_width=True):
             st.session_state.view="CBT"; st.session_state.cbt_step=1; st.session_state.cbt_guided=True
         st.caption("※ はじめての方はここ")
         st.markdown('</div>', unsafe_allow_html=True)
     with c2:
         st.markdown('<div class="badge-btn">', unsafe_allow_html=True)
-        if st.button("👣 3ステップで進む\n— 案内つき —", key="go_3step", use_container_width=True, help="1/3→2/3→3/3と順番に進みます"):
+        if st.button("👣 3ステップで進む\n— 案内つき —", key="go_3step", use_container_width=True):
             st.session_state.view="CBT"; st.session_state.cbt_step=1; st.session_state.cbt_guided=True
         st.caption("迷わず順番に進めます")
         st.markdown('</div>', unsafe_allow_html=True)
@@ -422,10 +419,10 @@ def view_home():
     st.markdown("#### 本日、どのように進めますか？")
     c1,c2 = st.columns(2)
     with c1:
-        if st.button("📓 2分ノートへ（おすすめ）", use_container_width=True, help="3ステップで気持ちを整えます"):
+        if st.button("📓 2分ノートへ（おすすめ） — 3ステップで整理", use_container_width=True):
             st.session_state.view="CBT"; st.session_state.cbt_step=1; st.session_state.cbt_guided=True
     with c2:
-        if st.button("📝 1日のふり返りへ", use_container_width=True, help="今日の小さなできたこと等を記録"):
+        if st.button("📝 1日のふり返りへ — 今日を短く記録", use_container_width=True):
             st.session_state.view="REFLECT"
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -499,7 +496,7 @@ def _cbt_step3():
                                                     value=st.session_state.cbt.get("rephrase","") or seed, height=84)
     ccols = st.columns(2)
     with ccols[0]:
-        st.session_state.cbt["prob_after"] = st.slider("この“仮の見方”のしんどさ軽減度（しっくり度 %）", 0, 100, int(st.session_state.cbt.get("prob_after",40)))
+        st.session_state.cbt["prob_after"] = st.slider("この“仮の見方”のしっくり度（%）", 0, 100, int(st.session_state.cbt.get("prob_after",40)))
     with ccols[1]:
         st.session_state.cbt["distress_after"] = st.slider("いまのしんどさ（まとめた後）", 0, 10, int(st.session_state.cbt.get("distress_after",4)))
     st.markdown('</div>', unsafe_allow_html=True)
@@ -555,9 +552,10 @@ def view_cbt():
     _cbt_step_header()
 
     if not st.session_state.cbt_guided:
-        # まとめて表示
+        # まとめて表示（余計な空白を作らないよう最小カード構成）
         st.markdown('<div class="card">', unsafe_allow_html=True)
         st.subheader("いまの気持ちをえらぶ")
+        st.caption("当てはまる顔をタップ（複数OK／途中でやめてもOK）")
         st.session_state.cbt["emotions"] = emoji_toggle_grid(st.session_state.cbt.get("emotions", []))
         st.markdown('</div>', unsafe_allow_html=True)
 
@@ -754,7 +752,7 @@ else:
 
 # ---------------- Footer ----------------
 st.markdown("""
-<div style="text-align:center; color:var(--muted); margin-top:12px;">
+<div style="text-align:center; color:var(--muted); margin-top:10px;">
   <small>※ 個人名や連絡先は記入しないでください。<br>
   とてもつらい場合は、お住まいの地域の相談窓口や専門機関のご利用もご検討ください。</small>
 </div>
