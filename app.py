@@ -1,4 +1,4 @@
-# app.py — Sora 2分ノート（言葉で分かるUI／ガイド付き・完全版）
+# app.py — Sora 2分ノート（言葉で分かるUI／タブ式ナビ・完全版）
 
 from datetime import datetime, date
 from pathlib import Path
@@ -37,23 +37,6 @@ html, body, .stApp {{ background:var(--bg); }}
 * {{ font-family:"Zen Maru Gothic", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }}
 h1,h2,h3,p,li,label,.stMarkdown,.stTextInput,.stTextArea {{ color:var(--text); }}
 small {{ color:var(--muted); }}
-
-/* ---------- Top Nav（言葉つき） ---------- */
-.topbar {{
-  position:sticky; top:0; z-index:10;
-  background: rgba(25,17,75,.55); backdrop-filter: blur(8px);
-  border-bottom: 1px solid rgba(255,255,255,.08);
-  margin: 0 -12px 12px; padding: 8px 12px 10px;
-}}
-.topnav {{ display:grid; grid-template-columns: repeat(6,1fr); gap:8px; }}
-.navbtn > button {{
-  background:#FFFFFF !important; color:#1b1742 !important;
-  border:1px solid rgba(0,0,0,.06) !important;
-  border-radius:14px !important; padding:10px !important; height:auto !important;
-  text-align:left !important; box-shadow:none !important; font-weight:800 !important;
-}}
-.navbtn .sub   {{ display:block; color:#5b5b8a; font-size:.78rem; margin-top:2px; }}
-.navbtn.active > button {{ background:#F4F4FF !important; border:2px solid #8A84FF !important; }}
 
 /* ---------- Card ---------- */
 .card {{
@@ -125,10 +108,24 @@ textarea, input, .stTextInput>div>div>input{{
 }}
 .emoji-on>button{{ background:linear-gradient(180deg,#ffc6a3,#ff9fbe)!important; border:1px solid #ff80b0!important; }}
 
-/* ---------- Responsive ---------- */
-@media (max-width: 980px) {{
-  .topnav {{ grid-template-columns: repeat(3,1fr); }}
+/* ---------- Sticky Navbar (Radio Tabs) ---------- */
+.navbar {{
+  position: sticky; top: 0; z-index: 10;
+  background: rgba(25,17,75,.72); backdrop-filter: blur(8px);
+  margin: 0 -12px 12px; padding: 8px 12px 10px;
+  border-bottom: 1px solid rgba(255,255,255,.08);
 }}
+.navbar .stRadio [role="radiogroup"] {{ gap: 8px; flex-wrap: wrap; }}
+.navbar label {{
+  background:#fff; color:#1b1742; border:1px solid rgba(0,0,0,.06);
+  border-radius:12px; padding:10px 12px; font-weight:800;
+}}
+/* checked state */
+.navbar input:checked + div label {{
+  background:#F4F4FF; border:2px solid #8A84FF;
+}}
+
+/* ---------- Responsive ---------- */
 @media (max-width: 640px) {{
   .emoji-grid {{ grid-template-columns: repeat(4,1fr); }}
   .block-container {{ padding-left:1rem; padding-right:1rem; }}
@@ -235,27 +232,34 @@ def support(distress: Optional[int]=None, lonely: Optional[int]=None):
     else:
         companion("🌟","ここまで入力いただけて十分です。","空欄があっても大丈夫です。")
 
-# ---------------- Top Nav（言葉つき） ----------------
+# ---------------- Top Nav（文字つきタブ） ----------------
 def top_nav():
-    st.markdown('<div class="topbar"><div class="topnav">', unsafe_allow_html=True)
-    pages = [
-        ("INTRO","👋 はじめに","最初の説明"),
-        ("HOME","🏠 ホーム","用途の入口"),
-        ("CBT","📓 2分ノート","3ステップで整理"),
-        ("REFLECT","📝 1日のふり返り","今日を短く記録"),
-        ("HISTORY","📚 記録を見る","保存した一覧"),
-        ("EXPORT","⬇️ エクスポート","CSV・設定"),
-    ]
-    cols = st.columns(len(pages))
-    for i,(key,title,sub) in enumerate(pages):
-        active = (st.session_state.view==key)
-        cls = "navbtn active" if active else "navbtn"
-        with cols[i]:
-            st.markdown(f'<div class="{cls}">', unsafe_allow_html=True)
-            if st.button(f"{title}\n{sub}", key=f"nav_{key}", use_container_width=True, help=sub):
-                st.session_state.view = key
-            st.markdown("</div>", unsafe_allow_html=True)
-    st.markdown('</div></div>', unsafe_allow_html=True)
+    st.markdown('<div class="navbar">', unsafe_allow_html=True)
+
+    keys = ["INTRO","HOME","CBT","REFLECT","HISTORY","EXPORT"]
+    labels = {
+        "INTRO":   "👋 はじめに — 最初の説明",
+        "HOME":    "🏠 ホーム — 用途の入口",
+        "CBT":     "📓 2分ノート — 3ステップで整理",
+        "REFLECT": "📝 1日のふり返り — 今日を短く記録",
+        "HISTORY": "📚 記録を見る — 保存した一覧",
+        "EXPORT":  "⬇️ エクスポート — CSV・設定",
+    }
+
+    current = st.session_state.get("view","INTRO")
+    idx = keys.index(current) if current in keys else 0
+
+    choice = st.radio(
+        "移動先",
+        options=keys,
+        index=idx,
+        format_func=lambda k: labels[k],
+        horizontal=True,
+        label_visibility="collapsed",
+        key="nav_radio",
+    )
+    st.session_state.view = choice
+    st.markdown('</div>', unsafe_allow_html=True)
 
 # ---------------- Emoji & Chips ----------------
 EMOJIS = ["😟","😡","😢","😔","😤","😴","🙂","🤷‍♀️"]
@@ -495,12 +499,11 @@ def _cbt_step3():
                                                     value=st.session_state.cbt.get("rephrase","") or seed, height=84)
     ccols = st.columns(2)
     with ccols[0]:
-        st.session_state.cbt["prob_after"] = st.slider("この“仮の見方”のしっくり度（%）", 0, 100, int(st.session_state.cbt.get("prob_after",40)))
+        st.session_state.cbt["prob_after"] = st.slider("この“仮の見方”のしんどさ軽減度（しっくり度 %）", 0, 100, int(st.session_state.cbt.get("prob_after",40)))
     with ccols[1]:
         st.session_state.cbt["distress_after"] = st.slider("いまのしんどさ（まとめた後）", 0, 10, int(st.session_state.cbt.get("distress_after",4)))
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # 保存（ガイド時はここだけ）
     st.markdown('<div class="card">', unsafe_allow_html=True)
     c1,c2 = st.columns(2)
     with c1:
