@@ -1,11 +1,10 @@
-# app.py — Sora 2分ノート（bcrypt不要／Supabase Auth／多人数同時／白ボックス撤去・テキストボタン）
-
 from datetime import datetime, date
-from typing import Optional, List, Tuple, Dict
+from pathlib import Path
+from typing import Optional, List
 import pandas as pd
 import streamlit as st
 
-# ================= Page Config =================
+# ---------------- Page config ----------------
 st.set_page_config(
     page_title="Sora — しんどい夜の2分ノート",
     page_icon="🌙",
@@ -13,205 +12,159 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# ================= Theme =================
-PINK = "#FBDDD3"
-NAVY = "#19114B"
-
-# ================= CSS (no white boxes / text buttons) =================
+# ---------------- Theme / CSS ----------------
 def inject_css():
-    css = f"""
+    st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;600;700;900&display=swap');
+:root{
+  --text:#2a2731; --muted:#6f7180;
+  --glass:rgba(255,255,255,.94); --glass-brd:rgba(185,170,255,.28);
+  --outline:#e9ddff;
+  --grad-from:#ffa16d; --grad-to:#ff77a3;
+  --chip:#fff6fb; --chip-brd:#ffd7f0;
 
-:root {{
-  --bg:{NAVY};
-  --text:#FFFFFF;
-  --muted:rgba(255,255,255,.78);
-  --pink:{PINK};
-  --panel:#1C1550;
-  --line:rgba(251,221,211,.35);
-  --ink:#0f0f23;
-}}
+  --tile-a:#ffb37c; --tile-b:#ffe0c2;
+  --tile-c:#ff9ec3; --tile-d:#ffd6ea;
+  --tile-e:#c4a4ff; --tile-f:#e8dbff;
+  --tile-g:#89d7ff; --tile-h:#d4f2ff;
+}
 
-html, body, .stApp {{ background:var(--bg); }}
-* {{ font-family:"Zen Maru Gothic", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }}
-.block-container {{ max-width:980px; padding: 1rem 1rem 2.2rem; }}
-h1,h2,h3,p,li,label,.stMarkdown,.stTextInput,.stTextArea,.stSelectbox label {{ color:var(--text); }}
-small {{ color:var(--muted); }}
+.stApp{
+  background:
+    radial-gradient(820px 520px at 0% -10%,  rgba(255,226,200,.55) 0%, transparent 60%),
+    radial-gradient(780px 480px at 100% -8%, rgba(255,215,242,.55) 0%, transparent 60%),
+    radial-gradient(960px 560px at -10% 98%, rgba(232,216,255,.45) 0%, transparent 60%),
+    radial-gradient(960px 560px at 110% 100%, rgba(217,245,255,.46) 0%, transparent 60%),
+    linear-gradient(180deg, #fffefd 0%, #fff8fb 28%, #f7f3ff 58%, #f2fbff 100%);
+}
+/* 控えめな静止の星 */
+.stApp:before{
+  content:""; position:fixed; inset:0; pointer-events:none; z-index:0;
+  background-image:
+    radial-gradient(circle, rgba(255,255,255,.65) 0.6px, transparent 1px),
+    radial-gradient(circle, rgba(255,255,255,.35) 0.5px, transparent 1px);
+  background-size: 22px 22px, 34px 34px;
+  background-position: 0 0, 10px 12px;
+  opacity:.18;
+}
 
-/* 余計な空白削除 */
-.stMarkdown p:empty, .stMarkdown div:empty {{ display:none !important; }}
-section.main > div:empty {{ display:none !important; }}
+.block-container{max-width:960px; padding-top:1rem; padding-bottom:2rem; position:relative; z-index:1}
+h1,h2,h3{color:var(--text); letter-spacing:.2px}
+p,label,.stMarkdown,.stTextInput,.stTextArea{color:var(--text); font-size:1.06rem}
+small{color:var(--muted)}
 
-/* 入力部品の見た目 */
-textarea, .stTextArea textarea, .stTextInput input, .stDateInput input, .stMultiSelect > div > div {{
-  background: var(--ink) !important;
-  color:#f0eeff !important;
-  border:1px solid #3a3d66 !important;
-  border-radius:14px !important;
-}}
+.card{
+  background:var(--glass); border:1px solid var(--glass-brd);
+  border-radius:20px; padding:16px; margin-bottom:14px;
+  box-shadow:0 18px 36px rgba(80,70,120,.14); backdrop-filter:blur(8px);
+}
+.hr{height:1px; background:linear-gradient(to right,transparent,#c7b8ff,transparent); margin:12px 0 10px}
 
-/* カード */
-.card {{
-  background: var(--panel);
-  border: 2px solid var(--line);
-  border-radius: 22px;
-  padding: 16px 18px;
-  box-shadow: 0 18px 40px rgba(0,0,0,.22);
-  margin-bottom: 14px;
-}}
+/* --- 共通の（グラデ）ボタン：選択ピルやCTA用 --- */
+.stButton>button,.stDownloadButton>button{
+  width:100%; padding:14px 16px; border-radius:999px; border:1px solid var(--outline);
+  background:linear-gradient(180deg,var(--grad-from),var(--grad-to)); color:#fff; font-weight:900; font-size:1.04rem;
+  box-shadow:0 12px 26px rgba(255,145,175,.22);
+}
+.stButton>button:hover{filter:brightness(.98)}
 
-/* multiselect を“ピル”に見せる（白い大きい四角を使わない） */
-.stMultiSelect > div > div {{
-  background: rgba(0,0,0,.10) !important;
-  border: 1px solid rgba(255,255,255,.18) !important;
-  border-radius: 16px !important;
-}}
-.stMultiSelect [data-baseweb="tag"] {{
-  background: linear-gradient(180deg,#ffbcd2,#ff99bc) !important;
-  color:#3a2144 !important;
-  border-radius: 999px !important;
-  font-weight: 900 !important;
-}}
-.stMultiSelect [data-baseweb="tag"] span {{ color:#3a2144 !important; }}
+/* ======================= ナビ専用（白いゴースト） ======================= */
+.topbar{
+  position:sticky; top:0; z-index:10;
+  background:rgba(255,255,255,.7); backdrop-filter:blur(8px);
+  border-bottom:1px solid #ececff;
+  margin:0 -12px 10px; padding:8px 12px;
+}
+.topnav{display:flex; gap:8px; flex-wrap:wrap; margin:4px 0 2px}
+.topnav .nav-btn>button{
+  background:#ffffff !important;
+  color:#2d2a33 !important;
+  border:1px solid #d9dbe8 !important;
+  box-shadow:none !important;
+  height:auto !important;
+  padding:9px 12px !important;
+  border-radius:12px !important;
+  font-weight:700 !important;
+  font-size:.95rem !important;
+  letter-spacing:.1px;
+}
+.topnav .nav-btn>button:hover{background:#f6f7ff !important; filter:none !important;}
+.topnav .active>button{
+  background:#f4f3ff !important;
+  border:2px solid #7d74ff !important;
+}
+.nav-hint{font-size:.78rem; color:#9aa; margin:0 2px 4px 2px}
 
-/* スライダーの文字色 */
-[data-baseweb="slider"] * {{ color:var(--text) !important; }}
+/* ======================= 選択UI（感情/きっかけ/チップ） ======================= */
+.chips{display:flex; gap:8px; flex-wrap:wrap; margin:8px 0 10px}
+.chips .chip-btn>button{
+  background:linear-gradient(180deg,#ffd8e9,#ffc4e1); color:#523a6a;
+  border:1px solid var(--chip-brd)!important; padding:10px 14px; height:auto;
+  border-radius:999px!important; font-weight:900; box-shadow:0 10px 20px rgba(60,45,90,.08)
+}
 
-/* Sticky Navbar */
-.navbar {{
-  position: sticky; top: 0; z-index: 1000;
-  background: rgba(25,17,75,.82); backdrop-filter: blur(10px);
-  margin: 0 0 10px 0; padding: 10px 12px;
-  border-bottom: 1px solid rgba(255,255,255,.08);
-}}
-.navbar .stRadio [role="radiogroup"] {{ gap: 8px; flex-wrap: wrap; }}
-.navbar label {{
-  background:#fff; color:#1b1742; border:1px solid rgba(0,0,0,.06);
-  border-radius:12px; padding:8px 10px; font-weight:800;
-}}
-.navbar input:checked + div label {{
-  background:#F4F4FF; border:2px solid #8A84FF;
-}}
+/* Emoji grid（選択ピルとは別テイスト） */
+.emoji-grid{display:grid; grid-template-columns:repeat(8,1fr); gap:10px; margin:8px 0 6px}
+.emoji-btn>button{
+  width:100%!important; aspect-ratio:1/1; border-radius:18px!important;
+  font-size:1.55rem!important; background:#fff; border:1px solid #eadfff!important;
+  box-shadow:0 8px 16px rgba(60,45,90,.06);
+}
+.emoji-on>button{
+  background:linear-gradient(180deg,#ffc6a3,#ff9fbe)!important;
+  border:1px solid #ff80b0!important;
+}
 
-/* テキストボタン（白い四角を完全撤去） */
-.stButton > button {{
-  background: rgba(0,0,0,.10) !important;
-  color:#ffffff !important;
-  border:1px solid rgba(255,255,255,.18) !important;
-  border-radius:14px !important;
-  padding:10px 14px !important;
-  font-weight:800 !important;
-  box-shadow: 0 8px 18px rgba(0,0,0,.18) !important;
-}}
-.stButton span {{ color:#ffffff !important; }}
+/* ホームのタイル */
+.tile-grid{display:grid; grid-template-columns:1fr 1fr; gap:18px; margin-top:8px}
+.tile .stButton>button{
+  aspect-ratio:1/1; min-height:220px; border-radius:28px;
+  text-align:left; padding:20px; white-space:normal; line-height:1.2;
+  border:none; font-weight:900; font-size:1.18rem; color:#2d2a33;
+  box-shadow:0 20px 36px rgba(60,45,90,.18);
+  display:flex; align-items:flex-end; justify-content:flex-start;
+}
+.tile .stButton>button:after{content:"";}
+.tile-a .stButton>button{background:linear-gradient(160deg,var(--tile-a),var(--tile-b))}
+.tile-b .stButton>button{background:linear-gradient(160deg,var(--tile-c),var(--tile-d))}
+.tile-c .stButton>button{background:linear-gradient(160deg,var(--tile-e),var(--tile-f))}
+.tile-d .stButton>button{background:linear-gradient(160deg,var(--tile-g),var(--tile-h))}
 
-/* CTA */
-.cta-primary .stButton > button {{
-  width:100%; border-radius:999px; padding:12px 16px !important;
-  background:#FFFFFF !important; color:#18123F !important;
-  font-weight:900; border:0 !important; box-shadow:0 14px 26px rgba(0,0,0,.22) !important;
-}}
-.cta-ghost .stButton > button {{
-  width:100%; border-radius:999px; padding:12px 16px !important;
-  background:transparent !important; color:#FFFFFF !important;
-  border:2px solid var(--line) !important; font-weight:900; box-shadow:none !important;
-}}
-
-/* ヒーロー */
-.hero {{
-  border: 2px solid var(--line);
-  border-radius: 24px;
-  padding: 22px;
-  background: linear-gradient(180deg, rgba(255,255,255,.02), rgba(0,0,0,.06));
-  margin-bottom: 16px;
-}}
-.hero .topline {{
-  text-align:center; font-weight:900; font-size:1.08rem; letter-spacing:.06em;
-  color: var(--pink); margin-bottom: 10px;
-}}
-.hero .maincopy {{
-  text-align:center; font-weight:900; font-size:1.8rem; line-height:1.35; margin:.2rem 0 .9rem;
-}}
-.hero .maincopy .big3 {{ font-size:3rem; color:#fff; display:inline-block; transform:translateY(.04em); }}
-
-/* レスポンシブ */
-@media (max-width: 640px) {{
-  .block-container {{ padding-left:1rem; padding-right:1rem; }}
-  .hero .maincopy {{ font-size:1.6rem; }}
-  .hero .maincopy .big3 {{ font-size:2.6rem; }}
-}}
+/* モバイル */
+@media (max-width: 840px){ .emoji-grid{grid-template-columns:repeat(6,1fr)} }
+@media (max-width: 640px){
+  .emoji-grid{grid-template-columns:repeat(4,1fr)}
+  .tile-grid{grid-template-columns:1fr}
+  .tile .stButton>button{min-height:180px}
+  .block-container{padding-left:1rem; padding-right:1rem}
+}
 </style>
-"""
-    st.markdown(css, unsafe_allow_html=True)
+""", unsafe_allow_html=True)
 
 inject_css()
 
-# ================= Supabase =================
-try:
-    from supabase import create_client, Client
-except Exception:
-    st.error("`supabase` パッケージが必要です。まず `pip install supabase` をしてください。")
-    st.stop()
+# ---------------- Data helpers ----------------
+DATA_DIR = Path("data"); DATA_DIR.mkdir(exist_ok=True)
+CBT_CSV = DATA_DIR / "cbt_entries.csv"
+REFLECT_CSV = DATA_DIR / "daily_reflections.csv"
 
-@st.cache_resource
-def sb() -> Client:
-    # Streamlit Cloud では .streamlit/secrets.toml に設定
-    return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_ANON_KEY"])
+def _load_csv(p: Path) -> pd.DataFrame:
+    if p.exists():
+        try: return pd.read_csv(p)
+        except Exception: return pd.DataFrame()
+    return pd.DataFrame()
 
-# ---- Auth（メール＋パスワード、bcryptなし） ----
-def auth_block() -> Dict:
-    """
-    ログイン済なら {id,email} を返す。
-    未ログインならログイン/登録フォームを出して停止。
-    """
-    if "sb_user" in st.session_state and st.session_state["sb_user"]:
-        return st.session_state["sb_user"]
+def _append_csv(p: Path, row: dict):
+    df = _load_csv(p)
+    df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
+    df.to_csv(p, index=False)
 
-    st.markdown("### 🔐 ログイン / 新規登録")
-    tab_in, tab_up = st.tabs(["ログイン", "新規登録"])
+def _download_button(df: pd.DataFrame, label: str, filename: str):
+    if df.empty: st.caption("（まだデータはございません）"); return
+    st.download_button(label, df.to_csv(index=False).encode("utf-8"),
+                       file_name=filename, mime="text/csv")
 
-    with tab_in:
-        email = st.text_input("メールアドレス", key="login_email")
-        pw = st.text_input("パスワード", type="password", key="login_pw")
-        if st.button("ログインする"):
-            try:
-                res = sb().auth.sign_in_with_password({"email": email, "password": pw})
-                st.session_state["sb_user"] = {"id": res.user.id, "email": res.user.email}
-                st.success("ログインしました。")
-                st.experimental_rerun()
-            except Exception as e:
-                st.error(f"ログインに失敗しました: {e}")
-
-    with tab_up:
-        email2 = st.text_input("メールアドレス（新規）", key="signup_email")
-        pw2 = st.text_input("パスワード（8文字以上）", type="password", key="signup_pw")
-        if st.button("新規登録する"):
-            try:
-                res = sb().auth.sign_up({"email": email2, "password": pw2})
-                if res.user:
-                    st.success("登録しました。ログインしてください。")
-                else:
-                    st.info("確認メールを送信しました。メールをご確認ください。")
-            except Exception as e:
-                st.error(f"登録に失敗しました: {e}")
-
-    st.stop()
-
-def current_uid() -> str:
-    u = st.session_state.get("sb_user")
-    return u["id"] if u else ""
-
-# ---- DB helpers（RLSで user_id ごとに保護） ----
-def db_insert(table: str, row: dict):
-    row = {**row, "user_id": current_uid()}
-    sb().table(table).insert(row).execute()
-
-def db_select(table: str, order_field: str) -> pd.DataFrame:
-    r = sb().table(table).select("*").eq("user_id", current_uid()).order(order_field, desc=True).execute()
-    return pd.DataFrame(r.data)
-
-# ================= Session Defaults =================
+# ---------------- Session defaults ----------------
 def ensure_cbt_defaults():
     if "cbt" not in st.session_state or not isinstance(st.session_state.cbt, dict):
         st.session_state.cbt = {}
@@ -219,14 +172,17 @@ def ensure_cbt_defaults():
     cbt.setdefault("emotions", [])
     cbt.setdefault("trigger_tags", [])
     cbt.setdefault("trigger_free","")
-    cbt.setdefault("fact","")
-    cbt.setdefault("alt","")
+    cbt.setdefault("fact","")      # いまの見方
+    cbt.setdefault("alt","")       # ほかの見方
     checks = cbt.setdefault("checks", {})
-    for k in ["bw","catastrophe","fortune","emotion","decide"]:
-        checks.setdefault(k, False)
+    checks.setdefault("bw", False)           # 0/100で考えていたかも
+    checks.setdefault("catastrophe", False)  # 最悪の状態を想定していたかも
+    checks.setdefault("fortune", False)      # 先の展開を一つに決めていたかも
+    checks.setdefault("emotion", False)      # 感情が先に走っているかも
+    checks.setdefault("decide", False)       # 決めつけてしまっていたかも
     cbt.setdefault("distress_before",5)
     cbt.setdefault("prob_before",50)
-    cbt.setdefault("rephrase","")
+    cbt.setdefault("rephrase","")  # 仮の見方
     cbt.setdefault("prob_after",40)
     cbt.setdefault("distress_after",4)
 
@@ -245,209 +201,277 @@ def ensure_reflection_defaults():
     r["date"] = d
 
 st.session_state.setdefault("view","INTRO")
-st.session_state.setdefault("cbt_step", 1)
-st.session_state.setdefault("cbt_guided", True)
 ensure_cbt_defaults(); ensure_reflection_defaults()
 
-# ================= UI Helpers =================
-def vibrate(ms=8):
-    st.markdown("<script>try{navigator.vibrate&&navigator.vibrate(%d)}catch(e){{}}</script>"%ms, unsafe_allow_html=True)
+# ---------------- Gentle companion ----------------
+def companion(emoji: str, text: str, sub: Optional[str]=None):
+    st.markdown(
+        f"""
+<div class="card">
+  <div style="font-weight:900; color:#2f2a3b">{emoji} {text}</div>
+  {f"<div class='small' style='margin-top:4px; color:var(--muted)'>{sub}</div>" if sub else ""}
+</div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 def support(distress: Optional[int]=None, lonely: Optional[int]=None):
-    def card(emoji: str, text: str, sub: Optional[str]=None):
-        st.markdown(
-            f"""
-<div class="card" style="margin-top:6px;margin-bottom:8px">
-  <div style="font-weight:900; color:var(--pink)">{emoji} {text}</div>
-  {f"<div class='small' style='margin-top:2px; color:var(--muted)'>{sub}</div>" if sub else ""}
-</div>
-            """,
-            unsafe_allow_html=True,
-        )
     if distress is not None and distress >= 7:
-        card("🫶","ここでは、がんばらなくて大丈夫です。","ご自身のペースで進めていただければ十分です。")
+        companion("🫶","ここでは、がんばらなくて大丈夫です。","ご自身のペースで進めていただければ十分です。")
     elif lonely is not None and lonely >= 7:
-        card("🤝","この瞬間、ひとりではありません。","深呼吸をひとつして、ゆっくり進めましょう。")
+        companion("🤝","この瞬間、ひとりではありません。","深呼吸をひとつして、ゆっくり進めましょう。")
     else:
-        card("🌟","ここまで入力いただけて十分です。","空欄があっても大丈夫です。")
+        companion("🌟","ここまで入力いただけて十分です。","短くても大丈夫です。")
 
+# ---------------- 小さなハプティクス（対応端末限定） ----------------
+def vibrate(ms=12):
+    st.markdown("<script>try{navigator.vibrate&&navigator.vibrate(%d)}catch(e){{}}</script>"%ms, unsafe_allow_html=True)
+
+# ---------------- ナビ（白ゴースト・スティッキー） ----------------
 def top_nav():
-    st.markdown('<div class="navbar">', unsafe_allow_html=True)
-    left, right = st.columns([4,1])
-    with left:
-        keys = ["INTRO","HOME","CBT","REFLECT","HISTORY","EXPORT"]
-        labels = {
-            "INTRO":   "👋 はじめに",
-            "HOME":    "🏠 ホーム",
-            "CBT":     "📓 2分ノート",
-            "REFLECT": "📝 1日のふり返り",
-            "HISTORY": "📚 記録を見る",
-            "EXPORT":  "⬇️ エクスポート・設定",
-        }
-        current = st.session_state.get("view","INTRO")
-        idx = keys.index(current) if current in keys else 0
-        choice = st.radio("移動先", options=keys, index=idx,
-                          format_func=lambda k: labels[k], horizontal=True,
-                          label_visibility="collapsed", key="nav_radio")
-        st.session_state.view = choice
-    with right:
-        user = st.session_state.get("sb_user", {})
-        st.caption(f"👤 {user.get('email','')}")
-        if st.button("🔓 ログアウト"):
-            try:
-                sb().auth.sign_out()
-            except Exception:
-                pass
-            st.session_state.pop("sb_user", None)
-            st.experimental_rerun()
+    st.markdown('<div class="topbar">', unsafe_allow_html=True)
+    st.markdown('<div class="nav-hint">ページ移動</div>', unsafe_allow_html=True)
+    st.markdown('<div class="topnav">', unsafe_allow_html=True)
+    pages = [("INTRO","👋 はじめに"),("HOME","🏠 ホーム"),("CBT","📓 2分ノート"),
+             ("REFLECT","📝 1日のふり返り"),("HISTORY","📚 記録を見る"),("EXPORT","⬇️ エクスポート")]
+    cols = st.columns(len(pages))
+    for i,(key,label) in enumerate(pages):
+        cls = "nav-btn active" if st.session_state.view==key else "nav-btn"
+        with cols[i]:
+            st.markdown(f'<div class="{cls}">', unsafe_allow_html=True)
+            if st.button(label, key=f"nav_{key}", use_container_width=True):
+                st.session_state.view = key
+            st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown('</div></div>', unsafe_allow_html=True)
+
+# ---------------- Emoji & chips (toggle UI) ----------------
+EMOJIS = ["😟","😡","😢","😔","😤","😴","🙂","🤷‍♀️"]
+
+def emoji_toggle_grid(selected: List[str]) -> List[str]:
+    st.caption("いまの気持ちをタップ（複数OK／途中でやめてもOK）")
+    st.markdown('<div class="emoji-grid">', unsafe_allow_html=True)
+    chosen = set(selected)
+    cols = st.columns(8 if len(EMOJIS) >= 8 else len(EMOJIS))
+    for i, e in enumerate(EMOJIS):
+        with cols[i % len(cols)]:
+            on = e in chosen
+            cls = "emoji-btn emoji-on" if on else "emoji-btn"
+            st.markdown(f'<div class="{cls}">', unsafe_allow_html=True)
+            if st.button(f"{e}", key=f"emo_{i}", use_container_width=True):
+                if on: chosen.remove(e)
+                else: chosen.add(e)
+                vibrate(10)
+            st.markdown('</div>', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
+    st.caption("選択中：" + (" ".join(list(chosen)) if chosen else "（未選択）"))
+    return list(chosen)
 
-# ================= Selectors (no icon-only buttons) =================
-EMOJIS: List[Tuple[str,str]] = [
-    ("😟","不安"),("😡","怒り"),("😢","悲しみ"),("😔","落ち込み"),
-    ("😤","イライラ"),("😴","疲れ"),("🙂","安心"),("🤷‍♀️","戸惑い"),
-]
-TRIGGER_DEFS: List[Tuple[str,str,str]] = [
-    ("time","⏱️","さっきの出来事"),
-    ("thought_line","🧠","浮かんだ一言"),
-    ("relationship","🤝","人との関係"),
-    ("body","🫀","体のサイン"),
-    ("unknown","🌀","うまく言えない"),
+TRIGGER_DEFS = [
+    ("⏱️ さっきの出来事", "time"),
+    ("🧠 浮かんだ一言", "thought_line"),
+    ("🤝 人との関係", "relationship"),
+    ("🫀 体のサイン", "body"),
+    ("🌀 うまく言えない", "unknown"),
 ]
 
-def emoji_selector(selected: List[str]) -> List[str]:
-    options = [f"{e} {t}" for e,t in EMOJIS]
-    default_labels = [f"{e} {t}" for e,t in EMOJIS if e in selected]
-    picked = st.multiselect("いまの気持ち（複数選択可）", options=options, default=default_labels)
-    out = [p.split(" ",1)[0] for p in picked]
-    st.caption(f"選択中：{' '.join(out) if out else '（未選択）'}")
-    return out
+def trigger_chip_row(selected: List[str]) -> List[str]:
+    st.caption("言葉にしづらい時は、近いものだけタップで結構です。")
+    st.markdown('<div class="chips">', unsafe_allow_html=True)
+    cols = st.columns(len(TRIGGER_DEFS))
+    chosen = set(selected)
+    for i,(label,val) in enumerate(TRIGGER_DEFS):
+        with cols[i]:
+            on = val in chosen
+            st.markdown('<div class="chip-btn">', unsafe_allow_html=True)
+            if st.button(label + (" ✓" if on else ""), key=f"trg_{val}", use_container_width=True):
+                if on: chosen.remove(val)
+                else: chosen.add(val)
+                vibrate(8)
+            st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
+    return list(chosen)
 
-def trigger_selector(selected_values: List[str]) -> List[str]:
-    options = [f"{e} {t}" for _,e,t in TRIGGER_DEFS]
-    value_to_label = {v:f"{e} {t}" for v,e,t in TRIGGER_DEFS}
-    label_to_value = {f"{e} {t}":v for v,e,t in TRIGGER_DEFS}
-    default_labels = [value_to_label[v] for v in selected_values if v in value_to_label]
-    picked = st.multiselect("きっかけ（近いものでOK／複数可）", options=options, default=default_labels)
-    return [label_to_value[p] for p in picked if p in label_to_value]
+# ---------------- 一言の挿入ヘルパー ----------------
+def append_to_textarea(ss_key: str, phrase: str):
+    cur = st.session_state.cbt.get(ss_key, "") or ""
+    glue = "" if (cur.strip() == "" or cur.strip().endswith(("。","!","！"))) else " "
+    st.session_state.cbt[ss_key] = (cur + glue + phrase).strip()
 
-# ================= Views =================
+# あなたの指定そのまま（固定一言）
+CHECK_LABELS = {
+    "bw":          "0/100で考えていたかも",
+    "catastrophe": "最悪の状態を想定していたかも",
+    "fortune":     "先の展開を一つに決めていたかも",
+    "emotion":     "感情が先に走っているかも",
+    "decide":      "決めつけてしまっていたかも",
+}
+TIP_MAP = {
+    "bw":          "🌷 部分的にOKも、あるかもしれません。",
+    "catastrophe": "☁️ 他の展開もあるかもしれません。",
+    "fortune":     "🎈 他の展開になればラッキーですね。",
+    "emotion":     "🫶 気持ちはそのまま、事実はそっと分けておいておくのもありかもしれません。",
+    "decide":      "🌿 分からない場合はいったん保留にするのもありですね。",
+}
+
+def render_checks_and_tips():
+    g = st.session_state.cbt.setdefault("checks", {})
+    cols = st.columns(2)
+    keys = list(CHECK_LABELS.keys())
+    for i, k in enumerate(keys):
+        with cols[i % 2]:
+            g[k] = st.checkbox(CHECK_LABELS[k], value=bool(g.get(k, False)))
+    st.session_state.cbt["checks"] = g
+
+    on_keys = [k for k,v in g.items() if v]
+    if on_keys:
+        st.write("💡 タップで“ほかの見方”に挿入できます")
+        st.markdown('<div class="chips">', unsafe_allow_html=True)
+        tip_cols = st.columns(min(4, len(on_keys)))
+        for i, k in enumerate(on_keys):
+            tip = TIP_MAP.get(k, "")
+            if not tip: continue
+            with tip_cols[i % len(tip_cols)]:
+                st.markdown('<div class="chip-btn">', unsafe_allow_html=True)
+                if st.button(tip, key=f"tip_{k}", use_container_width=True):
+                    append_to_textarea("alt", tip)
+                    vibrate(8)
+                st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+
+# ---------------- INTRO ----------------
 def view_intro():
-    top_nav()
     st.markdown("""
-<div class="hero">
-  <div class="topline">夜、考えすぎてしんどくなるときに。</div>
-  <div class="maincopy">
-    たった <span class="big3">3</span> ステップで<br>
-    気持ちを整理して、少し落ち着こう。
-  </div>
-  <div class="what" style="margin-top:10px">
-    <div class="title">これは何？</div>
-    <div>しんどい夜に、短時間で“見方”を整えるノート。<br>
-    正解探しではなく、気持ちを整える時間を届けます。</div>
-  </div>
+<div class="card" style="padding:22px;">
+  <h2 style="margin:.1rem 0 .6rem; color:#2f2a3b;">
+    いま感じていることを、<b>いっしょに静かに整えます。</b>
+  </h2>
+  <ul style="margin:.4rem 0 .6rem;">
+    <li>⏱ <b>所要</b>：約2分 ／ <b>3ステップ</b></li>
+    <li>🎯 <b>内容</b>：気持ち → きっかけ → 見方の仮置き</li>
+    <li>🔒 <b>安心</b>：この端末のみ保存／途中でやめてもOK／医療・診断ではありません</li>
+  </ul>
+  <p style="margin:.2rem 0 .2rem; color:#6f7180">
+    空欄があっても大丈夫です。
+  </p>
 </div>
 """, unsafe_allow_html=True)
 
-    c1, c2 = st.columns([3,2])
-    with c1:
-        st.markdown('<div class="cta-primary">', unsafe_allow_html=True)
-        if st.button("① 今すぐはじめる（約2分）"):
-            st.session_state.view="CBT"; st.session_state.cbt_step=1; st.session_state.cbt_guided=True
-        st.markdown('</div>', unsafe_allow_html=True)
-    with c2:
-        st.markdown('<div class="cta-ghost">', unsafe_allow_html=True)
-        if st.button("ホームを見る"):
-            st.session_state.view="HOME"
-        st.markdown('</div>', unsafe_allow_html=True)
+    cta1, cta2 = st.columns([3,2])
+    with cta1:
+        if st.button("今すぐはじめる（約2分）", use_container_width=True):
+            st.session_state.view = "CBT"
+    with cta2:
+        if st.button("ホームを見る", use_container_width=True):
+            st.session_state.view = "HOME"
 
+    st.markdown("""
+<div class="card">
+  <h3 style="margin:.2rem 0 .6rem;">これは何？（短く）</h3>
+  <p>しんどい夜に、短時間で“見方”を整えるノートです。正解探しではなく、整える時間。</p>
+</div>
+""", unsafe_allow_html=True)
+
+# ---------------- HOME ----------------
 def view_home():
     st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.markdown("#### 本日、どのように進めますか？")
+    st.markdown("#### 本日、どのように進められますか？")
+    st.markdown('<div class="tile-grid">', unsafe_allow_html=True)
     c1,c2 = st.columns(2)
     with c1:
-        if st.button("📓 2分ノートへ（3ステップ）"):
-            st.session_state.view="CBT"; st.session_state.cbt_step=1; st.session_state.cbt_guided=True
+        st.markdown('<div class="tile tile-a">', unsafe_allow_html=True)
+        if st.button("📓 2分ノート", key="tile_cbt"): st.session_state.view="CBT"
+        st.markdown('</div>', unsafe_allow_html=True)
     with c2:
-        if st.button("📝 1日のふり返りへ（短く記録）"):
-            st.session_state.view="REFLECT"
+        st.markdown('<div class="tile tile-b">', unsafe_allow_html=True)
+        if st.button("📝 1日のふり返り", key="tile_ref"): st.session_state.view="REFLECT"
+        st.markdown('</div>', unsafe_allow_html=True)
+    c3,c4 = st.columns(2)
+    with c3:
+        st.markdown('<div class="tile tile-c">', unsafe_allow_html=True)
+        if st.button("📚 記録を見る", key="tile_his"): st.session_state.view="HISTORY"
+        st.markdown('</div>', unsafe_allow_html=True)
+    with c4:
+        st.markdown('<div class="tile tile-d">', unsafe_allow_html=True)
+        if st.button("⬇️ エクスポート / 設定", key="tile_exp"): st.session_state.view="EXPORT"
+        st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown('</div></div>', unsafe_allow_html=True)
+
+# ---------------- CBT（2分ノート） ----------------
+def view_cbt():
+    ensure_cbt_defaults()
+    top_nav()
+
+    # Step0 感情
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.subheader("いまの気持ち")
+    st.session_state.cbt["emotions"] = emoji_toggle_grid(
+        st.session_state.cbt.get("emotions", [])
+    )
     st.markdown('</div>', unsafe_allow_html=True)
 
-def _cbt_step_header():
-    total = 3; step = st.session_state.cbt_step
+    # Step1 きっかけ
     st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.write(f"**2分ノート｜現在 {step} / {total}**")
-    st.progress(step/total)
-    left, right = st.columns(2)
-    with left:
-        st.session_state.cbt_guided = st.toggle("かんたんガイド（順番に表示）", value=st.session_state.cbt_guided)
-    with right:
-        st.caption("オフ＝全項目を一括表示")
-    st.markdown('</div>', unsafe_allow_html=True)
-
-def _cbt_step1():
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.subheader("① いまの気持ちをえらぶ")
-    st.session_state.cbt["emotions"] = emoji_selector(st.session_state.cbt.get("emotions", []))
-    st.markdown('</div>', unsafe_allow_html=True)
-
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.subheader("しんどさ・確からしさ（ざっくりでOK）")
-    cols = st.columns(2)
-    with cols[0]:
-        st.session_state.cbt["distress_before"] = st.slider("いまのしんどさ（0〜10）", 0, 10, int(st.session_state.cbt.get("distress_before",5)))
-    with cols[1]:
-        st.session_state.cbt["prob_before"] = st.slider("この考えの“ありえそう度”（%）", 0, 100, int(st.session_state.cbt.get("prob_before",50)))
-    support(distress=st.session_state.cbt["distress_before"])
-    st.markdown('</div>', unsafe_allow_html=True)
-
-def _cbt_step2():
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.subheader("② きっかけをえらぶ（近いものでOK）")
-    st.session_state.cbt["trigger_tags"] = trigger_selector(st.session_state.cbt.get("trigger_tags", []))
+    st.subheader("この気持ち、近かったきっかけは？")
+    st.session_state.cbt["trigger_tags"] = trigger_chip_row(
+        st.session_state.cbt.get("trigger_tags", [])
+    )
     st.session_state.cbt["trigger_free"] = st.text_area(
-        "任意の一言（なくてOK）",
+        "任意の一言（なくて大丈夫です）",
         value=st.session_state.cbt.get("trigger_free",""),
         placeholder="例）返信がまだ／『また失敗する』と浮かんだ など",
         height=72
     )
+    cols = st.columns(2)
+    with cols[0]:
+        st.session_state.cbt["distress_before"] = st.slider("いまのしんどさ（0〜10）", 0, 10, int(st.session_state.cbt.get("distress_before",5)))
+    with cols[1]:
+        st.session_state.cbt["prob_before"] = st.slider("いまの考えは、どのくらい“ありえそう”？（%）", 0, 100, int(st.session_state.cbt.get("prob_before",50)))
+    support(distress=st.session_state.cbt["distress_before"])
     st.markdown('</div>', unsafe_allow_html=True)
 
-def _cbt_step3():
+    # Step2 考えを整理（いまの見方 ↔ ほかの見方）
     st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.subheader("③ 見方の仮置き（短くでOK）")
-    st.caption("左＝いまの見方／右＝ほかの見方（片方だけでもOK）")
+    st.subheader("考えを整理する（いまの見方 ↔ ほかの見方）")
+    st.caption("片方だけでも大丈夫です。短くてOK。")
     cols2 = st.columns(2)
     with cols2[0]:
-        st.session_state.cbt["fact"] = st.text_area("いまの見方", value=st.session_state.cbt.get("fact",""),
-                                                   placeholder="例）返事が遅い＝嫌われたかも など", height=108)
+        st.session_state.cbt["fact"] = st.text_area(
+            "いまの見方",
+            value=st.session_state.cbt.get("fact",""),
+            placeholder="例）返事が遅い＝嫌われたかも など",
+            height=108
+        )
     with cols2[1]:
-        st.session_state.cbt["alt"] = st.text_area("ほかの見方（別の説明・例外）", value=st.session_state.cbt.get("alt",""),
-                                                  placeholder="例）移動中かも／前も夜に返ってきた など", height=108)
-    st.subheader("視界をひろげる小さなチェック")
-    st.caption("当てはまるものだけ軽くオンに。合わなければスルーでOK。")
-    g = st.session_state.cbt.setdefault("checks", {})
-    c1,c2 = st.columns(2)
-    with c1:
-        g["bw"] = st.checkbox("0/100で考えていたかも", value=bool(g.get("bw", False)))
-        g["fortune"] = st.checkbox("先の展開を一つに決めていたかも", value=bool(g.get("fortune", False)))
-        g["decide"] = st.checkbox("決めつけてしまっていたかも", value=bool(g.get("decide", False)))
-    with c2:
-        g["catastrophe"] = st.checkbox("最悪の状態を想定していたかも", value=bool(g.get("catastrophe", False)))
-        g["emotion"] = st.checkbox("感情が先に走っているかも", value=bool(g.get("emotion", False)))
-    st.session_state.cbt["checks"] = g
+        st.session_state.cbt["alt"] = st.text_area(
+            "ほかの見方（別の説明・例外）",
+            value=st.session_state.cbt.get("alt",""),
+            placeholder="例）移動中かも／前も夜に返ってきた など",
+            height=108
+        )
 
+    st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
+    st.subheader("視界をひろげる小さなチェック")
+    st.caption("当てはまるものだけ軽くオンに。合わなければスルーで大丈夫です。")
+    render_checks_and_tips()
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    # Step3 仮の見方
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.subheader("いま採用しておく“仮の見方”を1行で")
     starters = [
         "分からない部分は保留にします。",
         "可能性は一つじゃないかもしれない。",
         "今ある事実の範囲で受け止めます。",
         "決め打ちはいったん止めておきます。"
     ]
-    idx = st.radio("“仮の見方”の候補（編集可）", options=list(range(len(starters))),
+    idx = st.radio("候補（編集可）", options=list(range(len(starters))),
                    format_func=lambda i: starters[i], index=0, horizontal=False)
     seed = starters[idx] if 0 <= idx < len(starters) else ""
-    st.session_state.cbt["rephrase"] = st.text_area("仮の見方（1行）",
-                                                    value=st.session_state.cbt.get("rephrase","") or seed, height=84)
+    st.session_state.cbt["rephrase"] = st.text_area(
+        "仮の見方（1行）",
+        value=st.session_state.cbt.get("rephrase","") or seed,
+        height=84
+    )
     ccols = st.columns(2)
     with ccols[0]:
         st.session_state.cbt["prob_after"] = st.slider("この“仮の見方”のしっくり度（%）", 0, 100, int(st.session_state.cbt.get("prob_after",40)))
@@ -455,14 +479,14 @@ def _cbt_step3():
         st.session_state.cbt["distress_after"] = st.slider("いまのしんどさ（まとめた後）", 0, 10, int(st.session_state.cbt.get("distress_after",4)))
     st.markdown('</div>', unsafe_allow_html=True)
 
-    st.markdown('<div class="card">', unsafe_allow_html=True)
+    # 保存・初期化
     c1,c2 = st.columns(2)
     with c1:
         if st.button("💾 保存して完了（入力欄を初期化）"):
             now = datetime.now().isoformat(timespec="seconds")
             g = st.session_state.cbt["checks"]
             row = {
-                "ts":now,
+                "id":f"cbt-{now}","ts":now,
                 "emotions":" ".join(st.session_state.cbt.get("emotions",[])),
                 "trigger_tags":" ".join(st.session_state.cbt.get("trigger_tags",[])),
                 "trigger_free":st.session_state.cbt.get("trigger_free",""),
@@ -479,62 +503,17 @@ def _cbt_step3():
                 "prob_after":st.session_state.cbt.get("prob_after",0),
                 "distress_after":st.session_state.cbt.get("distress_after",0),
             }
-            try:
-                db_insert("cbt_entries", row)
-                st.session_state.cbt = {}; ensure_cbt_defaults()
-                st.session_state.cbt_step = 1
-                st.success("保存しました。ここで完了です。")
-            except Exception as e:
-                st.error(f"保存時にエラー: {e}")
+            _append_csv(CBT_CSV,row)
+            st.session_state.cbt = {}
+            ensure_cbt_defaults()
+            st.success("保存いたしました。ここで完了です。行動は決めなくて大丈夫です。")
     with c2:
         if st.button("🧼 入力欄のみ初期化（未保存分は消去）"):
-            st.session_state.cbt = {}; ensure_cbt_defaults()
-            st.info("入力欄を初期化しました（記録は残っています）。")
-    st.markdown('</div>', unsafe_allow_html=True)
+            st.session_state.cbt = {}
+            ensure_cbt_defaults()
+            st.info("入力欄を初期化いたしました（記録は残っています）。")
 
-def _cbt_nav_buttons():
-    step = st.session_state.cbt_step; total = 3
-    prev_col, next_col = st.columns(2)
-    with prev_col:
-        if st.button("← 前へ", disabled=(step<=1)):
-            st.session_state.cbt_step = max(1, step-1); vibrate(5)
-    with next_col:
-        if st.button(("完了へ →" if step==total else "次へ →")):
-            st.session_state.cbt_step = min(total, step+1); vibrate(7)
-
-def view_cbt():
-    ensure_cbt_defaults()
-    top_nav()
-    _cbt_step_header()
-    if not st.session_state.cbt_guided:
-        st.markdown('<div class="card">', unsafe_allow_html=True)
-        st.subheader("いまの気持ち")
-        st.session_state.cbt["emotions"] = emoji_selector(st.session_state.cbt.get("emotions", []))
-        st.markdown('</div>', unsafe_allow_html=True)
-
-        st.markdown('<div class="card">', unsafe_allow_html=True)
-        st.subheader("この気持ち、近かったきっかけは？")
-        st.session_state.cbt["trigger_tags"] = trigger_selector(st.session_state.cbt.get("trigger_tags", []))
-        st.session_state.cbt["trigger_free"] = st.text_area(
-            "任意の一言（なくてOK）", value=st.session_state.cbt.get("trigger_free",""),
-            placeholder="例）返信がまだ／『また失敗する』と浮かんだ など", height=72
-        )
-        cols = st.columns(2)
-        with cols[0]:
-            st.session_state.cbt["distress_before"] = st.slider("いまのしんどさ（0〜10）", 0, 10, int(st.session_state.cbt.get("distress_before",5)))
-        with cols[1]:
-            st.session_state.cbt["prob_before"] = st.slider("この考えの“ありえそう度”（%）", 0, 100, int(st.session_state.cbt.get("prob_before",50)))
-        support(distress=st.session_state.cbt["distress_before"])
-        st.markdown('</div>', unsafe_allow_html=True)
-
-        _cbt_step3()
-    else:
-        step = st.session_state.cbt_step
-        if step == 1: _cbt_step1()
-        if step == 2: _cbt_step2()
-        if step == 3: _cbt_step3()
-        _cbt_nav_buttons()
-
+# ---------------- Reflection ----------------
 def view_reflect():
     ensure_reflection_defaults()
     top_nav()
@@ -542,10 +521,20 @@ def view_reflect():
     st.subheader("本日をやさしくふり返る")
     st.caption("点数ではなく、心が少しやわらぐ表現で短くご記入ください。")
     st.session_state.reflection["date"] = st.date_input("日付", value=st.session_state.reflection["date"])
-    st.session_state.reflection["today_small_win"] = st.text_area("本日できたことを1つだけ：", value=st.session_state.reflection.get("today_small_win",""), height=76)
-    st.session_state.reflection["self_message"] = st.text_area("いまのご自身への一言：", value=st.session_state.reflection.get("self_message",""), height=76)
-    st.session_state.reflection["note_for_tomorrow"] = st.text_area("明日のご自身へのメモ（任意）：", value=st.session_state.reflection.get("note_for_tomorrow",""), height=76)
-    st.session_state.reflection["loneliness"] = st.slider("いまの孤独感（0〜10）", 0, 10, int(st.session_state.reflection.get("loneliness",5)))
+    st.session_state.reflection["today_small_win"] = st.text_area(
+        "本日できたことを1つだけ：",
+        value=st.session_state.reflection.get("today_small_win",""), height=76
+    )
+    st.session_state.reflection["self_message"] = st.text_area(
+        "いまのご自身へ一言：",
+        value=st.session_state.reflection.get("self_message",""), height=76
+    )
+    st.session_state.reflection["note_for_tomorrow"] = st.text_area(
+        "明日のご自身へのメモ（任意）：",
+        value=st.session_state.reflection.get("note_for_tomorrow",""), height=76
+    )
+    st.session_state.reflection["loneliness"] = st.slider(
+        "いまの孤独感（0〜10）", 0, 10, int(st.session_state.reflection.get("loneliness",5)))
     support(lonely=st.session_state.reflection["loneliness"])
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -555,32 +544,29 @@ def view_reflect():
             now = datetime.now().isoformat(timespec="seconds")
             dv = st.session_state.reflection["date"]
             date_str = dv.isoformat() if isinstance(dv,(date,datetime)) else str(dv)
-            row = {"date":date_str,"ts_saved":now,
+            row = {"id":f"ref-{now}","date":date_str,"ts_saved":now,
                    "small_win":st.session_state.reflection.get("today_small_win",""),
                    "self_message":st.session_state.reflection.get("self_message",""),
                    "note_for_tomorrow":st.session_state.reflection.get("note_for_tomorrow",""),
                    "loneliness":st.session_state.reflection.get("loneliness",0)}
-            try:
-                db_insert("daily_reflections", row)
-                st.session_state.reflection = {}; ensure_reflection_defaults()
-                st.success("保存しました。")
-            except Exception as e:
-                st.error(f"保存時にエラー: {e}")
+            _append_csv(REFLECT_CSV,row)
+            st.session_state.reflection = {}
+            ensure_reflection_defaults()
+            st.success("保存いたしました。")
     with c2:
         if st.button("🧼 入力欄のみ初期化（未保存分は消去）"):
-            st.session_state.reflection = {}; ensure_reflection_defaults()
-            st.info("入力欄を初期化しました（記録は残っています）。")
+            st.session_state.reflection = {}
+            ensure_reflection_defaults()
+            st.info("入力欄を初期化いたしました（記録は残っています）。")
 
+# ---------------- History ----------------
 def view_history():
     top_nav()
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.subheader("📓 記録（2分ノート）")
-    try:
-        df = db_select("cbt_entries","ts")
-    except Exception as e:
-        st.error(f"取得エラー: {e}"); df = pd.DataFrame()
+    df = _load_csv(CBT_CSV)
     if df.empty:
-        st.caption("まだ保存されたノートはありません。")
+        st.caption("まだ保存されたノートはございません。最初の2分を行うと、こちらに一覧が表示されます。")
     else:
         q = st.text_input("キーワード検索（見方・一言・きっかけ・感情）", "")
         view = df.copy()
@@ -588,11 +574,11 @@ def view_history():
         for c in text_cols:
             if c in view.columns: view[c] = view[c].astype(str)
         if q.strip():
-            q2 = q.strip().lower()
+            q = q.strip().lower()
             mask = False
             for c in text_cols:
                 if c in view.columns:
-                    mask = mask | view[c].str.lower().str.contains(q2)
+                    mask = mask | view[c].str.lower().str.contains(q)
             view = view[mask]
         if "ts" in view.columns:
             view = view.sort_values("ts", ascending=False)
@@ -610,6 +596,14 @@ def view_history():
                 st.caption(f"しんどさ: {b} → {a} ／ 体感の確からしさ: {pb}% → {pa}%")
             except Exception:
                 pass
+            tags=[]
+            if r.get("bw",False): tags.append("0/100")
+            if r.get("catastrophe",False): tags.append("最悪想定")
+            if r.get("fortune",False): tags.append("結末決め打ち")
+            if r.get("emotion",False): tags.append("感情先行")
+            if r.get("decide",False): tags.append("言い切り")
+            if tags:
+                st.markdown(" " .join([f"<span class='tag'>{t}</span>" for t in tags]), unsafe_allow_html=True)
             st.markdown('</div>', unsafe_allow_html=True)
         try:
             chart = df[["ts","distress_before","distress_after"]].copy()
@@ -622,12 +616,9 @@ def view_history():
 
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.subheader("📝 記録（1日のふり返り）")
-    try:
-        rf = db_select("daily_reflections","ts_saved")
-    except Exception as e:
-        st.error(f"取得エラー: {e}"); rf = pd.DataFrame()
+    rf = _load_csv(REFLECT_CSV)
     if rf.empty:
-        st.caption("まだ保存されたふり返りはありません。")
+        st.caption("まだ保存されたふり返りはございません。")
     else:
         view = rf.copy()
         if "date" in view.columns:
@@ -657,37 +648,39 @@ def view_history():
             pass
     st.markdown('</div>', unsafe_allow_html=True)
 
+# ---------------- Export / Settings ----------------
 def view_export():
     top_nav()
     st.subheader("⬇️ エクスポート & 設定")
     st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.markdown("**自分のデータをCSVでダウンロード**")
-    try:
-        df1 = db_select("cbt_entries","ts")
-        df2 = db_select("daily_reflections","ts_saved")
-    except Exception as e:
-        st.error(f"取得エラー: {e}")
-        df1, df2 = pd.DataFrame(), pd.DataFrame()
-    if not df1.empty:
-        st.download_button("⬇️ 2分ノート（CSV）をダウンロード", df1.to_csv(index=False).encode("utf-8"),
-                           file_name="cbt_entries.csv", mime="text/csv")
-    else:
-        st.caption("2分ノート：まだデータがありません。")
-    if not df2.empty:
-        st.download_button("⬇️ ふり返り（CSV）をダウンロード", df2.to_csv(index=False).encode("utf-8"),
-                           file_name="daily_reflections.csv", mime="text/csv")
-    else:
-        st.caption("ふり返り：まだデータがありません。")
+    st.markdown("**データのエクスポート（CSV）**")
+    _download_button(_load_csv(CBT_CSV), "⬇️ 2分ノート（CSV）をダウンロード", "cbt_entries.csv")
+    _download_button(_load_csv(REFLECT_CSV), "⬇️ ふり返り（CSV）をダウンロード", "daily_reflections.csv")
     st.markdown('</div>', unsafe_allow_html=True)
 
-# ================= Router =================
-# 認証（未ログインならここでフォームを表示して停止）
-user = auth_block()
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.markdown("**入力欄の初期化 / データの管理**")
+    c1,c2 = st.columns(2)
+    with c1:
+        if st.button("🧼 入力欄のみすべて初期化（記録は残ります）"):
+            st.session_state.cbt = {}; st.session_state.reflection = {}
+            ensure_cbt_defaults(); ensure_reflection_defaults()
+            st.success("入力欄を初期化いたしました。記録は残っています。")
+    with c2:
+        danger = st.checkbox("⚠️ すべての保存データ（CSV）を削除することに同意します")
+        if st.button("🗑️ すべての保存データを削除（取り消し不可）", disabled=not danger):
+            try:
+                if CBT_CSV.exists(): CBT_CSV.unlink()
+                if REFLECT_CSV.exists(): REFLECT_CSV.unlink()
+                st.success("保存データを削除いたしました。最初からやり直せます。")
+            except Exception as e:
+                st.error(f"削除時にエラーが発生しました: {e}")
+    st.markdown('</div>', unsafe_allow_html=True)
 
-# 画面遷移
+# ---------------- Render ----------------
 view = st.session_state.view
 if view == "INTRO":
-    view_intro()
+    top_nav(); view_intro()
 elif view == "HOME":
     top_nav(); view_home()
 elif view == "CBT":
@@ -699,10 +692,11 @@ elif view == "HISTORY":
 else:
     view_export()
 
-# ================= Footer =================
+# ---------------- Footer ----------------
 st.markdown("""
-<div style="text-align:center; color:var(--muted); margin-top:10px;">
+<div style="text-align:center; color:var(--muted); margin-top:12px;">
   <small>※ 個人名や連絡先は記入しないでください。<br>
   とてもつらい場合は、お住まいの地域の相談窓口や専門機関のご利用もご検討ください。</small>
 </div>
 """, unsafe_allow_html=True)
+
