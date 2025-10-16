@@ -98,7 +98,7 @@ def init_db():
             anon_id TEXT NOT NULL,
             ts TEXT NOT NULL,
             path TEXT NOT NULL,           -- 'breathing' or 'cbt'
-            emotion TEXT,                 -- かなしい/ふあん/もやもや/ふつう/うれしい
+            emotion TEXT,                 -- 悲しい/不安/もやもや/普通/嬉しい
             data_json TEXT
         );
     """)
@@ -134,8 +134,7 @@ tab_use, tab_hist, tab_about = st.tabs(["体験する", "履歴", "使い方 / �
 with tab_use:
     # 1) 感情選択（ひらがな）
     st.markdown("### ① いまのきもち")
-　　　　emotions ＝ ［”悲しい”,”不安”,”もやもや”,”普通”,”嬉しい”］    cols = st.columns(len(emotions))
-    if "emotion" not in st.session_state: st.session_state.emotion = None
+ emotions = ["悲しい", "不安","もやもや","普通","嬉しい"]    if "emotion" not in st.session_state: st.session_state.emotion = None
     for i, label in enumerate(emotions):
         with cols[i]:
             if st.button(label, use_container_width=True):
