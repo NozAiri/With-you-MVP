@@ -1,323 +1,320 @@
-# app.py — Sora Hybrid MVP (感情→[呼吸 or CBT]、SQLite保存/履歴閲覧つき)
+# app.py — Sora Hybrid MVP v2
+# 変更点:
+# - ひらがな感情選択／ログインなし（匿名セッション）
+# - CBTを濃く：前後スコア、認知のくせドロップダウン、行動計画
+# - 呼吸: デフォ2セット（可変）、星と波のCSSアニメ
 # 使い方:
-#   1) `pip install streamlit`
-#   2) `streamlit run app.py`
-# ポイント:
-#  - ニックネームで簡易ログイン（マルチユーザー同時利用OK）
-#  - 感情を選ぶ → 「呼吸で落ち着く」 or 「考えを整理（CBT）」 を選択
-#  - 入力内容はSQLiteに保存、履歴タブでいつでも確認
-#  - ボタンは必ずテキスト表示（“何のボタンか分からない”問題を解消）
-#  - 謎の白い空白を出さないように余白を最小化したレイアウト
+#   pip install streamlit
+#   streamlit run app.py
 
 import streamlit as st
-import sqlite3
-import json
+import sqlite3, json, os, uuid, time
 from datetime import datetime, timezone, timedelta
-import time
-import os
 import pandas as pd
 
-# ====== 基本設定 ======
+# ===== 基本設定 =====
 st.set_page_config(page_title="Sora Hybrid MVP", page_icon="🌙", layout="centered")
 
-# 余白・スタイル微調整（白い謎スペース対策）
+# スタイル（余白最小化＋アニメ）
 st.markdown("""
 <style>
-/* ヘッダー余白調整 */
-.block-container {padding-top: 1rem; padding-bottom: 2rem;}
-/* ボタン行の余白抑制 */
-button[kind="secondary"], button[kind="primary"] { margin: 0.25rem 0.25rem; }
-/* 入力欄の上下マージン縮小 */
-.css-1kyxreq, .stTextInput, .stTextArea { margin-top: 0.25rem; margin-bottom: 0.25rem; }
-/* サブヘッダーの余白調整 */
-h3, h4 { margin-top: 0.6rem; margin-bottom: 0.4rem; }
+.block-container { padding-top: 0.8rem; padding-bottom: 1.2rem; }
+
+/* --- 見出し調整 --- */
+h3, h4 { margin: .6rem 0 .4rem 0; }
+
+/* --- ボタンの行間 --- */
+button[kind="primary"], button[kind="secondary"] { margin: .25rem .25rem; }
+
+/* --- 入力欄余白 --- */
+.stTextInput, .stTextArea, .stNumberInput, .stSlider { margin: .2rem 0; }
+
+/* --- 呼吸アニメ: 星 --- */
+.breathing-star {
+  width: 140px; height: 140px;
+  margin: 10px auto 6px auto;
+  position: relative;
+  filter: drop-shadow(0 0 10px rgba(150,150,255,.35));
+}
+.star-shape {
+  width: 100%; height: 100%;
+  background: radial-gradient(circle at 50% 40%, #dfe7ff 0%, #a8b7ff 60%, #6f7cff 100%);
+  -webkit-clip-path: polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%,
+                             79% 91%, 50% 70%, 21% 91%, 32% 57%,
+                             2% 35%, 39% 35%);
+          clip-path: polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%,
+                             79% 91%, 50% 70%, 21% 91%, 32% 57%,
+                             2% 35%, 39% 35%);
+  animation: breathe var(--cycle,12s) ease-in-out infinite;
+  transform-origin: center;
+}
+@keyframes breathe {
+  0%   { transform: scale(0.82); }
+  25%  { transform: scale(1.05); }  /* 吸う(膨らむ) */
+  35%  { transform: scale(1.05); }  /* 止める */
+  70%  { transform: scale(0.80); }  /* 吐く(縮む) */
+  80%  { transform: scale(0.80); }  /* 止める */
+  100% { transform: scale(0.82); }
+}
+
+/* --- 呼吸アニメ: 波 --- */
+.wave-wrap {
+  width: 260px; height: 70px; margin: 8px auto 0 auto; overflow: hidden;
+  border-radius: 10px; position: relative;
+  background: linear-gradient(180deg,#0f172a,#101a30);
+  box-shadow: inset 0 0 20px rgba(80,120,255,.25);
+}
+.wave {
+  position: absolute; left: 0; right: 0; top: 0; bottom: 0;
+  background:
+    radial-gradient(circle at 10% 50%, rgba(255,255,255,.15) 2px, transparent 3px) -20px 0/40px 40px repeat-x,
+    linear-gradient(90deg, rgba(150,180,255,.25), rgba(90,120,255,.15), rgba(150,180,255,.25));
+  animation: waveMove 4s linear infinite;
+  opacity: .9;
+}
+@keyframes waveMove {
+  0% { background-position: 0 0, 0 0; }
+  100% { background-position: 260px 0, 260px 0; }
+}
+.phase {
+  text-align:center; font-weight:600; margin-top:2px;
+}
+.badge { display:inline-block; padding:.1rem .5rem; border-radius:999px; background:#eef2ff; color:#3b47a1; font-size:.85rem; }
+.small { color:#64748b; font-size:.85rem; }
+
+/* テーブルの余白軽減 */
+.dataframe tbody tr th, .dataframe tbody tr td { padding: .35rem .5rem; }
 </style>
 """, unsafe_allow_html=True)
 
-# ====== タイムゾーン（JST） ======
-JST = timezone(timedelta(hours=9))
-
-def now_jst_str():
-    return datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S")
-
-# ====== データベース準備（SQLite） ======
-DB_PATH = os.path.join(os.getcwd(), "sora_hybrid.db")
-
+# ===== DB =====
+DB = os.path.join(os.getcwd(), "sora_hybrid_v2.db")
 def init_db():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB)
     cur = conn.cursor()
     cur.execute("""
         CREATE TABLE IF NOT EXISTS entries (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user TEXT NOT NULL,
+            anon_id TEXT NOT NULL,
             ts TEXT NOT NULL,
-            path TEXT NOT NULL,          -- "breathing" or "cbt"
-            emotion_key TEXT,            -- e.g. "sad"
-            emotion_label TEXT,          -- e.g. "かなしい"
-            data_json TEXT               -- path別の詳細データ
+            path TEXT NOT NULL,           -- 'breathing' or 'cbt'
+            emotion TEXT,                 -- かなしい/ふあん/もやもや/ふつう/うれしい
+            data_json TEXT
         );
     """)
-    conn.commit()
-    conn.close()
-
-def save_entry(user, path, emotion_key, emotion_label, data_dict):
-    conn = sqlite3.connect(DB_PATH)
+    conn.commit(); conn.close()
+def save(anon_id, path, emotion, data):
+    conn = sqlite3.connect(DB)
     cur = conn.cursor()
-    cur.execute("""
-        INSERT INTO entries (user, ts, path, emotion_key, emotion_label, data_json)
-        VALUES (?, ?, ?, ?, ?, ?);
-    """, (user, now_jst_str(), path, emotion_key, emotion_label, json.dumps(data_dict, ensure_ascii=False)))
-    conn.commit()
-    conn.close()
-
-def get_user_history(user, limit=100):
-    conn = sqlite3.connect(DB_PATH)
+    cur.execute(
+        "INSERT INTO entries(anon_id, ts, path, emotion, data_json) VALUES (?,?,?,?,?)",
+        (anon_id, datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d %H:%M:%S"),
+         path, emotion, json.dumps(data, ensure_ascii=False))
+    )
+    conn.commit(); conn.close()
+def load_history(anon_id, limit=200):
+    conn = sqlite3.connect(DB)
     cur = conn.cursor()
-    cur.execute("""
-        SELECT ts, path, emotion_label, data_json
-        FROM entries
-        WHERE user = ?
-        ORDER BY ts DESC
-        LIMIT ?;
-    """, (user, limit))
+    cur.execute("SELECT ts, path, emotion, data_json FROM entries WHERE anon_id=? ORDER BY ts DESC LIMIT ?",
+                (anon_id, limit))
     rows = cur.fetchall()
     conn.close()
     return rows
-
 init_db()
 
-# ====== セッション初期化 ======
-if "user" not in st.session_state:
-    st.session_state.user = ""
-if "emotion" not in st.session_state:
-    st.session_state.emotion = {"key": None, "label": None}
-if "path" not in st.session_state:
-    st.session_state.path = None
-if "breathing_run" not in st.session_state:
-    st.session_state.breathing_run = False
+# ===== 匿名セッションID =====
+if "anon_id" not in st.session_state:
+    st.session_state.anon_id = str(uuid.uuid4())[:8]
 
-# ====== サイドバー：ログイン & ナビ ======
-with st.sidebar:
-    st.markdown("## 🌙 Sora Hybrid MVP")
-    st.caption("中高生の“今この瞬間”に寄り添う、短時間ハイブリッド体験")
+# ===== UI: ヘッダー =====
+st.markdown("## 🌙 Sora — ハイブリッド（呼吸 × CBT）MVP")
 
-    st.markdown("### 👤 ログイン（ニックネーム）")
-    user_input = st.text_input("ニックネーム（ひらがな/英数OK）", value=st.session_state.user)
-    if st.button("ログイン / 更新", use_container_width=True):
-        st.session_state.user = user_input.strip()
-        st.success("ログインしました")
+tab_use, tab_hist, tab_about = st.tabs(["体験する", "履歴", "使い方 / 検証"])
 
-    st.markdown("---")
-    nav = st.radio("ページ", ["体験する", "履歴を見る", "使い方 / メモ"], index=0)
-
-# ====== ログインチェック ======
-if not st.session_state.user:
-    st.warning("まず左のサイドバーで **ニックネーム** を入力して「ログイン / 更新」を押してね。")
-    st.stop()
-
-# ====== メイン：体験ページ ======
-if nav == "体験する":
-    st.markdown("### ① 今の気持ちを選ぶ")
-    st.caption("ボタンはテキストつきで“何のボタンか分からない”問題を回避しています。")
-
-    # 感情ボタン（テキスト＋絵文字）
-    emotions = [
-        {"key": "sad", "emoji": "😢", "label": "かなしい"},
-        {"key": "anx", "emoji": "😟", "label": "ふあん"},
-        {"key": "meh", "emoji": "😐", "label": "ふつう"},
-        {"key": "ok",  "emoji": "🙂", "label": "だいじょうぶ"},
-        {"key": "joy", "emoji": "😊", "label": "うれしい"},
-    ]
-
-    cols = st.columns(5)
-    for i, e in enumerate(emotions):
+with tab_use:
+    # 1) 感情選択（ひらがな）
+    st.markdown("### ① いまのきもち")
+　　　　emotions ＝ ［”悲しい”,”不安”,”もやもや”,”普通”,”嬉しい”］    cols = st.columns(len(emotions))
+    if "emotion" not in st.session_state: st.session_state.emotion = None
+    for i, label in enumerate(emotions):
         with cols[i]:
-            if st.button(f"{e['emoji']} {e['label']}", key=f"emo_{e['key']}", use_container_width=True):
-                st.session_state.emotion = {"key": e["key"], "label": e["label"]}
-                st.toast(f"今の気持ち：{e['emoji']} {e['label']}", icon="✅")
-
-    # 選択中表示
-    if st.session_state.emotion["key"] is None:
+            if st.button(label, use_container_width=True):
+                st.session_state.emotion = label
+                st.toast(f"気持ち：{label}", icon="✅")
+    if not st.session_state.emotion:
         st.info("↑ まず“今の気持ち”を選んでね。")
         st.stop()
-    else:
-        st.success(f"選択中：{st.session_state.emotion['label']}")
+    st.success(f"選んだ気持ち：{st.session_state.emotion}")
 
-    st.markdown("### ② どちらをやってみる？（ハイブリッド）")
+    # 2) モード選択
+    st.markdown("### ② 何をやってみる？")
     path_choice = st.radio(
-        "今は、落ち着きたい？ それとも考えを整理したい？",
-        ["呼吸で落ち着く（約1分）", "考えを整理（CBT 3分）"],
-        horizontal=False,
+        "※後で別の方も試せるよ",
+        ["よぶきを整える（約1分）", "考えを整理（CBT 3分）"],
+        horizontal=False
     )
-    st.session_state.path = "breathing" if "呼吸" in path_choice else "cbt"
+    path = "breathing" if "よぶき" in path_choice else "cbt"
+    st.divider()
 
-    st.markdown("---")
+    # 3-A) 呼吸モード（UI強化）
+    if path == "breathing":
+        st.markdown("### ③ よぶきを整える")
+        st.caption("吸う4秒 → 止める2秒 → 吐く4秒 → 止める2秒（1サイクル12秒）")
+        sets = st.slider("回数（しんどければ2回でOK）", min_value=1, max_value=4, value=2, step=1)
 
-    # ====== 呼吸モード ======
-    if st.session_state.path == "breathing":
-        st.markdown("### ③ 呼吸で落ち着く（1分）")
-        st.caption("吸って4秒 → 止めて2秒 → 吐いて4秒 → 止めて2秒 × 4セット（合計約48秒）")
-        st.write("**ヒント**：肩の力を抜いて、ゆっくり。画面のガイドに合わせてみよう。")
+        # CSSアニメ（星＋波）— サイクル長をCSS変数で渡す
+        cycle_seconds = 12
+        st.markdown(f"""
+        <div style="--cycle:{cycle_seconds}s">
+          <div class="breathing-star"><div class="star-shape"></div></div>
+        </div>
+        <div class="wave-wrap"><div class="wave"></div></div>
+        """, unsafe_allow_html=True)
 
-        # 操作ボタン
-        colA, colB = st.columns([1,1])
+        # 簡易フェーズガイド（テキストだけ同期）
+        colA, colB = st.columns(2)
         with colA:
-            start = st.button("▶ 開始", use_container_width=True)
+            start = st.button("▶ 始める", use_container_width=True)
         with colB:
             reset = st.button("⟲ リセット", use_container_width=True)
 
-        if reset:
-            st.session_state.breathing_run = False
-            st.experimental_rerun()
-
-        status = st.empty()
         phase_box = st.empty()
         prog = st.progress(0)
+        if reset:
+            st.experimental_rerun()
 
         if start:
-            st.session_state.breathing_run = True
-
-        # 実行ループ
-        if st.session_state.breathing_run:
-            total_sets = 4
-            phases = [
-                ("吸う", 4),
-                ("止める", 2),
-                ("吐く", 4),
-                ("止める", 2),
-            ]
-            current = 0
-            total_seconds = total_sets * sum(p[1] for p in phases)
+            total_seconds = sets * cycle_seconds
             elapsed = 0
+            for s in range(sets):
+                # 吸う4
+                for t in range(4,0,-1):
+                    phase_box.markdown(f"<div class='phase'><span class='badge'>吸う</span> 残り {t} 秒</div>", unsafe_allow_html=True)
+                    elapsed += 1; prog.progress(min(int(elapsed/total_seconds*100), 100)); time.sleep(1)
+                # 止2
+                for t in range(2,0,-1):
+                    phase_box.markdown(f"<div class='phase'><span class='badge'>止める</span> 残り {t} 秒</div>", unsafe_allow_html=True)
+                    elapsed += 1; prog.progress(min(int(elapsed/total_seconds*100), 100)); time.sleep(1)
+                # 吐4
+                for t in range(4,0,-1):
+                    phase_box.markdown(f"<div class='phase'><span class='badge'>吐く</span> 残り {t} 秒</div>", unsafe_allow_html=True)
+                    elapsed += 1; prog.progress(min(int(elapsed/total_seconds*100), 100)); time.sleep(1)
+                # 止2
+                for t in range(2,0,-1):
+                    phase_box.markdown(f"<div class='phase'><span class='badge'>止める</span> 残り {t} 秒</div>", unsafe_allow_html=True)
+                    elapsed += 1; prog.progress(min(int(elapsed/total_seconds*100), 100)); time.sleep(1)
 
-            for s in range(total_sets):
-                status.info(f"セット {s+1} / {total_sets}")
-                for name, sec in phases:
-                    for t in range(sec, 0, -1):
-                        if not st.session_state.breathing_run:
-                            break
-                        phase_box.markdown(f"#### {name}（残り {t} 秒）")
-                        elapsed += 1
-                        prog.progress(min(int((elapsed/total_seconds)*100), 100))
-                        time.sleep(1)
-                if not st.session_state.breathing_run:
-                    break
+            phase_box.markdown("<div class='phase'>お疲れ様です。少し楽になりましたか？</div>", unsafe_allow_html=True)
 
-            st.session_state.breathing_run = False
-            phase_box.success("おつかれさま。少し楽になったかな？")
+        st.markdown("#### ④ 一言メモ（日記として保存・任意）")
+        note = st.text_input("今の気持ち（短くでOK）", placeholder="例：ちょっと落ちついた／まだドキドキ など")
+        if st.button("保存する", type="primary"):
+            save(st.session_state.anon_id, "breathing", st.session_state.emotion,
+                 {"note": note, "sets": sets, "pattern": "4-2-4-2"})
+            st.success("保存しました（履歴タブで見られます）")
 
-            st.markdown("#### ④ ひとことメモ（任意）")
-            note = st.text_input("今の気持ち（短くでOK）", placeholder="例：ちょっと落ち着いた / まだ緊張してる など")
-            if st.button("保存する", type="primary"):
-                data = {
-                    "note": note,
-                    "sets": total_sets,
-                    "pattern": "4-2-4-2",
-                }
-                save_entry(
-                    user=st.session_state.user,
-                    path="breathing",
-                    emotion_key=st.session_state.emotion["key"],
-                    emotion_label=st.session_state.emotion["label"],
-                    data_dict=data
-                )
-                st.success("保存しました（履歴ページで見られます）")
+    # 3-B) CBTモード（濃い検証設計）
+    else:
+        st.markdown("### ③ 考えを整理（3分）")
+        st.caption("“前後スコア → 状況 → 自動思考 → 認知のくせ → 別の見方 → 今日の一歩”")
 
-    # ====== CBTモード ======
-    if st.session_state.path == "cbt":
-        st.markdown("### ③ 考えを整理（CBT 3分）")
-        st.caption("“状況→自動思考→別の見方→小さな一歩” の順で短く書くと、絡まった思考がほどけやすいよ。")
+        distortions = [
+            "0/100の考え方", "一般化しすぎ", "心の読みすぎ", "先読みしすぎ",
+            "ラベリング", "べき思考", "拡大/過小評価", "感情的決めつけ", "個人化/責任の取りすぎ", "とくになし"
+        ]
 
-        with st.form("cbt_form", clear_on_submit=False):
+        with st.form("cbt_form"):
+            col0a, col0b = st.columns(2)
+            with col0a:
+                pre = st.slider("前の気分（0=最悪〜10=落ちついてる）", 0, 10, 3)
+            with col0b:
+                post_plan = st.checkbox("後で“最新のスコア”を記録する（保存後に表示）", value=True)
+
             col1, col2 = st.columns(2)
             with col1:
-                situation = st.text_area("1) どんな状況？（事実）", placeholder="例：明日の提出、時間が足りない気がする", height=80)
-                thought   = st.text_area("2) 今浮かんだ考え（自動思考）", placeholder="例：失敗するかも / 私だけ遅れてる", height=80)
+                situation = st.text_area("1) 状況", height=80, placeholder="例：テストが近い／LINEの返事がない など")
+                thought   = st.text_area("2) 浮かんだ言葉", height=80, placeholder="例：絶対失敗する／嫌われたかも")
             with col2:
-                reframe  = st.text_area("3) 別の見方（やさしい仮説）", placeholder="例：今日は30分だけ進めたらOK / 手伝いを頼んでみよう", height=80)
-                step     = st.text_input("4) 今日の小さな一歩（具体的）", placeholder="例：タイマー15分で1セクションだけやる")
+                dist = st.selectbox("3) 認知のくせ（あてはまるなら）", options=distortions, index=len(distortions)-1)
+                reframe  = st.text_area("4) べつの見方（やさしい仮説）", height=80, placeholder="例：まず15分だけやれば前進／相手も忙しいだけかも")
+            step = st.text_input("5) 今日の一歩（5〜15分でできること）", placeholder="例：タイマー10分で1ページだけやる")
 
-            submitted = st.form_submit_button("保存する（履歴に追加）", type="primary")
+            submitted = st.form_submit_button("保存する", type="primary")
 
         if submitted:
-            if not situation.strip() and not thought.strip() and not reframe.strip() and not step.strip():
-                st.warning("どれか一つでOK。短くても大丈夫！")
-            else:
-                data = {
-                    "situation": situation.strip(),
-                    "thought": thought.strip(),
-                    "reframe": reframe.strip(),
-                    "step": step.strip(),
-                }
-                save_entry(
-                    user=st.session_state.user,
-                    path="cbt",
-                    emotion_key=st.session_state.emotion["key"],
-                    emotion_label=st.session_state.emotion["label"],
-                    data_dict=data
-                )
-                st.success("保存しました（履歴ページで見られます）")
+            payload = {
+                "pre": pre,
+                "situation": situation.strip(),
+                "thought": thought.strip(),
+                "distortion": dist,
+                "reframe": reframe.strip(),
+                "step": step.strip()
+            }
+            save(st.session_state.anon_id, "cbt", st.session_state.emotion, payload)
+            st.success("保存しました（履歴タブで見られます）")
+            if post_plan:
+                # “あとスコア”の入力UI（同じ画面で追加入力）
+                st.markdown("#### あとスコア（やってみた後でOK）")
+                post = st.slider("今の気分（0〜10）", 0, 10, min(10, max(0, pre)))
+                if st.button("今のスコアを追記"):
+                    # 直近のCBTレコードを読み直し→postを追記して上書き
+                    rows = load_history(st.session_state.anon_id, limit=1)
+                    if rows and rows[0][1] == "cbt":
+                        # 単純に新規行としてpostを書き足す（上書き簡略化）
+                        save(st.session_state.anon_id, "cbt", st.session_state.emotion,
+                             {"post_only": post})
+                        st.success("最新のスコアを追記しました（簡易保存）")
 
-        st.markdown("#### ✨ コツ")
-        st.write("- ぜんぶ書かなくてOK。**1行**でもすごい前進。")
-        st.write("- “今日の小さな一歩”は**5〜15分**で終わるサイズに。")
-
-# ====== 履歴ページ ======
-elif nav == "履歴を見る":
+with tab_hist:
     st.markdown("### 履歴")
-    rows = get_user_history(st.session_state.user, limit=200)
+    rows = load_history(st.session_state.anon_id, limit=300)
     if not rows:
-        st.info("まだ履歴はありません。まずは「体験する」からどうぞ。")
+        st.info("まだ記録はありません。となりのタブで体験してみてね。")
     else:
-        # テーブル用に整形
-        records = []
-        for ts, path, emo_label, data_json in rows:
+        # 表示整形
+        recs = []
+        for ts, path, emo, data_json in rows:
             try:
                 data = json.loads(data_json) if data_json else {}
             except:
                 data = {}
-            summary = ""
             if path == "breathing":
-                summary = f"呼吸（{data.get('pattern', '4-2-4-2')}）: {data.get('note','')}"
+                summary = f"よぶき {data.get('pattern','4-2-4-2')} × {data.get('sets',2)}回｜{data.get('note','')}"
             else:
                 # cbt
-                s = data.get("situation", "")
-                t = data.get("thought", "")
-                r = data.get("reframe", "")
-                step = data.get("step", "")
-                # なるべく短いサマリ
-                summary = "｜".join([x for x in [f"状況:{s}", f"思考:{t}", f"別の見方:{r}", f"一歩:{step}"] if x])[:120]
-            records.append({
-                "日時(JST)": ts,
-                "モード": "呼吸" if path=="breathing" else "CBT",
-                "気持ち": emo_label or "",
-                "メモ/サマリ": summary
+                bits = []
+                if "pre" in data: bits.append(f"まえ:{data.get('pre')}")
+                if data.get("situation"): bits.append("状況:"+data.get("situation"))
+                if data.get("thought"): bits.append("自動:"+data.get("thought"))
+                if data.get("distortion"): bits.append("くせ:"+data.get("distortion"))
+                if data.get("reframe"): bits.append("別見:"+data.get("reframe"))
+                if data.get("step"): bits.append("一歩:"+data.get("step"))
+                if "post_only" in data: bits.append(f"あと:{data.get('post_only')}")
+                summary = "｜".join(bits)[:140]
+            recs.append({
+                "日時(JST)": ts, "モード": "よぶき" if path=="breathing" else "CBT",
+                "気持ち": emo or "", "メモ/サマリ": summary
             })
-        df = pd.DataFrame(records)
+        df = pd.DataFrame(recs)
         st.dataframe(df, use_container_width=True, hide_index=True)
 
-# ====== 使い方 / メモ ======
-else:
-    st.markdown("### 使い方 / メモ")
-    st.write("""
-- 左サイドバーでニックネームを入れて **ログイン** → 「体験する」へ。
-- **①気持ちを選ぶ** → **②呼吸 or CBT を選択** → **保存**。
-- 保存すると **履歴** に追加され、あとで振り返れます。
-- データはローカルの `sora_hybrid.db`（SQLite）に保存されます。
-- Streamlit Cloud等でも動作します（同時利用OK）。**個人情報は入れない設計**を想定。
-- これは**メンタル医療の代替ではありません**。緊急時は専門機関へ。
-""")
-    st.markdown("#### ねらい（検証視点）")
-    st.write("""
-- **短時間（1〜3分）**での安心感・整理感が出るか
-- **感情選択 → 体験** の導線が迷わず使われるか
-- CBTの**“小さな一歩”**が実行しやすいサイズで提案できているか
-""")
-    st.markdown("#### 次の改善のタネ")
-    st.write("""
-- 呼吸ガイドのアニメーションを滑らかに（CSS/Canvas化）
-- 効果測定（前後の気分スケール 0-10）
-- 匿名アカウントの軽量ログイン（Magic link / 一時ID）
-- 学校向け: 管理画面で**集計のみ**（個人は見えない）→ 保護者配慮
-""")
+        # CSV保存（ローカル）
+        if st.button("CSVとして保存（/sora_history.csv）"):
+            csv_path = os.path.join(os.getcwd(), "sora_history.csv")
+            df.to_csv(csv_path, index=False, encoding="utf-8-sig")
+            st.success("保存しました: sora_history.csv")
+
+with tab_about:
+    st.markdown("### 使い方 / 検証ポイント")
+    st.write("- **ログインなし**で使える匿名MVP（個人テキストは手元保存、サーバ送信なし想定）")
+    st.write("- **ハイブリッド**：感情→（よぶき or CBT）→保存→履歴")
+    st.write("- **CBTは検証向け**：前後スコア・認知のくせ・一歩の記録で、短時間の効果をみる")
+    st.markdown("#### 検証で見る指標（例）")
+    st.write("1) 前後スコアの差（平均改善量）")
+    st.write("2) 1セッションあたりの完了率（開始→保存まで）")
+    st.write("3) “一歩”の実行率（次回ログでフラグ質問を追加予定）")
+    st.markdown("#### 次の改善アイデア")
+    st.write("- 呼吸アニメをCanvas化して**完全同期**（JS連携 or st_canvas等）")
+    st.write("- “あとスコア”を**同一レコードに追記**（編集API or レコードID保持）")
+    st.write("- 学校向けは**集計のみ**（個人テキスト非表示）ダッシュボード設計")
 
