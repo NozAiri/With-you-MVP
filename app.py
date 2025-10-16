@@ -179,72 +179,30 @@ with tab_use:
     st.divider()
 
     # ---------- 呼吸 ----------
-    if path == "breathing":
-        st.markdown("<div class='card'>", unsafe_allow_html=True)
-        st.markdown("#### ③ 呼吸で落ち着く")
-        st.caption("1サイクル＝吸気→停止→呼気→停止。必要回数のみで構いません。")
-
-        preset = st.selectbox(
-            "サイクル（秒）",
-            ["4-2-4-2（標準）", "3-1-5-1（軽め）", "4-4-4-4（均等）"],
-            index=0
-        )
-        if "3-1-5-1" in preset:
-            inhale, hold1, exhale, hold2 = 3, 1, 5, 1
-        elif "4-4-4-4" in preset:
-            inhale, hold1, exhale, hold2 = 4, 4, 4, 4
-        else:
-            inhale, hold1, exhale, hold2 = 4, 2, 4, 2
-
-        sets = st.slider("回数（推奨：2回）", min_value=1, max_value=4, value=2, step=1)
-        st.markdown("<div class='small'>画面の指示に合わせて、無理のない範囲でお願いいたします。</div>", unsafe_allow_html=True)
-
-        colA, colB = st.columns(2)
-        with colA:
-            start = st.button("開始", use_container_width=True)
-        with colB:
-            reset = st.button("リセット", use_container_width=True)
-
-        phase_box = st.empty()
-        count_box = st.empty()
-        prog = st.progress(0)
-
-        if reset:
-            st.experimental_rerun()
-
-        if start:
+           if start:
             total = sets * (inhale + hold1 + exhale + hold2)
             elapsed = 0
 
-            def run_phase(name: str, seconds: int):
-                nonlocal elapsed
-                if seconds <= 0:
-                    return
-                phase_box.markdown(f"<div class='phase-pill'>{name}</div>", unsafe_allow_html=True)
-                for t in range(seconds, 0, -1):
-                    count_box.markdown(f"<div class='count-box'>{t}</div>", unsafe_allow_html=True)
-                    elapsed += 1
-                    prog.progress(min(int(elapsed / total * 100), 100))
-                    time.sleep(1)
+            phases = [
+                ("吸気", inhale),
+                ("停止", hold1),
+                ("呼気", exhale),
+                ("停止", hold2),
+            ]
 
             for s in range(sets):
-                run_phase("吸気", inhale)
-                run_phase("停止", hold1)
-                run_phase("呼気", exhale)
-                run_phase("停止", hold2)
+                for name, seconds in phases:
+                    if seconds <= 0:
+                        continue
+                    phase_box.markdown(f"<div class='phase-pill'>{name}</div>", unsafe_allow_html=True)
+                    for t in range(seconds, 0, -1):
+                        count_box.markdown(f"<div class='count-box'>{t}</div>", unsafe_allow_html=True)
+                        elapsed += 1
+                        prog.progress(min(int(elapsed / total * 100), 100))
+                        time.sleep(1)
 
             phase_box.markdown("<div class='phase-pill'>完了</div>", unsafe_allow_html=True)
-            count_box.markdown(f"<div class='count-box'>お疲れさまでした。</div>", unsafe_allow_html=True)
-
-        st.markdown("##### ④ メモ（任意）")
-        note = st.text_input("現在の状態（短文で結構です）", placeholder="例：落ち着いた／少し緊張が残る など")
-        if st.button("保存する", type="primary"):
-            save_entry(
-                st.session_state.anon_id, "breathing", st.session_state.emotion,
-                {"note": note, "sets": sets, "pattern": f"{inhale}-{hold1}-{exhale}-{hold2}"}
-            )
-            st.success("保存いたしました（「履歴」タブからご確認いただけます）。")
-        st.markdown("</div>", unsafe_allow_html=True)
+            count_box.markdown("<div class='count-box'>お疲れさまでした。</div>", unsafe_allow_html=True)
 
     # ---------- CBT ----------
     else:
