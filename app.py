@@ -1,10 +1,8 @@
-# app.py — Sora Hybrid MVP（敬語・専門用語なし・ログイン不要・1ファイル）
-# 目的:
-#  3分以内で「落ち着く → 考えを整える → 今日の行動」に自然につなげます
-#  前後スコアとメモを残し、履歴で振り返れます（SQLite保存）
+# app.py — Sora Hybrid MVP v6
+# 敬語・専門用語なし / ログイン不要 / 呼吸カウントダウン + 考えの整理 / 書き込み可DB & フォールバック
 
 import streamlit as st
-import sqlite3, json, os, uuid, time
+import sqlite3, json, os, uuid, time, tempfile
 from datetime import datetime, timezone, timedelta
 import pandas as pd
 
@@ -14,76 +12,77 @@ st.set_page_config(page_title="Sora（ハイブリッド）", page_icon="🌙", 
 # ----------------- スタイル -----------------
 st.markdown("""
 <style>
-:root {
-  --accent:#3b82f6;
-  --text:#e5e7eb;
-  --sub:#94a3b8;
-  --card1:#0f172a;
-  --card2:#111827;
-}
+:root { --accent:#3b82f6; --text:#e5e7eb; --sub:#94a3b8; --card1:#0f172a; --card2:#111827; }
 html, body { background: radial-gradient(1200px 600px at 20% -10%, #0f172a, #0b1220); }
 .block-container { padding-top: 1.1rem; padding-bottom: 1.4rem; }
-
 h2,h3 { color: var(--text); letter-spacing:.2px; }
-label, p, .small { color:#cbd5e1; }
-.small { font-size:.9rem; color: var(--sub); }
-
-.card {
-  background: linear-gradient(180deg, var(--card1), var(--card2));
-  border: 1px solid rgba(148,163,184,.12);
-  border-radius: 16px;
-  padding: 16px 18px;
-  box-shadow: 0 6px 24px rgba(0,0,0,.25), inset 0 1px 0 rgba(255,255,255,.02);
-  margin-bottom: 14px;
-}
-
-button[kind="primary"]{
-  border-radius:12px;
-  border:1px solid rgba(59,130,246,.35);
-  box-shadow: 0 6px 18px rgba(59,130,246,.25);
-}
+label, p, .small { color:#cbd5e1; } .small { font-size:.9rem; color: var(--sub); }
+.card { background: linear-gradient(180deg, var(--card1), var(--card2));
+  border: 1px solid rgba(148,163,184,.12); border-radius: 16px; padding: 16px 18px;
+  box-shadow: 0 6px 24px rgba(0,0,0,.25), inset 0 1px 0 rgba(255,255,255,.02); margin-bottom: 14px; }
+button[kind="primary"]{ border-radius:12px; border:1px solid rgba(59,130,246,.35);
+  box-shadow: 0 6px 18px rgba(59,130,246,.25); }
 button[kind="secondary"]{ border-radius:12px; }
-
-.stTextArea, .stTextInput, .stNumberInput, .stSelectbox, .stSlider, .stRadio, .stButton {
-  margin:.25rem 0 .25rem 0;
-}
-
-/* 呼吸のフェーズ表示とカウント */
-.phase-pill{
-  display:inline-block; padding:.2rem .75rem; border-radius:999px;
+.stTextArea, .stTextInput, .stNumberInput, .stSelectbox, .stSlider, .stRadio, .stButton { margin:.25rem 0; }
+.phase-pill{ display:inline-block; padding:.2rem .75rem; border-radius:999px;
   background: rgba(59,130,246,.12); color:#bfdbfe; border:1px solid rgba(59,130,246,.25);
-  margin-bottom:6px; font-weight:600;
-}
-.count-box{
-  font-size: 42px; font-weight: 700; letter-spacing: .5px;
-  text-align:center; color:#e2e8f0; padding: 8px 0 2px 0;
-}
-
-/* 表の見やすさ */
+  margin-bottom:6px; font-weight:600; }
+.count-box{ font-size: 42px; font-weight: 700; letter-spacing: .5px; text-align:center;
+  color:#e2e8f0; padding: 8px 0 2px 0; }
 .dataframe tbody tr th, .dataframe tbody tr td { padding: .40rem .55rem; }
 </style>
 """, unsafe_allow_html=True)
 
-# ================= DB（SQLite） =================
-DB_PATH = os.path.join(os.getcwd(), "sora_hybrid.db")
+# ================= 匿名セッション =================
+if "anon_id" not in st.session_state:
+    st.session_state.anon_id = str(uuid.uuid4())[:8]
+
+# ================= DB（書き込み可パス & フォールバック） =================
+HOME_DIR = os.path.expanduser("~")
+DATA_DIR = os.path.join(HOME_DIR, ".sora_data")
+os.makedirs(DATA_DIR, exist_ok=True)
+DB_PATH = os.path.join(DATA_DIR, "sora_hybrid.db")
+
+USE_MEMORY_ONLY = False  # DBが使えない場合に True になる
+MEM_STORE = []          # フォールバック時のメモリ保存
+
+def get_conn():
+    return sqlite3.connect(DB_PATH, check_same_thread=False)
 
 def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS entries (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            anon_id TEXT NOT NULL,
-            ts TEXT NOT NULL,
-            path TEXT NOT NULL,       -- 'breathing' or 'thinking'
-            emotion TEXT,             -- 悲しい/不安/混乱/平静/嬉しい
-            data_json TEXT
-        );
-    """)
-    conn.commit(); conn.close()
+    global USE_MEMORY_ONLY
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("PRAGMA journal_mode=WAL;")
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS entries (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                anon_id TEXT NOT NULL,
+                ts TEXT NOT NULL,
+                path TEXT NOT NULL,       -- 'breathing' or 'thinking'
+                emotion TEXT,
+                data_json TEXT
+            );
+        """)
+        conn.commit(); conn.close()
+    except Exception as e:
+        USE_MEMORY_ONLY = True
+        st.warning("保存先の準備に失敗したため、この起動中は一時保存で対応いたします。アプリを再起動すると消えます。")
 
 def save_entry(anon_id: str, path: str, emotion: str, data: dict) -> int:
-    conn = sqlite3.connect(DB_PATH)
+    if USE_MEMORY_ONLY:
+        rid = len(MEM_STORE) + 1
+        MEM_STORE.append({
+            "id": rid,
+            "anon_id": anon_id,
+            "ts": datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d %H:%M:%S"),
+            "path": path,
+            "emotion": emotion,
+            "data_json": json.dumps(data, ensure_ascii=False)
+        })
+        return rid
+    conn = get_conn()
     cur = conn.cursor()
     cur.execute(
         "INSERT INTO entries(anon_id, ts, path, emotion, data_json) VALUES (?,?,?,?,?)",
@@ -96,7 +95,18 @@ def save_entry(anon_id: str, path: str, emotion: str, data: dict) -> int:
     return rowid
 
 def update_entry_json(rowid: int, update_dict: dict):
-    conn = sqlite3.connect(DB_PATH); cur = conn.cursor()
+    if USE_MEMORY_ONLY:
+        for r in MEM_STORE:
+            if r["id"] == rowid:
+                try:
+                    data = json.loads(r["data_json"]) if r["data_json"] else {}
+                except Exception:
+                    data = {}
+                data.update(update_dict)
+                r["data_json"] = json.dumps(data, ensure_ascii=False)
+                return
+        return
+    conn = get_conn(); cur = conn.cursor()
     cur.execute("SELECT data_json FROM entries WHERE id=?", (rowid,))
     row = cur.fetchone()
     if row:
@@ -109,18 +119,19 @@ def update_entry_json(rowid: int, update_dict: dict):
         conn.commit()
     conn.close()
 
-def load_history(anon_id: str, limit=300):
-    conn = sqlite3.connect(DB_PATH); cur = conn.cursor()
-    cur.execute("SELECT id, ts, path, emotion, data_json FROM entries WHERE anon_id=? ORDER BY ts DESC LIMIT ?",
-                (anon_id, limit))
+def load_history(anon_id: str, limit: int = 300):
+    if USE_MEMORY_ONLY:
+        rows = [ (r["id"], r["ts"], r["path"], r["emotion"], r["data_json"])
+                 for r in MEM_STORE if r["anon_id"] == anon_id ]
+        rows.sort(key=lambda x: x[1], reverse=True)
+        return rows[:limit]
+    conn = get_conn(); cur = conn.cursor()
+    # LIMIT には整数を直接埋め込む方がドライバ互換性が高い
+    cur.execute(f"SELECT id, ts, path, emotion, data_json FROM entries WHERE anon_id=? ORDER BY ts DESC LIMIT {int(limit)}", (anon_id,))
     rows = cur.fetchall(); conn.close()
     return rows
 
 init_db()
-
-# ============== 匿名セッション ==============
-if "anon_id" not in st.session_state:
-    st.session_state.anon_id = str(uuid.uuid4())[:8]
 
 # ============== ヘッダー ==============
 st.markdown("<h2>🌙 Sora — ハイブリッド（呼吸 と 考えの整理）</h2>", unsafe_allow_html=True)
@@ -169,11 +180,8 @@ with tab_use:
         st.markdown("#### ③ 呼吸で落ち着く")
         st.caption("1サイクル＝吸う → 止める → 吐く → 止める。無理のない回数で構いません。")
 
-        preset = st.selectbox(
-            "サイクル（秒）",
-            ["4-2-4-2（標準）", "3-1-5-1（軽め）", "4-4-4-4（均等）"],
-            index=0
-        )
+        preset = st.selectbox("サイクル（秒）",
+                              ["4-2-4-2（標準）", "3-1-5-1（軽め）", "4-4-4-4（均等）"], index=0)
         if "3-1-5-1" in preset:
             inhale, hold1, exhale, hold2 = 3, 1, 5, 1
         elif "4-4-4-4" in preset:
@@ -218,11 +226,9 @@ with tab_use:
         st.markdown("##### ④ メモ（任意）")
         note = st.text_input("今の状態（短文で結構です）", placeholder="例：少し落ち着いた／まだ緊張が残る など")
         if st.button("保存する", type="primary"):
-            save_entry(
-                st.session_state.anon_id, "breathing", st.session_state.emotion,
-                {"note": note, "sets": sets, "pattern": f"{inhale}-{hold1}-{exhale}-{hold2}"}
-            )
-            st.success("保存いたしました（「履歴」タブからご確認いただけます）。")
+            save_entry(st.session_state.anon_id, "breathing", st.session_state.emotion,
+                       {"note": note, "sets": sets, "pattern": f"{inhale}-{hold1}-{exhale}-{hold2}"})
+            st.success("保存いたしました（「履歴」タブでご確認いただけます）。")
         st.markdown("</div>", unsafe_allow_html=True)
 
     # ---------- 考えの整理 ----------
@@ -240,24 +246,23 @@ with tab_use:
 
             col1, col2 = st.columns(2)
             with col1:
-                situation = st.text_area("① 事実（何があったか）", height=90, placeholder="例：課題の期限が近い／返信がない など")
-                thought   = st.text_area("② 浮かんだ考え", height=90, placeholder="例：間に合わないかもしれない／嫌われたかも など")
+                situation = st.text_area("① 事実（何があったか）", height=90,
+                                         placeholder="例：課題の期限が近い／返信がない など")
+                thought   = st.text_area("② 浮かんだ考え", height=90,
+                                         placeholder="例：間に合わないかもしれない／嫌われたかも など")
             with col2:
-                view     = st.text_area("③ 別の見方（やさしい仮説）", height=90, placeholder="例：まず10分だけ進める／相手が忙しい可能性 など")
-            step = st.text_input("④ 今日の行動（5〜15分で終えられること）", placeholder="例：タイマー10分で1ページだけ進める")
+                view     = st.text_area("③ 別の見方（やさしい仮説）", height=90,
+                                         placeholder="例：まず10分だけ進める／相手が忙しい可能性 など")
+            step = st.text_input("④ 今日の行動（5〜15分で終えられること）",
+                                 placeholder="例：タイマー10分で1ページだけ進める")
 
             submitted = st.form_submit_button("保存する", type="primary")
 
         if submitted:
             rowid = save_entry(
                 st.session_state.anon_id, "thinking", st.session_state.emotion,
-                {
-                    "pre": pre,
-                    "situation": situation.strip(),
-                    "thought": thought.strip(),
-                    "view": view.strip(),
-                    "step": step.strip()
-                }
+                {"pre": pre, "situation": situation.strip(), "thought": thought.strip(),
+                 "view": view.strip(), "step": step.strip()}
             )
             st.success("保存いたしました（「履歴」タブからご確認いただけます）。")
 
@@ -305,9 +310,9 @@ with tab_hist:
         st.dataframe(df, use_container_width=True, hide_index=True)
 
         if st.button("CSVとして保存（/sora_history.csv）"):
-            csv_path = os.path.join(os.getcwd(), "sora_history.csv")
+            csv_path = os.path.join(DATA_DIR, "sora_history.csv")
             df.to_csv(csv_path, index=False, encoding="utf-8-sig")
-            st.success("保存いたしました：sora_history.csv")
+            st.success(f"保存いたしました：{csv_path}")
     st.markdown("</div>", unsafe_allow_html=True)
 
 # ================= 使い方 =================
@@ -315,8 +320,8 @@ with tab_about:
     st.markdown("<div class='card'>", unsafe_allow_html=True)
     st.markdown("#### 使い方")
     st.write("- ログインは不要です。内容はお使いの環境にあるファイルへ匿名で保存します。")
-    st.write("- 「呼吸で落ち着く」では、カウントに合わせてゆっくり呼吸してください。")
-    st.write("- 「考えを整える」では、短く書くことを最優先にしてください。全てを埋めなくても大丈夫です。")
-    st.markdown("#### 検証の観点（例）")
-    st.write("1) 前後の気分の差  2) 最後まで進んだ割合  3) 「今日の行動」の実行確認（次回以降に追加予定）")
+    st.write("- 「呼吸で落ち着く」はカウントに合わせてゆっくり進めてください。")
+    st.write("- 「考えを整える」は短く書くことを最優先に。空欄があっても構いません。")
+    if USE_MEMORY_ONLY:
+        st.warning("現在は一時保存で動作中です。アプリを再起動すると履歴は消えます。")
     st.markdown("</div>", unsafe_allow_html=True)
