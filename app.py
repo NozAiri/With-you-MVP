@@ -1,51 +1,59 @@
-# app_focus_nomood.py — Sora かんたんノート（“やること”で気分は聞かない版）
-# 起動: streamlit run app_focus_nomood.py
+# app_calm2min.py — 中高生向け「2分で止める」：ぐるぐる停止・寂しさダウン特化
+# 起動: streamlit run app_calm2min.py
 
-from datetime import datetime, date, time, timedelta
+from __future__ import annotations
+from datetime import datetime, date
 from pathlib import Path
 from typing import List, Dict
+import time
 import pandas as pd
 import streamlit as st
 
-# =============== 基本設定 & 落ち着くCSS ===============
-st.set_page_config(page_title="Sora かんたんノート", page_icon="🌙", layout="centered")
+# ================= 基本設定 & 落ち着くUI =================
+st.set_page_config(page_title="Sora 2分で止める", page_icon="🌙", layout="centered")
 
 CALM_CSS = """
 <style>
-:root{ --ink:#2b2d33; --muted:#6e7380; --panel:#ffffff; }
+:root{
+  --ink:#2b2d33; --muted:#6f7280; --panel:#ffffff;
+  --tint1:rgba(212,232,255,.35); --tint2:rgba(235,218,255,.35); --bd:rgba(120,120,200,.12);
+}
 .stApp{
   background:
-    radial-gradient(800px 480px at 0% -10%, rgba(212,232,255,.35), transparent 60%),
-    radial-gradient(900px 560px at 100% -8%, rgba(255,221,236,.32), transparent 60%),
-    linear-gradient(180deg,#fbfcff, #f8fbff 45%, #f9f6ff 100%);
+    radial-gradient(800px 520px at 0% -10%, var(--tint1), transparent 60%),
+    radial-gradient(820px 520px at 100% -8%, var(--tint2), transparent 60%),
+    linear-gradient(180deg,#fbfcff,#f7f9ff 50%, #faf8ff 100%);
 }
 .block-container{max-width:920px}
 h1,h2,h3{ color:var(--ink); letter-spacing:.2px }
-.stMarkdown, p, label{ color:var(--ink) }
+p,label, .stMarkdown{ color:var(--ink) }
 .small{color:var(--muted); font-size:.9rem}
 .card{
-  border:1px solid rgba(120,120,200,.12);
-  background:var(--panel);
+  border:1px solid var(--bd); background:var(--panel);
   border-radius:18px; padding:16px; margin:10px 0;
   box-shadow:0 16px 36px rgba(40,40,80,.06);
 }
+.kit-grid{display:grid; grid-template-columns:1fr 1fr; gap:10px}
+.badge{display:inline-block; padding:2px 8px; border-radius:999px; background:#f3f5ff; border:1px solid #e2e6ff; font-size:.85rem; color:#344;}
+hr{border:none; height:1px; background:linear-gradient(90deg,transparent,#dfe3ff,transparent); margin:10px 0}
 </style>
 """
 st.markdown(CALM_CSS, unsafe_allow_html=True)
 
-# =============== データ保存先 ===============
+# ================= データ保存先 =================
 DATA_DIR = Path("data"); DATA_DIR.mkdir(exist_ok=True)
-CSV_NOTE = DATA_DIR / "simple_notes.csv"
-CSV_DO   = DATA_DIR / "do_sessions.csv"   # “やること”の記録（前後チェック付き）
+CSV_SESS  = DATA_DIR / "calm_sessions.csv"   # 2分セッション
+CSV_BOX   = DATA_DIR / "comfort_box.csv"     # 安心ボックス（お気に入り）
 
-NOTE_COLS = ["ts","date","feeling","trigger","tags","memo","self_msg","next_action","distress"]
-# ↓ 気分カラム（mood_*）は持たない
-DO_COLS   = ["ts_start","ts_end","date","category","idea","plan_sentence",
-             "where","when_label","after_cue","duration_min",
-             "ease_before","distress_before",
-             "ease_after","distress_after","notes"]
+SESS_COLS = [
+    "ts_start","ts_end","date",
+    "loop_labels","anchor_used","breath_count","ground_54321",
+    "micro_action","from_box","notes",
+    "rumination_before","rumination_after",
+    "lonely_before","lonely_after"
+]
+BOX_COLS = ["added_ts","kind","label","detail"]
 
-# =============== ユーティリティ ===============
 def _ensure_cols(df: pd.DataFrame, cols: List[str]) -> pd.DataFrame:
     for c in cols:
         if c not in df.columns: df[c] = ""
@@ -66,324 +74,287 @@ def append_row(path: Path, row: Dict, cols: List[str]):
     df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
     df.to_csv(path, index=False, encoding="utf-8")
 
-# =============== マスタ（気分はノートでのみ使用） ===============
-EMOTIONS = [
-    "🙂 安定している","😟 不安","😢 悲しい","😡 怒り",
-    "😰 緊張","😴 疲労","😕 混乱","😔 落ち込み",
+# ================= プリセット =================
+LOOP_PRESETS = [
+    "既読がつかない不安", "比較して落ち込む", "失敗の想像",
+    "一人ぼっち感", "将来の心配", "体調の不安",
+    "完璧にしたい気持ち", "先生/親の目が気になる",
 ]
-TRIGGERS = [
-    "📱 返事が来ない/遅い","🏫 仕事・学業で消耗","👥 対人関係のモヤモヤ",
-    "🏠 家庭/生活の負荷","❓ 説明しにくい違和感",
+MICRO_ACTIONS = [
+    "スタンプだけ送る（メッセージは書かない）",
+    "家の人に『おやすみ』と言う",
+    "推しの曲を1曲だけ聴く",
+    "制服をハンガーにかける",
+    "机の上を3点だけ片づける",
+    "『今日はここまででOK』と自分に書く",
 ]
-TAGS = ["仕事","学校","家族","友人","SNS","健康","お金","その他"]
 
-CAT_MAP = {
-    "😊 気分が上がる": [
-        "外の光を5分浴びる","好きな音楽を1曲だけ聴く","温かい飲み物をゆっくり飲む",
-        "ストレッチを2分","感謝を3つメモする","ベランダ深呼吸3回",
-    ],
-    "💪 ちょっと進める": [
-        "机の上を2分だけ片づける","メール1通の下書きだけ","タスクを3つに絞る",
-        "ToDoを1つだけ着手","洗い物を5個だけ","書類を1束だけ仕分け",
-    ],
-    "🤝 つながり/意味": [
-        "『ありがとう』を1通送る","“お疲れさま”と伝える",
-        "自分にやさしい言葉を書き出す","自然の写真を1枚撮る","挨拶をひとつ増やす",
-    ],
-}
-WHERE_CHOICES = ["デスク","ベッド/ソファ","玄関周り","ベランダ/外","キッチン","その他"]
-WHEN_CHOICES  = ["今すぐ","10分後","30分後","時間を指定"]
-CUE_CHOICES   = ["タイマーが鳴ったら","飲み物を飲んだら","立ち上がったら","深呼吸3回の後で","メモを書いたら"]
-
-def compose_plan_sentence(idea:str, where:str, when_label:str, cue:str, duration:int, specific_time:time|None):
-    if when_label == "時間を指定" and specific_time:
-        t = f"{specific_time.strftime('%H:%M')}に"
-    elif when_label == "今すぐ":
-        t = "このあとすぐ"
-    else:
-        t = when_label
-    cue_part = f"{cue}、" if cue else ""
-    return f"{t}、{where}で、{cue_part}{idea}を{duration}分だけ。"
-
-# =============== ナビ ===============
-page = st.radio("メニュー", ["✏️ 書く","🧭 やること（小さく始める）","📚 記録","📈 インサイト"], horizontal=True)
-st.title("🌙 Sora かんたんノート")
+# ================= ナビ =================
+page = st.radio("メニュー", ["⏱️ 2分で止める", "📦 安心ボックス", "📚 記録 / インサイト"], horizontal=True)
+st.title("🌙 Sora — 2分で止める")
 
 with st.expander("このアプリについて（短く）", expanded=False):
     st.write(
-        "- 気持ちを整え、**次の一歩**を決めるためのシンプルなノートです。\n"
-        "- “やること”では**気分は再度たずねません**。前後で**取りかかりやすさ**と**しんどさ**のみ確認します。\n"
-        "- データは端末内CSVに保存（医療・診断ではありません）。"
+        "【目的】考えがぐるぐる回るのを**一度止めて**、寂しさ・しんどさを**少し下げる**。\n"
+        "1回**2分**、3ステップ（止める→体に戻す→つながる）。専門用語は使いません。\n"
+        "データはこの端末に保存されます。医療・診断ではありません。"
     )
 
-# =============== 1) 書く ===============
-if page == "✏️ 書く":
-    st.header("1. いまの気持ち")
-    feeling = st.radio("最も近いものを1つ", EMOTIONS, index=1)
+# ================= 1) 2分で止める =================
+if page == "⏱️ 2分で止める":
+    st.header("1. いまのぐるぐるに名前をつける（最大3つ）")
+    col1, col2 = st.columns(2)
+    with col1:
+        picked = st.multiselect("近いものを選ぶ", LOOP_PRESETS, max_selections=3)
+    with col2:
+        free = st.text_input("自分の言葉で（任意）", placeholder="例）明日の提出が不安")
+        if free.strip():
+            if free.strip() not in picked and len(picked) < 3:
+                # ユーザーの自由入力も候補に含められるよう表示
+                st.caption("✔️ 入れる場合は左の選択から追加してください。")
 
-    st.header("2. 何があった？（近いものを1つ）")
-    trigger = st.radio("出来事のタイプ", TRIGGERS, index=2)
+    st.subheader("測っておく（前）")
+    cA, cB = st.columns(2)
+    with cA:
+        rum_b = st.slider("ぐるぐるの強さ（0〜10）", 0, 10, 6)
+    with cB:
+        lon_b = st.slider("寂しさの強さ（0〜10）", 0, 10, 5)
 
-    st.header("3. メモ")
     st.markdown('<div class="card">', unsafe_allow_html=True)
-    memo = st.text_area("状況や思考（自由に）", placeholder="例）提出が遅れている。他の人は終わっていそうで焦る。", height=90)
+    st.subheader("2. この話題から**20秒だけ離れる**")
+    st.caption("ボタンを押すと20秒のカウントが始まります。目を閉じても、画面をぼんやり見てもOK。")
+    if st.button("▶︎ 20秒だけ離れる"):
+        pb = st.progress(0, text="20秒 だけ 離れる")
+        for i in range(20):
+            time.sleep(1)
+            pb.progress((i+1)/20, text=f"{20-(i+1)} 秒")
+        st.success("OK。ここまでで十分です。")
     st.markdown('</div>', unsafe_allow_html=True)
 
-    st.header("4. タグ（任意）")
-    tags = st.multiselect("あとで探しやすくするために", TAGS, default=[])
+    st.header("3. 体に戻す（どちらか1つでOK）")
+    tab1, tab2 = st.tabs(["👀 5-4-3-2-1", "🌬️ 呼吸 × 4"])
+    ground_54321 = ""
+    breath_count = 0
+    with tab1:
+        st.caption("見える/触れる/聞こえる/嗅げる/味わう を各1つずつ。テキストは短くでOK。")
+        g1 = st.text_input("見えるもの", key="g1")
+        g2 = st.text_input("触れるもの", key="g2")
+        g3 = st.text_input("聞こえる音", key="g3")
+        g4 = st.text_input("香り/空気", key="g4")
+        g5 = st.text_input("味/口の感覚", key="g5")
+        ground_54321 = " | ".join([g for g in [g1,g2,g3,g4,g5] if g.strip()])
+    with tab2:
+        st.caption("押すたびに数えます（4回で十分）。")
+        st.session_state.setdefault("breath", 0)
+        c1, c2, c3 = st.columns([2,1,1])
+        with c1:
+            if st.button("ゆっくり吸って吐く（+1）"):
+                st.session_state.breath = min(4, st.session_state.breath + 1)
+        with c2:
+            if st.button("−1"):
+                st.session_state.breath = max(0, st.session_state.breath - 1)
+        with c3:
+            if st.button("リセット"):
+                st.session_state.breath = 0
+        st.markdown(f"**回数：{st.session_state.breath} / 4**")
+        breath_count = int(st.session_state.breath)
 
-    st.header("5. 自分への一言（テンプレから選んで編集可）")
-    STARTERS = [
-        "分からないところは保留。今できる範囲に集中する。",
-        "事実と解釈を分けて受け止める。",
-        "完璧でなくてよい。小さく進めば十分。",
-        "過去の例外やうまくいった時も思い出す。",
-    ]
-    pick = st.radio("候補", STARTERS, index=2)
-    self_msg = st.text_input("1行メッセージ", value=pick)
+    st.header("4. つながり/安心を**1つだけ**足す")
+    st.caption("“誰かに連絡”でも“連絡しないで自分をねぎらう”でもOK。")
+    box_df = load_df(CSV_BOX, BOX_COLS)
+    favorites = box_df["label"].tolist() if not box_df.empty else []
+    left, right = st.columns(2)
+    with left:
+        fav = st.selectbox("安心ボックス（自分に効いたもの）", ["（選ばない）"] + favorites, index=0)
+    with right:
+        templ = st.selectbox("おすすめから選ぶ", ["（選ばない）"] + MICRO_ACTIONS, index=0)
+    micro_action = st.text_input("今回やること（1行）", value=(fav if fav!="（選ばない）" else (templ if templ!="（選ばない）" else "")))
+    notes = st.text_area("ひとことメモ（任意）", placeholder="やってみてどうだった？次は何を変える？", height=68)
 
-    st.header("6. 次の一歩（アイデアだけ）")
-    idea_templates = [
-        "5分だけ深呼吸＋目を閉じる","ToDoを3つに絞って1つだけ着手","水を飲んで姿勢を整える",
-        "返信テンプレを下書きだけ作る","今日は休む、と決める"
-    ]
-    idea_choice = st.selectbox("テンプレ（任意）", ["（選ばない）"] + idea_templates, index=0)
-    next_action = st.text_input("やるアイデア（短く）", value="" if idea_choice=="（選ばない）" else idea_choice)
+    st.subheader("測っておく（後）")
+    cC, cD = st.columns(2)
+    with cC:
+        rum_a = st.slider("ぐるぐるの強さ（0〜10）", 0, 10, max(0, rum_b-1), key="rum_after")
+    with cD:
+        lon_a = st.slider("寂しさの強さ（0〜10）", 0, 10, max(0, lon_b-1), key="lon_after")
 
-    st.header("7. しんどさ")
-    distress = st.slider("いまのしんどさ（0〜10）", 0, 10, 5)
+    st.markdown('<hr/>', unsafe_allow_html=True)
+    cS, cT = st.columns(2)
+    with cS:
+        save_to_box = st.checkbox("今回の“安心”をボックスに保存する", value=False)
+    with cT:
+        if st.button("💾 記録を保存"):
+            now = datetime.now()
+            if save_to_box and micro_action.strip():
+                append_row(CSV_BOX, {
+                    "added_ts": now.isoformat(timespec="seconds"),
+                    "kind": "custom",
+                    "label": micro_action.strip(),
+                    "detail": notes.strip()
+                }, BOX_COLS)
+            append_row(CSV_SESS, {
+                "ts_start": now.isoformat(timespec="seconds"),
+                "ts_end": now.isoformat(timespec="seconds"),
+                "date": date.today().isoformat(),
+                "loop_labels": " / ".join(picked + ([free.strip()] if free.strip() else [])),
+                "anchor_used": "54321" if ground_54321 else ("breath" if breath_count>0 else ""),
+                "breath_count": breath_count,
+                "ground_54321": ground_54321,
+                "micro_action": micro_action.strip(),
+                "from_box": fav if fav!="（選ばない）" else "",
+                "notes": notes.strip(),
+                "rumination_before": rum_b,
+                "rumination_after": rum_a,
+                "lonely_before": lon_b,
+                "lonely_after": lon_a
+            }, SESS_COLS)
+            st.success("保存しました。**ここまでで十分**です。")
+            # 後の回に備えて呼吸カウンタだけリセット
+            st.session_state.breath = 0
 
-    st.divider()
+# ================= 2) 安心ボックス =================
+elif page == "📦 安心ボックス":
+    st.header("自分に効いた“安心”をためておく箱")
+    st.caption("曲・物・言葉・香り・ルーティンなど。2分モードで先に表示されます。")
+    box_df = load_df(CSV_BOX, BOX_COLS)
+
     c1, c2 = st.columns(2)
     with c1:
-        if st.button("💾 保存して完了", use_container_width=True):
-            now = datetime.now()
-            append_row(CSV_NOTE, {
-                "ts": now.isoformat(timespec="seconds"),
-                "date": date.today().isoformat(),
-                "feeling": feeling,
-                "trigger": trigger,
-                "tags": " ".join(tags),
-                "memo": memo.strip(),
-                "self_msg": self_msg.strip(),
-                "next_action": next_action.strip(),
-                "distress": distress,
-            }, NOTE_COLS)
-            st.success("保存しました。具体化は『やること』タブでどうぞ。")
+        new_label = st.text_input("追加する“安心”（1行）", placeholder="例）YOASOBI『祝福』1コーラスだけ")
     with c2:
-        if st.button("🧼 入力をリセット（未保存）", use_container_width=True):
-            st.experimental_rerun()
-
-# =============== 2) やること（気分は聞かない） ===============
-elif page == "🧭 やること（小さく始める）":
-    st.header("A. 開始前の確認（気分は聞きません）")
-    ease_before = st.slider("取りかかりやすさ（0〜10）", 0, 10, 4)
-    distress_before = st.slider("しんどさ（0〜10）", 0, 10, 6)
-
-    st.header("B. アイデア → 実行プランへ（**左=アイデア** / **右=具体プラン**）")
-    colL, colR = st.columns(2)
-
-    with colL:
-        category = st.selectbox("カテゴリを選ぶ", list(CAT_MAP.keys()), index=0)
-        idea = st.selectbox("アイデア（編集可）", CAT_MAP[category], index=0)
-        idea = st.text_input("アイデア（短く一言）", value=idea, key="idea_edit")
-
-    with colR:
-        where = st.selectbox("どこで", WHERE_CHOICES, index=0)
-        when_label = st.selectbox("いつ", WHEN_CHOICES, index=0)
-        specific_time = None
-        if when_label == "時間を指定":
-            now = datetime.now()
-            rounded = (now + timedelta(minutes=10)).replace(second=0, microsecond=0)
-            specific_time = st.time_input("開始時刻", value=time(hour=rounded.hour, minute=rounded.minute), step=300)
-        after_cue = st.selectbox("きっかけ（任意）", ["（選ばない）"] + CUE_CHOICES, index=0)
-        duration = st.slider("何分だけやる？", 3, 30, 5)
-
-        plan_sentence = compose_plan_sentence(
-            idea=idea.strip(),
-            where=where,
-            when_label=when_label,
-            cue="" if after_cue=="（選ばない）" else after_cue,
-            duration=duration,
-            specific_time=specific_time
-        )
-        st.text_area("実行プラン（自動で作成・編集可）", value=plan_sentence, height=68, key="plan_sentence")
-
-    # セッション管理
-    st.session_state.setdefault("do_active", False)
-    st.session_state.setdefault("do_start_ts", "")
-
-    st.divider()
-    c3, c4 = st.columns(2)
-    with c3:
-        if not st.session_state.do_active:
-            if st.button("▶️ 今から始める（最初の10〜30秒だけでOK）", use_container_width=True):
-                st.session_state.do_active = True
-                st.session_state.do_start_ts = datetime.now().isoformat(timespec="seconds")
-                st.success("スタート！まずは立つ/タイマーをセット/一口飲む等から。")
+        new_detail = st.text_input("メモ（任意）", placeholder="いつ効きやすい？注意点など")
+    if st.button("➕ 追加"):
+        if new_label.strip():
+            append_row(CSV_BOX, {
+                "added_ts": datetime.now().isoformat(timespec="seconds"),
+                "kind": "custom",
+                "label": new_label.strip(),
+                "detail": new_detail.strip()
+            }, BOX_COLS)
+            st.success("追加しました。")
         else:
-            st.info(f"開始時刻：{st.session_state.do_start_ts}")
-    with c4:
-        if st.session_state.do_active:
-            if st.button("✅ 終わった（記録へ）", use_container_width=True):
-                st.session_state["do_pending_end"] = datetime.now().isoformat(timespec="seconds")
-                st.session_state.do_active = False
+            st.info("1行は入力してください。")
 
-    if st.session_state.get("do_pending_end"):
-        st.header("C. 終了後の確認（変化をチェック）")
-        ease_after = st.slider("取りかかりやすさ（0〜10）", 0, 10, max(5, ease_before), key="ease_after")
-        distress_after = st.slider("しんどさ（0〜10）", 0, 10, max(0, distress_before-1), key="dist_after")
-        notes = st.text_area("ひとことメモ（任意）", placeholder="やってみて感じたこと/次はどうする？", height=70)
-
-        c5, c6 = st.columns(2)
-        with c5:
-            if st.button("💾 記録を保存", use_container_width=True):
-                append_row(CSV_DO, {
-                    "ts_start": st.session_state.do_start_ts,
-                    "ts_end": st.session_state["do_pending_end"],
-                    "date": date.today().isoformat(),
-                    "category": category,
-                    "idea": idea.strip(),
-                    "plan_sentence": st.session_state.get("plan_sentence", plan_sentence),
-                    "where": where,
-                    "when_label": when_label if when_label != "時間を指定" else "時間指定",
-                    "after_cue": "" if after_cue=="（選ばない）" else after_cue,
-                    "duration_min": duration,
-                    "ease_before": ease_before,
-                    "distress_before": distress_before,
-                    "ease_after": ease_after,
-                    "distress_after": distress_after,
-                    "notes": notes.strip(),
-                }, DO_COLS)
-                st.session_state["do_pending_end"] = ""
-                st.session_state.do_start_ts = ""
-                st.success("保存しました。小さく動けたら十分です！")
-        with c6:
-            if st.button("🧼 破棄（保存しない）", use_container_width=True):
-                st.session_state["do_pending_end"] = ""
-                st.session_state.do_start_ts = ""
-                st.info("記録を破棄しました。")
-
-# =============== 3) 記録（ノート/やること） ===============
-elif page == "📚 記録":
-    st.header("ノート")
-    df = load_df(CSV_NOTE, NOTE_COLS)
-    if df.empty:
-        st.caption("まだノートの記録がありません。")
+    st.subheader("登録済み")
+    box_df = load_df(CSV_BOX, BOX_COLS)
+    if box_df.empty:
+        st.caption("まだありません。上のフォームから追加できます。")
     else:
+        try:
+            box_df["added_ts_dt"] = pd.to_datetime(box_df["added_ts"])
+            box_df = box_df.sort_values("added_ts_dt", ascending=False)
+        except Exception:
+            pass
+        for _, r in box_df.iterrows():
+            with st.container(border=True):
+                st.markdown(f"**🕒 {r.get('added_ts','')}**  —  **{r.get('label','')}**")
+                dt = str(r.get("detail","")).strip()
+                if dt: st.caption(dt)
+
+# ================= 3) 記録 / インサイト =================
+else:
+    st.header("記録")
+    df = load_df(CSV_SESS, SESS_COLS)
+    if df.empty:
+        st.caption("まだ記録がありません。『2分で止める』から始めてみてください。")
+    else:
+        # フィルタ
         c1, c2, c3 = st.columns(3)
-        with c1: q = st.text_input("キーワード（本文・タグ）", "")
-        with c2: emo_f = st.multiselect("気持ち", sorted(df["feeling"].dropna().unique().tolist()))
-        with c3: dmin, dmax = st.slider("しんどさ", 0, 10, (0, 10))
+        with c1:
+            q = st.text_input("キーワード（ループ名・安心・メモ）", "")
+        with c2:
+            rmin, rmax = st.slider("ぐるぐる（前）の範囲", 0, 10, (0,10))
+        with c3:
+            lmin, lmax = st.slider("寂しさ（前）の範囲", 0, 10, (0,10))
 
         view = df.copy()
-        for col in ["memo","self_msg","next_action","tags","trigger","feeling"]:
-            view[col] = view[col].astype(str)
+        for c in ["loop_labels","micro_action","notes","from_box","ground_54321"]:
+            view[c] = view[c].astype(str)
 
         if q.strip():
             ql = q.lower().strip()
-            mask = False
-            for col in ["memo","self_msg","next_action","tags","trigger","feeling"]:
-                mask = mask | view[col].str.lower().str.contains(ql)
-            view = view[mask]
+            m = False
+            for c in ["loop_labels","micro_action","notes","from_box","ground_54321"]:
+                m = m | view[c].str.lower().str.contains(ql)
+            view = view[m]
 
-        view["distress"] = pd.to_numeric(view["distress"], errors="coerce")
-        view = view[(view["distress"] >= dmin) & (view["distress"] <= dmax)]
+        # 数値型
+        for c in ["rumination_before","rumination_after","lonely_before","lonely_after"]:
+            view[c] = pd.to_numeric(view[c], errors="coerce")
+
+        view = view[
+            (view["rumination_before"].between(rmin, rmax)) &
+            (view["lonely_before"].between(lmin, lmax))
+        ]
 
         try:
-            view["ts_dt"] = pd.to_datetime(view["ts"])
+            view["ts_dt"] = pd.to_datetime(view["ts_start"])
             view = view.sort_values("ts_dt", ascending=False)
         except Exception:
             pass
 
-        for _, r in view.head(20).iterrows():
+        for _, r in view.head(30).iterrows():
             with st.container(border=True):
-                st.markdown(f"**🕒 {r.get('ts','')}** / **📅 {r.get('date','')}**")
-                st.markdown(f"**気持ち：** {r.get('feeling','')}  |  **出来事：** {r.get('trigger','')}")
-                tg = str(r.get("tags","")).strip()
-                if tg: st.markdown(f"**タグ：** {tg}")
-                mm = str(r.get("memo","")).strip()
-                if mm: st.markdown(f"**メモ：** {mm}")
-                st.markdown(f"**自分への一言：** {r.get('self_msg','')}")
-                na = str(r.get("next_action","")).strip()
-                if na: st.markdown(f"**次の一歩（アイデア）：** {na}")
+                st.markdown(f"**🕒 {r.get('ts_start','')}** / **📅 {r.get('date','')}**")
+                loops = str(r.get("loop_labels","")).strip()
+                if loops: st.markdown(f"**ループ名：** {loops}")
+                anc = r.get("anchor_used","")
+                if anc == "breath": st.markdown(f"**体に戻す：** 呼吸 × {int(r.get('breath_count',0))}")
+                elif anc == "54321": st.markdown("**体に戻す：** 5-4-3-2-1")
+                act = str(r.get("micro_action","")).strip()
+                if act: st.markdown(f"**足した安心：** {act}")
+                fb = str(r.get("from_box","")).strip()
+                if fb: st.caption(f"（安心ボックス：{fb}）")
+                nt = str(r.get("notes","")).strip()
+                if nt: st.markdown(f"**メモ：** {nt}")
+
+                # 差分バッジ
                 try:
-                    st.caption(f"しんどさ：{int(r.get('distress',0))}/10")
+                    dr = int(r.get("rumination_before",0)) - int(r.get("rumination_after",0))
+                    dl = int(r.get("lonely_before",0)) - int(r.get("lonely_after",0))
+                    st.markdown(
+                        f"<span class='badge'>ぐるぐる ↓ {dr}</span>  "
+                        f"<span class='badge'>寂しさ ↓ {dl}</span>", unsafe_allow_html=True
+                    )
                 except Exception:
                     pass
 
         st.divider()
         csv = view.drop(columns=[c for c in ["ts_dt"] if c in view.columns]).to_csv(index=False).encode("utf-8")
-        st.download_button("⬇️ CSVダウンロード（ノート）", csv, file_name="simple_notes.csv", mime="text/csv")
+        st.download_button("⬇️ CSVダウンロード（セッション）", csv, file_name="calm_sessions.csv", mime="text/csv")
 
-    st.header("やること")
-    do = load_df(CSV_DO, DO_COLS)
-    if do.empty:
-        st.caption("まだ“やること”の記録がありません。")
+    st.header("インサイト（超シンプル）")
+    if df.empty:
+        st.caption("可視化するデータがありません。")
     else:
         try:
-            do["start_dt"] = pd.to_datetime(do["ts_start"])
-            do = do.sort_values("start_dt", ascending=False)
+            df["ts_dt"] = pd.to_datetime(df["ts_start"])
+            df["rumination_before"] = pd.to_numeric(df["rumination_before"], errors="coerce")
+            df["rumination_after"]  = pd.to_numeric(df["rumination_after"],  errors="coerce")
+            df["lonely_before"]     = pd.to_numeric(df["lonely_before"], errors="coerce")
+            df["lonely_after"]      = pd.to_numeric(df["lonely_after"],  errors="coerce")
+            df = df.sort_values("ts_dt")
+
+            # 前後差の合計だけを見せる
+            total_dr = (df["rumination_before"] - df["rumination_after"]).dropna().sum()
+            total_dl = (df["lonely_before"] - df["lonely_after"]).dropna().sum()
+
+            st.markdown(
+                f"**累計の下げ幅** — ぐるぐる：{int(total_dr)} / 寂しさ：{int(total_dl)}"
+            )
+
+            # 日別の合計差
+            daily = df.groupby(df["ts_dt"].dt.date).apply(
+                lambda x: pd.Series({
+                    "ぐるぐる↓": (x["rumination_before"] - x["rumination_after"]).sum(),
+                    "寂しさ↓": (x["lonely_before"] - x["lonely_after"]).sum()
+                })
+            )
+            st.bar_chart(daily)
+
         except Exception:
-            pass
+            st.caption("インサイトの集計に失敗しました。")
 
-        for _, r in do.head(20).iterrows():
-            with st.container(border=True):
-                st.markdown(f"**⏱ {r.get('ts_start','')} → {r.get('ts_end','')}** / **📅 {r.get('date','')}**")
-                st.markdown(f"**カテゴリ：** {r.get('category','')}  |  **アイデア：** {r.get('idea','')}")
-                st.markdown(f"**実行プラン：** {r.get('plan_sentence','')}")
-                st.caption(f"場所：{r.get('where','')}  /  タイミング：{r.get('when_label','')}  /  きっかけ：{r.get('after_cue','')}  /  時間：{r.get('duration_min','')}分")
-                st.markdown(
-                    f"**前**（取りかかりやすさ/しんどさ）：{r.get('ease_before','')} / {r.get('distress_before','')}"
-                )
-                st.markdown(
-                    f"**後**（取りかかりやすさ/しんどさ）：{r.get('ease_after','')} / {r.get('distress_after','')}"
-                )
-                nt = str(r.get("notes","")).strip()
-                if nt: st.markdown(f"**メモ：** {nt}")
-
-        st.divider()
-        csv2 = do.drop(columns=[c for c in ["start_dt"] if c in do.columns]).to_csv(index=False).encode("utf-8")
-        st.download_button("⬇️ CSVダウンロード（やること）", csv2, file_name="do_sessions.csv", mime="text/csv")
-
-# =============== 4) インサイト ===============
-else:
-    st.header("簡単な傾向")
-    df = load_df(CSV_NOTE, NOTE_COLS)
-    do = load_df(CSV_DO, DO_COLS)
-
-    if df.empty and do.empty:
-        st.caption("記録がまだありません。")
-    else:
-        if not df.empty:
-            st.subheader("しんどさの推移（ノート）")
-            try:
-                df["ts_dt"] = pd.to_datetime(df["ts"])
-                df["distress"] = pd.to_numeric(df["distress"], errors="coerce")
-                chart = df[["ts_dt","distress"]].dropna().sort_values("ts_dt").set_index("ts_dt")
-                st.line_chart(chart)
-            except Exception:
-                st.caption("グラフを表示できませんでした。")
-
-            st.subheader("よく出る気持ち / 出来事（トップ5）")
-            c1, c2 = st.columns(2)
-            with c1: st.bar_chart(df["feeling"].value_counts().head(5))
-            with c2: st.bar_chart(df["trigger"].value_counts().head(5))
-
-        if not do.empty:
-            st.subheader("“やること”の前後差（取りかかりやすさ / しんどさ）")
-            try:
-                do["ease_before"] = pd.to_numeric(do["ease_before"], errors="coerce")
-                do["ease_after"]  = pd.to_numeric(do["ease_after"],  errors="coerce")
-                do["distress_before"] = pd.to_numeric(do["distress_before"], errors="coerce")
-                do["distress_after"]  = pd.to_numeric(do["distress_after"],  errors="coerce")
-                delta_ease = (do["ease_after"] - do["ease_before"]).fillna(0)
-                delta_dist = (do["distress_before"] - do["distress_after"]).fillna(0)
-                c3, c4 = st.columns(2)
-                with c3: st.bar_chart(delta_ease, height=220)
-                with c4: st.bar_chart(delta_dist, height=220)
-            except Exception:
-                st.caption("集計に失敗しました。")
-
+# ================= フッター =================
 st.write("")
-st.caption("※ 個人情報（氏名・連絡先）は書かないでください。強い苦痛が続く場合は専門機関の利用も検討してください。")
+st.caption("※ 個人情報（氏名・連絡先）は書かないでください。しんどさが強い日は、身近な大人や学校/地域の窓口も検討してください。")
