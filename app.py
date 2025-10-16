@@ -1,5 +1,5 @@
-# app_focus.py — Sora かんたんノート + やること（小さく始める版・重複解消）
-# 起動: streamlit run app_focus.py
+# app_focus_nomood.py — Sora かんたんノート（“やること”で気分は聞かない版）
+# 起動: streamlit run app_focus_nomood.py
 
 from datetime import datetime, date, time, timedelta
 from pathlib import Path
@@ -7,7 +7,7 @@ from typing import List, Dict
 import pandas as pd
 import streamlit as st
 
-# =============== 基本設定 & ほんの少し落ち着くCSS ===============
+# =============== 基本設定 & 落ち着くCSS ===============
 st.set_page_config(page_title="Sora かんたんノート", page_icon="🌙", layout="centered")
 
 CALM_CSS = """
@@ -39,10 +39,11 @@ CSV_NOTE = DATA_DIR / "simple_notes.csv"
 CSV_DO   = DATA_DIR / "do_sessions.csv"   # “やること”の記録（前後チェック付き）
 
 NOTE_COLS = ["ts","date","feeling","trigger","tags","memo","self_msg","next_action","distress"]
+# ↓ 気分カラム（mood_*）は持たない
 DO_COLS   = ["ts_start","ts_end","date","category","idea","plan_sentence",
              "where","when_label","after_cue","duration_min",
-             "mood_before","ease_before","distress_before",
-             "mood_after","ease_after","distress_after","notes"]
+             "ease_before","distress_before",
+             "ease_after","distress_after","notes"]
 
 # =============== ユーティリティ ===============
 def _ensure_cols(df: pd.DataFrame, cols: List[str]) -> pd.DataFrame:
@@ -65,20 +66,17 @@ def append_row(path: Path, row: Dict, cols: List[str]):
     df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
     df.to_csv(path, index=False, encoding="utf-8")
 
-# =============== マスタ（絵文字・トリガ・テンプレ） ===============
+# =============== マスタ（気分はノートでのみ使用） ===============
 EMOTIONS = [
     "🙂 安定している","😟 不安","😢 悲しい","😡 怒り",
     "😰 緊張","😴 疲労","😕 混乱","😔 落ち込み",
 ]
-
 TRIGGERS = [
     "📱 返事が来ない/遅い","🏫 仕事・学業で消耗","👥 対人関係のモヤモヤ",
     "🏠 家庭/生活の負荷","❓ 説明しにくい違和感",
 ]
-
 TAGS = ["仕事","学校","家族","友人","SNS","健康","お金","その他"]
 
-# “やること”候補（カテゴリ→候補）。左は「アイデア」、右は「実行プラン」に加工
 CAT_MAP = {
     "😊 気分が上がる": [
         "外の光を5分浴びる","好きな音楽を1曲だけ聴く","温かい飲み物をゆっくり飲む",
@@ -93,13 +91,11 @@ CAT_MAP = {
         "自分にやさしい言葉を書き出す","自然の写真を1枚撮る","挨拶をひとつ増やす",
     ],
 }
-
 WHERE_CHOICES = ["デスク","ベッド/ソファ","玄関周り","ベランダ/外","キッチン","その他"]
 WHEN_CHOICES  = ["今すぐ","10分後","30分後","時間を指定"]
 CUE_CHOICES   = ["タイマーが鳴ったら","飲み物を飲んだら","立ち上がったら","深呼吸3回の後で","メモを書いたら"]
 
 def compose_plan_sentence(idea:str, where:str, when_label:str, cue:str, duration:int, specific_time:time|None):
-    t = ""
     if when_label == "時間を指定" and specific_time:
         t = f"{specific_time.strftime('%H:%M')}に"
     elif when_label == "今すぐ":
@@ -116,11 +112,11 @@ st.title("🌙 Sora かんたんノート")
 with st.expander("このアプリについて（短く）", expanded=False):
     st.write(
         "- 気持ちを整え、**次の一歩**を決めるためのシンプルなノートです。\n"
-        "- “やること”は**小さく・短く・具体的**に。前後の気分も軽く確認します。\n"
-        "- データは端末内のCSVに保存。医療・診断ではありません。"
+        "- “やること”では**気分は再度たずねません**。前後で**取りかかりやすさ**と**しんどさ**のみ確認します。\n"
+        "- データは端末内CSVに保存（医療・診断ではありません）。"
     )
 
-# =============== 1) 書く（重複解消） ===============
+# =============== 1) 書く ===============
 if page == "✏️ 書く":
     st.header("1. いまの気持ち")
     feeling = st.radio("最も近いものを1つ", EMOTIONS, index=1)
@@ -146,8 +142,7 @@ if page == "✏️ 書く":
     pick = st.radio("候補", STARTERS, index=2)
     self_msg = st.text_input("1行メッセージ", value=pick)
 
-    st.header("6. 次の一歩（ここは**要点だけ**）")
-    # ★ 重複解消：ここは「アイデア」だけ。具体化は次タブ「やること」で行う。
+    st.header("6. 次の一歩（アイデアだけ）")
     idea_templates = [
         "5分だけ深呼吸＋目を閉じる","ToDoを3つに絞って1つだけ着手","水を飲んで姿勢を整える",
         "返信テンプレを下書きだけ作る","今日は休む、と決める"
@@ -179,10 +174,9 @@ if page == "✏️ 書く":
         if st.button("🧼 入力をリセット（未保存）", use_container_width=True):
             st.experimental_rerun()
 
-# =============== 2) やること（小さく始める） ===============
+# =============== 2) やること（気分は聞かない） ===============
 elif page == "🧭 やること（小さく始める）":
-    st.header("A. 開始前の確認")
-    mood_before = st.radio("気分（絵文字つき）", EMOTIONS, index=1)
+    st.header("A. 開始前の確認（気分は聞きません）")
     ease_before = st.slider("取りかかりやすさ（0〜10）", 0, 10, 4)
     distress_before = st.slider("しんどさ（0〜10）", 0, 10, 6)
 
@@ -199,7 +193,6 @@ elif page == "🧭 やること（小さく始める）":
         when_label = st.selectbox("いつ", WHEN_CHOICES, index=0)
         specific_time = None
         if when_label == "時間を指定":
-            # デフォルトは現在時刻+10分（丸め）
             now = datetime.now()
             rounded = (now + timedelta(minutes=10)).replace(second=0, microsecond=0)
             specific_time = st.time_input("開始時刻", value=time(hour=rounded.hour, minute=rounded.minute), step=300)
@@ -214,7 +207,6 @@ elif page == "🧭 やること（小さく始める）":
             duration=duration,
             specific_time=specific_time
         )
-        # ★ 右は「実行プラン文」に統合（2枚目スクショの“左右で同じに見える”問題を解消）
         st.text_area("実行プラン（自動で作成・編集可）", value=plan_sentence, height=68, key="plan_sentence")
 
     # セッション管理
@@ -238,8 +230,7 @@ elif page == "🧭 やること（小さく始める）":
                 st.session_state.do_active = False
 
     if st.session_state.get("do_pending_end"):
-        st.header("C. 終了後の確認（気分の変化）")
-        mood_after = st.radio("今の気分", EMOTIONS, index=0, key="mood_after")
+        st.header("C. 終了後の確認（変化をチェック）")
         ease_after = st.slider("取りかかりやすさ（0〜10）", 0, 10, max(5, ease_before), key="ease_after")
         distress_after = st.slider("しんどさ（0〜10）", 0, 10, max(0, distress_before-1), key="dist_after")
         notes = st.text_area("ひとことメモ（任意）", placeholder="やってみて感じたこと/次はどうする？", height=70)
@@ -258,10 +249,8 @@ elif page == "🧭 やること（小さく始める）":
                     "when_label": when_label if when_label != "時間を指定" else "時間指定",
                     "after_cue": "" if after_cue=="（選ばない）" else after_cue,
                     "duration_min": duration,
-                    "mood_before": mood_before,
                     "ease_before": ease_before,
                     "distress_before": distress_before,
-                    "mood_after": mood_after,
                     "ease_after": ease_after,
                     "distress_after": distress_after,
                     "notes": notes.strip(),
@@ -283,12 +272,9 @@ elif page == "📚 記録":
         st.caption("まだノートの記録がありません。")
     else:
         c1, c2, c3 = st.columns(3)
-        with c1:
-            q = st.text_input("キーワード（本文・タグ）", "")
-        with c2:
-            emo_f = st.multiselect("気持ち", sorted(df["feeling"].dropna().unique().tolist()))
-        with c3:
-            dmin, dmax = st.slider("しんどさ", 0, 10, (0, 10))
+        with c1: q = st.text_input("キーワード（本文・タグ）", "")
+        with c2: emo_f = st.multiselect("気持ち", sorted(df["feeling"].dropna().unique().tolist()))
+        with c3: dmin, dmax = st.slider("しんどさ", 0, 10, (0, 10))
 
         view = df.copy()
         for col in ["memo","self_msg","next_action","tags","trigger","feeling"]:
@@ -348,10 +334,10 @@ elif page == "📚 記録":
                 st.markdown(f"**実行プラン：** {r.get('plan_sentence','')}")
                 st.caption(f"場所：{r.get('where','')}  /  タイミング：{r.get('when_label','')}  /  きっかけ：{r.get('after_cue','')}  /  時間：{r.get('duration_min','')}分")
                 st.markdown(
-                    f"**前**（気分/取りかかりやすさ/しんどさ）：{r.get('mood_before','')} / {r.get('ease_before','')} / {r.get('distress_before','')}"
+                    f"**前**（取りかかりやすさ/しんどさ）：{r.get('ease_before','')} / {r.get('distress_before','')}"
                 )
                 st.markdown(
-                    f"**後**（気分/取りかかりやすさ/しんどさ）：{r.get('mood_after','')} / {r.get('ease_after','')} / {r.get('distress_after','')}"
+                    f"**後**（取りかかりやすさ/しんどさ）：{r.get('ease_after','')} / {r.get('distress_after','')}"
                 )
                 nt = str(r.get("notes","")).strip()
                 if nt: st.markdown(f"**メモ：** {nt}")
