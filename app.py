@@ -1,15 +1,17 @@
-# app.py — Sora Hybrid MVP v6
-# 敬語・専門用語なし / ログイン不要 / 呼吸カウントダウン + 考えの整理 / 書き込み可DB & フォールバック
+# app.py — Sora Hybrid (メモリ保存版 / 書き込み不要 / 敬語・専門用語なし)
+# 目的:
+#   3分以内で「落ち着く → 考えを整える → 今日の行動」につなげます
+#   保存はメモリのみ（この起動中）。CSVをその場でダウンロードできます。
 
 import streamlit as st
-import sqlite3, json, os, uuid, time, tempfile
+import json, uuid, time
 from datetime import datetime, timezone, timedelta
 import pandas as pd
 
-# ================= 基本設定 =================
+# ============== 基本設定 ==============
 st.set_page_config(page_title="Sora（ハイブリッド）", page_icon="🌙", layout="centered")
 
-# ----------------- スタイル -----------------
+# -------------- スタイル ---------------
 st.markdown("""
 <style>
 :root { --accent:#3b82f6; --text:#e5e7eb; --sub:#94a3b8; --card1:#0f172a; --card2:#111827; }
@@ -33,105 +35,42 @@ button[kind="secondary"]{ border-radius:12px; }
 </style>
 """, unsafe_allow_html=True)
 
-# ================= 匿名セッション =================
-if "anon_id" not in st.session_state:
-    st.session_state.anon_id = str(uuid.uuid4())[:8]
+# ============== セッションと保存（メモリのみ） ==============
+if "session_id" not in st.session_state:
+    st.session_state.session_id = str(uuid.uuid4())[:8]
+if "records" not in st.session_state:
+    st.session_state.records = []   # ここに辞書を積む（この起動中のみ保持）
 
-# ================= DB（書き込み可パス & フォールバック） =================
-HOME_DIR = os.path.expanduser("~")
-DATA_DIR = os.path.join(HOME_DIR, ".sora_data")
-os.makedirs(DATA_DIR, exist_ok=True)
-DB_PATH = os.path.join(DATA_DIR, "sora_hybrid.db")
+def jst_now():
+    return datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d %H:%M:%S")
 
-USE_MEMORY_ONLY = False  # DBが使えない場合に True になる
-MEM_STORE = []          # フォールバック時のメモリ保存
+def save_record(path: str, emotion: str, data: dict) -> int:
+    rec_id = len(st.session_state.records) + 1
+    st.session_state.records.append({
+        "id": rec_id,
+        "session": st.session_state.session_id,
+        "ts": jst_now(),
+        "path": path,                 # 'breathing' or 'thinking'
+        "emotion": emotion,
+        "data_json": json.dumps(data, ensure_ascii=False)
+    })
+    return rec_id
 
-def get_conn():
-    return sqlite3.connect(DB_PATH, check_same_thread=False)
+def update_record(rec_id: int, extra: dict):
+    for r in st.session_state.records:
+        if r["id"] == rec_id:
+            try:
+                d = json.loads(r["data_json"]) if r["data_json"] else {}
+            except Exception:
+                d = {}
+            d.update(extra)
+            r["data_json"] = json.dumps(d, ensure_ascii=False)
+            break
 
-def init_db():
-    global USE_MEMORY_ONLY
-    try:
-        conn = get_conn()
-        cur = conn.cursor()
-        cur.execute("PRAGMA journal_mode=WAL;")
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS entries (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                anon_id TEXT NOT NULL,
-                ts TEXT NOT NULL,
-                path TEXT NOT NULL,       -- 'breathing' or 'thinking'
-                emotion TEXT,
-                data_json TEXT
-            );
-        """)
-        conn.commit(); conn.close()
-    except Exception as e:
-        USE_MEMORY_ONLY = True
-        st.warning("保存先の準備に失敗したため、この起動中は一時保存で対応いたします。アプリを再起動すると消えます。")
-
-def save_entry(anon_id: str, path: str, emotion: str, data: dict) -> int:
-    if USE_MEMORY_ONLY:
-        rid = len(MEM_STORE) + 1
-        MEM_STORE.append({
-            "id": rid,
-            "anon_id": anon_id,
-            "ts": datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d %H:%M:%S"),
-            "path": path,
-            "emotion": emotion,
-            "data_json": json.dumps(data, ensure_ascii=False)
-        })
-        return rid
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute(
-        "INSERT INTO entries(anon_id, ts, path, emotion, data_json) VALUES (?,?,?,?,?)",
-        (anon_id,
-         datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d %H:%M:%S"),
-         path, emotion, json.dumps(data, ensure_ascii=False))
-    )
-    rowid = cur.lastrowid
-    conn.commit(); conn.close()
-    return rowid
-
-def update_entry_json(rowid: int, update_dict: dict):
-    if USE_MEMORY_ONLY:
-        for r in MEM_STORE:
-            if r["id"] == rowid:
-                try:
-                    data = json.loads(r["data_json"]) if r["data_json"] else {}
-                except Exception:
-                    data = {}
-                data.update(update_dict)
-                r["data_json"] = json.dumps(data, ensure_ascii=False)
-                return
-        return
-    conn = get_conn(); cur = conn.cursor()
-    cur.execute("SELECT data_json FROM entries WHERE id=?", (rowid,))
-    row = cur.fetchone()
-    if row:
-        try:
-            data = json.loads(row[0]) if row[0] else {}
-        except Exception:
-            data = {}
-        data.update(update_dict)
-        cur.execute("UPDATE entries SET data_json=? WHERE id=?", (json.dumps(data, ensure_ascii=False), rowid))
-        conn.commit()
-    conn.close()
-
-def load_history(anon_id: str, limit: int = 300):
-    if USE_MEMORY_ONLY:
-        rows = [ (r["id"], r["ts"], r["path"], r["emotion"], r["data_json"])
-                 for r in MEM_STORE if r["anon_id"] == anon_id ]
-        rows.sort(key=lambda x: x[1], reverse=True)
-        return rows[:limit]
-    conn = get_conn(); cur = conn.cursor()
-    # LIMIT には整数を直接埋め込む方がドライバ互換性が高い
-    cur.execute(f"SELECT id, ts, path, emotion, data_json FROM entries WHERE anon_id=? ORDER BY ts DESC LIMIT {int(limit)}", (anon_id,))
-    rows = cur.fetchall(); conn.close()
-    return rows
-
-init_db()
+def load_my_records(limit: int = 300):
+    rows = [r for r in st.session_state.records if r["session"] == st.session_state.session_id]
+    rows.sort(key=lambda x: x["ts"], reverse=True)
+    return rows[:limit]
 
 # ============== ヘッダー ==============
 st.markdown("<h2>🌙 Sora — ハイブリッド（呼吸 と 考えの整理）</h2>", unsafe_allow_html=True)
@@ -139,7 +78,7 @@ st.markdown("<p class='small'>短い時間で「落ち着く → 考えを整え
 
 tab_use, tab_hist, tab_about = st.tabs(["体験", "履歴", "使い方"])
 
-# ================= 体験タブ =================
+# ============== 体験タブ ==============
 with tab_use:
     # ① 気持ち
     st.markdown("<div class='card'>", unsafe_allow_html=True)
@@ -192,10 +131,8 @@ with tab_use:
         sets = st.slider("回数（推奨：2回）", min_value=1, max_value=4, value=2, step=1)
 
         colA, colB = st.columns(2)
-        with colA:
-            start = st.button("開始", use_container_width=True)
-        with colB:
-            reset = st.button("リセット", use_container_width=True)
+        with colA:   start = st.button("開始", use_container_width=True)
+        with colB:   reset = st.button("リセット", use_container_width=True)
 
         phase_box = st.empty()
         count_box = st.empty()
@@ -226,9 +163,9 @@ with tab_use:
         st.markdown("##### ④ メモ（任意）")
         note = st.text_input("今の状態（短文で結構です）", placeholder="例：少し落ち着いた／まだ緊張が残る など")
         if st.button("保存する", type="primary"):
-            save_entry(st.session_state.anon_id, "breathing", st.session_state.emotion,
-                       {"note": note, "sets": sets, "pattern": f"{inhale}-{hold1}-{exhale}-{hold2}"})
-            st.success("保存いたしました（「履歴」タブでご確認いただけます）。")
+            save_record("breathing", st.session_state.emotion,
+                        {"note": note, "sets": sets, "pattern": f"{inhale}-{hold1}-{exhale}-{hold2}"})
+            st.success("保存いたしました（「履歴」タブからご確認いただけます）。")
         st.markdown("</div>", unsafe_allow_html=True)
 
     # ---------- 考えの整理 ----------
@@ -259,38 +196,39 @@ with tab_use:
             submitted = st.form_submit_button("保存する", type="primary")
 
         if submitted:
-            rowid = save_entry(
-                st.session_state.anon_id, "thinking", st.session_state.emotion,
-                {"pre": pre, "situation": situation.strip(), "thought": thought.strip(),
-                 "view": view.strip(), "step": step.strip()}
-            )
+            rec_id = save_record("thinking", st.session_state.emotion,
+                                 {"pre": pre, "situation": situation.strip(),
+                                  "thought": thought.strip(), "view": view.strip(),
+                                  "step": step.strip()})
             st.success("保存いたしました（「履歴」タブからご確認いただけます）。")
 
             if ask_post:
                 st.markdown("##### 後の気分（体験後にご記入ください）")
                 post = st.slider("後の気分（0〜10）", 0, 10, max(0, min(10, pre)))
                 if st.button("後の気分を追記する"):
-                    update_entry_json(rowid, {"post": post})
+                    update_record(rec_id, {"post": post})
                     st.success("追記いたしました。履歴に反映されています。")
         st.markdown("</div>", unsafe_allow_html=True)
 
-# ================= 履歴タブ =================
+# ============== 履歴タブ ==============
 with tab_hist:
     st.markdown("<div class='card'>", unsafe_allow_html=True)
     st.markdown("#### 履歴")
-    rows = load_history(st.session_state.anon_id, limit=300)
+    rows = load_my_records(limit=300)
     if not rows:
         st.info("まだ記録がございません。まずは「体験」タブからご利用ください。")
     else:
         recs = []
-        for _id, ts, path, emo, data_json in rows:
+        for r in rows:
+            data = {}
             try:
-                data = json.loads(data_json) if data_json else {}
+                data = json.loads(r["data_json"]) if r["data_json"] else {}
             except Exception:
-                data = {}
-            if path == "breathing":
+                pass
+            if r["path"] == "breathing":
                 summary = f"呼吸 {data.get('pattern','')} × {data.get('sets','-')}回"
                 if data.get("note"): summary += f"｜{data['note']}"
+                mode = "呼吸"
             else:
                 bits = []
                 if "pre" in data: bits.append(f"前:{data['pre']}")
@@ -300,28 +238,24 @@ with tab_hist:
                 if data.get("step"): bits.append("行動:"+data["step"])
                 if "post" in data: bits.append(f"後:{data['post']}")
                 summary = "｜".join(bits)[:170]
+                mode = "考えの整理"
             recs.append({
-                "日時（JST）": ts,
-                "内容": "呼吸" if path == "breathing" else "考えの整理",
-                "気持ち": emo or "",
-                "要約": summary
+                "日時（JST）": r["ts"], "内容": mode,
+                "気持ち": r["emotion"] or "", "要約": summary
             })
         df = pd.DataFrame(recs)
         st.dataframe(df, use_container_width=True, hide_index=True)
 
-        if st.button("CSVとして保存（/sora_history.csv）"):
-            csv_path = os.path.join(DATA_DIR, "sora_history.csv")
-            df.to_csv(csv_path, index=False, encoding="utf-8-sig")
-            st.success(f"保存いたしました：{csv_path}")
+        # ダウンロード（ファイルに書かず、その場でバイト列を生成）
+        csv_bytes = df.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig")
+        st.download_button("CSVをダウンロード", data=csv_bytes, file_name="sora_history.csv", mime="text/csv")
     st.markdown("</div>", unsafe_allow_html=True)
 
-# ================= 使い方 =================
+# ============== 使い方タブ ==============
 with tab_about:
     st.markdown("<div class='card'>", unsafe_allow_html=True)
     st.markdown("#### 使い方")
-    st.write("- ログインは不要です。内容はお使いの環境にあるファイルへ匿名で保存します。")
+    st.write("- ログインは不要です。保存はこの起動中のみ有効です。必要に応じてCSVをダウンロードしてください。")
     st.write("- 「呼吸で落ち着く」はカウントに合わせてゆっくり進めてください。")
     st.write("- 「考えを整える」は短く書くことを最優先に。空欄があっても構いません。")
-    if USE_MEMORY_ONLY:
-        st.warning("現在は一時保存で動作中です。アプリを再起動すると履歴は消えます。")
     st.markdown("</div>", unsafe_allow_html=True)
