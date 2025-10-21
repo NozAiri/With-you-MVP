@@ -1,28 +1,16 @@
-# app.py — Sora (Safe Boot) 真っ白対策版
-# すべてこのファイル一つで動きます。依存エラーは画面に表示され、白画面になりません。
+# app.py — Sora 本番モード（呼吸・感情・ジャーナル・一日の振り返り・Study Tracker）
+# この1ファイルで動きます。/data 配下にCSV保存（端末のみ・共有なし）。
 
-# === 最小の先頭レンダリング（本番モード）===
 from datetime import datetime, date, timedelta
 from pathlib import Path
 import time, uuid, json, io, os, sys, traceback
 import pandas as pd
 import streamlit as st
 
+# ================== 基本設定 ==================
 st.set_page_config(page_title="Sora — しんどい夜の2分ノート", page_icon="🌙", layout="centered")
 
-# ここからすぐ本体の処理を続けてOK（診断パネルは表示しない）
-
-
-# =============== 初期レンダリング（ここで必ず何か表示して白画面を防止） ===============
-st.set_page_config(page_title="Sora — しんどい夜の2分ノート", page_icon="🌙", layout="centered")
-
-st.markdown("## 🌙 Sora — セーフブート中")
-with st.expander("診断パネル（問題があればここに理由が出ます）", expanded=True):
-    st.markdown(f"- Python: `{sys.version.split()[0]}` / Streamlit: `{st.__version__}`")
-    st.markdown(f"- CWD: `{os.getcwd()}`")
-    st.markdown("- このパネルが見えていれば**UI描画は成功**しています。以降の本体読み込みでエラーが出た場合は、ここに赤いボックスで表示します。")
-
-# =============== ユーティリティ ===============
+# ================== ユーティリティ ==================
 DATA_DIR = Path("data"); DATA_DIR.mkdir(exist_ok=True)
 CSV_BREATH       = DATA_DIR/"breath.csv"
 CSV_FEEL         = DATA_DIR/"feel.csv"
@@ -38,15 +26,19 @@ def now_ts() -> str:
 def load_csv(p: Path) -> pd.DataFrame:
     if not p.exists(): return pd.DataFrame()
     try: return pd.read_csv(p)
-    except Exception:
-        return pd.DataFrame()
+    except Exception: return pd.DataFrame()
 
-def append_csv(p: Path, row: dict) -> bool:
+def save_csv(p: Path, df: pd.DataFrame):
     try:
-        df = load_csv(p); df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
-        df.to_csv(p, index=False); return True
+        df.to_csv(p, index=False)
+        return True
     except Exception:
         return False
+
+def append_csv(p: Path, row: dict) -> bool:
+    df = load_csv(p)
+    df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
+    return save_csv(p, df)
 
 def week_range(d: date | None = None):
     d = d or date.today()
@@ -54,7 +46,7 @@ def week_range(d: date | None = None):
     end = start + timedelta(days=6)           # 日曜
     return start, end
 
-# =============== セッション状態 ===============
+# ================== セッション状態 ==================
 if "view" not in st.session_state: st.session_state.view = "HOME"
 if "first_breath" not in st.session_state: st.session_state.first_breath = False
 if "breath_active" not in st.session_state: st.session_state.breath_active = False
@@ -65,7 +57,7 @@ if "rest_until" not in st.session_state: st.session_state.rest_until = None
 if "em" not in st.session_state: st.session_state.em = {}
 if "tg" not in st.session_state: st.session_state.tg = set()
 
-# 科目・目標の初期化は try で保護（壊れたCSVでも白画面にしない）
+# 科目・目標 初期化（壊れたCSVでも落ちない）
 try:
     if "subjects" not in st.session_state:
         if CSV_SUBJECTS.exists():
@@ -93,7 +85,7 @@ except Exception:
     st.session_state.daily_goal = 30
     st.session_state.weekly_subject_goals = {}
 
-# =============== スタイル（明るい星空＋読みやすい文字） ===============
+# ================== スタイル（明るい星空＋読みやすい文字） ==================
 st.markdown("""
 <style>
 :root{ --text:#1c1630; --muted:#686280; --glass:rgba(255,255,255,.94); --brd:rgba(185,170,255,.28); }
@@ -147,7 +139,7 @@ h1,h2,h3{ color:var(--text); letter-spacing:.2px }
 </style>
 """, unsafe_allow_html=True)
 
-# =============== 共通ヘッダ ===============
+# ================== 共通ヘッダ ==================
 def header(title: str):
     cols = st.columns([1,7])
     with cols[0]:
@@ -157,7 +149,7 @@ def header(title: str):
     with cols[1]:
         st.markdown(f"### {title}")
 
-# =============== 各ビュー ===============
+# ================== HOME ==================
 def view_home():
     st.markdown("## 🌙 Sora — しんどい夜の2分ノート")
     st.markdown('<div class="card">', unsafe_allow_html=True)
@@ -196,9 +188,10 @@ def view_home():
     if st.button("📦 記録を見る / エクスポート", use_container_width=True): st.session_state.view = "HISTORY"
     st.markdown('</div>', unsafe_allow_html=True)
 
+# ================== 呼吸 ==================
 def view_breath():
     header("🌬 呼吸で落ち着く")
-    # 休憩
+    # セーフティ（連続3回で休憩）
     if st.session_state.rest_until and datetime.now() < st.session_state.rest_until:
         left = int((st.session_state.rest_until - datetime.now()).total_seconds())
         st.info(f"少し休憩しよう（過換気予防）。{left} 秒後に再開できます。"); return
@@ -228,7 +221,7 @@ def view_breath():
         # 依存関係が無くても落ちない
         if not enable_sound: return
         try:
-            import numpy as np, soundfile as sf  # 無ければ except
+            import numpy as np, soundfile as sf
             sr=22050; sec=0.25 if kind!="吸う" else 0.35
             f=220 if kind=="吸う" else (180 if kind=="止める" else 150)
             t=np.linspace(0,sec,int(sr*sec),False)
@@ -300,6 +293,7 @@ def view_breath():
         st.session_state.view = "HOME"
     st.markdown("</div>", unsafe_allow_html=True)
 
+# ================== 感情（CBTライト） ==================
 EMOJIS = [("怒り","😠"),("かなしい","😢"),("ふあん","😟"),("罪悪感","😔"),("はずかしい","😳"),
           ("あせり","😣"),("たいくつ","😐"),("ほっとする","🙂"),("うれしい","😊")]
 TRIGGERS = ["今日の出来事","友だち","家族","部活","クラス","先生","SNS","勉強","宿題","体調","お金","将来"]
@@ -371,6 +365,7 @@ def view_feel():
         st.markdown(f"- 今日の一歩：{r.get('step','')}")
         st.markdown('</div>', unsafe_allow_html=True)
 
+# ================== ジャーナル ==================
 def view_journal():
     header("📝 自由ジャーナル")
     st.markdown('<div class="card">', unsafe_allow_html=True)
@@ -381,6 +376,7 @@ def view_journal():
         append_csv(CSV_JOURNAL,row); st.success("保存しました。")
     st.markdown('</div>', unsafe_allow_html=True)
 
+# ================== 一日の振り返り ==================
 def view_day():
     header("📅 一日の振り返り")
     st.markdown('<div class="card">', unsafe_allow_html=True)
@@ -410,7 +406,7 @@ def view_day():
             st.markdown('</div>', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
-# ---- Study Tracker ----
+# ================== Study Tracker ==================
 def save_goals_to_csv():
     rows = [{"key":"daily_goal","subject":"","value":st.session_state.daily_goal}]
     for s in st.session_state.subjects:
@@ -544,6 +540,7 @@ def view_study():
         st.download_button("⬇️ Study Tracker（CSV）をダウンロード", data=csv, file_name="study.csv", mime="text/csv")
     st.markdown('</div>', unsafe_allow_html=True)
 
+# ================== 記録/エクスポート ==================
 def view_history():
     header("📦 記録とエクスポート")
     # 感情
@@ -617,7 +614,7 @@ def view_history():
         st.download_button("⬇️ Study（CSV）", data=csv5, file_name="study.csv", mime="text/csv")
     st.markdown('</div>', unsafe_allow_html=True)
 
-# =============== セーフ実行（本体は try で守る） ===============
+# ================== ルーター ==================
 try:
     if   st.session_state.view == "HOME":    view_home()
     elif st.session_state.view == "BREATH":  view_breath()
