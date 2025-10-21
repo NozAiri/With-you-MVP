@@ -1,4 +1,4 @@
-# app.py — Sora（明るい星空UI／安全呼吸／やさしい感情整理／自由ジャーナル／一日の振り返り／Study Tracker）
+# app.py — Sora（明るい星空UI／安全呼吸／やさしい感情整理／自由ジャーナル／一日の振り返り／Study Tracker＋進捗）
 from __future__ import annotations
 from datetime import datetime, date, timedelta
 from pathlib import Path
@@ -11,12 +11,13 @@ st.set_page_config(page_title="Sora — しんどい夜の2分ノート", page_i
 DATA_DIR = Path("data"); DATA_DIR.mkdir(exist_ok=True)
 
 # CSV 保存先
-CSV_BREATH   = DATA_DIR/"breath.csv"
-CSV_FEEL     = DATA_DIR/"feel.csv"
-CSV_JOURNAL  = DATA_DIR/"journal.csv"
-CSV_DAY      = DATA_DIR/"day.csv"
-CSV_STUDY    = DATA_DIR/"study.csv"
-CSV_SUBJECTS = DATA_DIR/"subjects.csv"
+CSV_BREATH       = DATA_DIR/"breath.csv"
+CSV_FEEL         = DATA_DIR/"feel.csv"
+CSV_JOURNAL      = DATA_DIR/"journal.csv"
+CSV_DAY          = DATA_DIR/"day.csv"
+CSV_STUDY        = DATA_DIR/"study.csv"
+CSV_SUBJECTS     = DATA_DIR/"subjects.csv"
+CSV_STUDY_GOALS  = DATA_DIR/"study_goals.csv"   # 今日の目標分 & 科目別“今週”目標分
 
 # セッション状態
 if "view" not in st.session_state: st.session_state.view = "HOME"
@@ -42,14 +43,26 @@ if "subjects" not in st.session_state:
     else:
         st.session_state.subjects = ["国語","数学","英語"]
         st.session_state.subject_notes = {}
-if "study_last_saved" not in st.session_state:
-    st.session_state.study_last_saved = None
+
+# 目標（今日の全体／今週の科目別）
+if "daily_goal" not in st.session_state:
+    if CSV_STUDY_GOALS.exists():
+        try:
+            _g = pd.read_csv(CSV_STUDY_GOALS)
+            st.session_state.daily_goal = int(_g[_g["key"]=="daily_goal"]["value"].iloc[0]) if (_g["key"]=="daily_goal").any() else 30
+            st.session_state.weekly_subject_goals = {r["subject"]: int(r["value"]) for _,r in _g[_g["key"]=="weekly"].iterrows()}
+        except Exception:
+            st.session_state.daily_goal = 30
+            st.session_state.weekly_subject_goals = {}
+    else:
+        st.session_state.daily_goal = 30
+        st.session_state.weekly_subject_goals = {}
 
 # ======================= スタイル（明るい星空） =======================
 st.markdown("""
 <style>
 :root{
-  --text:#1f1a2b; --muted:#6f6a80; --glass:rgba(255,255,255,.93); --brd:rgba(185,170,255,.28);
+  --text:#1c1630; --muted:#686280; --glass:rgba(255,255,255,.94); --brd:rgba(185,170,255,.28);
 }
 .stApp{
   background: radial-gradient(1200px 600px at 20% -10%, #fff7fb 0%, #f7f1ff 45%, #ecf9ff 100%);
@@ -69,13 +82,13 @@ st.markdown("""
   0%,100%{opacity:.7; transform:translateY(0)}
   50%{opacity:1; transform:translateY(-2px)}
 }
-.block-container{ max-width:920px; padding-top:.8rem; padding-bottom:1.6rem }
+.block-container{ max-width:980px; padding-top:.8rem; padding-bottom:1.6rem }
 h1,h2,h3{ color:var(--text); letter-spacing:.2px }
 .small{ color:var(--muted); font-size:.92rem }
 .card{ background:var(--glass); border:1px solid var(--brd); border-radius:20px; padding:16px; margin:10px 0 14px;
        box-shadow:0 18px 36px rgba(50,40,90,.14); backdrop-filter:blur(6px); }
 .row{ display:grid; grid-template-columns:1fr 1fr; gap:14px }
-@media(max-width:720px){ .row{ grid-template-columns:1fr } }
+@media(max-width:780px){ .row{ grid-template-columns:1fr } }
 .tile .stButton>button{
   width:100%; min-height:120px; border-radius:18px; text-align:left; padding:18px; font-weight:900;
   background:linear-gradient(155deg,#ffe8f4,#fff3fb); color:#2a2731; border:1px solid #f5e8ff;
@@ -99,6 +112,9 @@ h1,h2,h3{ color:var(--text); letter-spacing:.2px }
 .count{ font-size:44px; font-weight:900; text-align:center; color:#2f2a3b; margin-top:6px; }
 .badge{ display:inline-block; padding:.35rem .7rem; border-radius:999px; border:1px solid #e6e0ff; background:#fff; font-weight:800 }
 .emoji{ font-size:26px }
+.progress-wrap{ display:flex; align-items:center; gap:10px }
+.progress-bar{ flex:1; height:12px; border-radius:999px; background:#f1ecff; position:relative; overflow:hidden; border:1px solid #e3dcff}
+.progress-bar > div{ position:absolute; left:0; top:0; bottom:0; width:0%; background:linear-gradient(90deg,#a89bff,#7b6cff)}
 </style>
 """, unsafe_allow_html=True)
 
@@ -125,7 +141,7 @@ def week_range(d: date | None = None):
 
 # ======================= ヘッダー（戻る常設） =======================
 def header(title: str):
-    cols = st.columns([1,6])
+    cols = st.columns([1,7])
     with cols[0]:
         if st.button("← ホームへ", use_container_width=True):
             st.session_state.view = "HOME"
@@ -137,7 +153,7 @@ def header(title: str):
 def view_home():
     st.markdown("## 🌙 Sora — しんどい夜の2分ノート")
     st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.write("**言葉の前に、息をひとつ。** 迷わず “呼吸で落ち着く → 感情を整える → 今日を書いておく” へ。説明いらずのやさしいUI。")
+    st.write("**言葉の前に、息をひとつ。** 迷わず “呼吸で落ち着く → 感情を整える → 今日を書いておく → 勉強の進捗を見える化” へ。")
     st.markdown('</div>', unsafe_allow_html=True)
 
     st.markdown('<div class="row">', unsafe_allow_html=True)
@@ -147,22 +163,25 @@ def view_home():
         if st.button("🌬 呼吸で落ち着く（1–3分）", use_container_width=True): st.session_state.view = "BREATH"
         st.markdown('</div>', unsafe_allow_html=True)
 
-        st.markdown('<div class="tile alt">', unsafe_allow_html=True)
-        if st.button("📝 自由ジャーナル", use_container_width=True): st.session_state.view = "JOURNAL"
-        st.markdown('</div>', unsafe_allow_html=True)
-
     with col2:
         st.markdown('<div class="tile alt">', unsafe_allow_html=True)
         if st.button("🙂 感情を整える（3ステップ）", use_container_width=True): st.session_state.view = "FEEL"
         st.markdown('</div>', unsafe_allow_html=True)
 
+    st.markdown('<div class="row">', unsafe_allow_html=True)
+    col3, col4 = st.columns(2)
+    with col3:
+        st.markdown('<div class="tile alt">', unsafe_allow_html=True)
+        if st.button("📝 自由ジャーナル", use_container_width=True): st.session_state.view = "JOURNAL"
+        st.markdown('</div>', unsafe_allow_html=True)
+    with col4:
         st.markdown('<div class="tile">', unsafe_allow_html=True)
         if st.button("📅 一日の振り返り", use_container_width=True): st.session_state.view = "DAY"
         st.markdown('</div>', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
     st.markdown('<div class="tile alt">', unsafe_allow_html=True)
-    if st.button("📚 Study Tracker", use_container_width=True): st.session_state.view = "STUDY"
+    if st.button("📚 Study Tracker（科目×時間×メモ×進捗）", use_container_width=True): st.session_state.view = "STUDY"
     st.markdown('</div>', unsafe_allow_html=True)
 
     st.markdown('<div class="card cta">', unsafe_allow_html=True)
@@ -405,13 +424,31 @@ def view_day():
             st.markdown('</div>', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
-# ======================= Study Tracker（科目×時間×メモ） =======================
+# ======================= Study Tracker（科目×時間×メモ×進捗） =======================
+def save_goals_to_csv():
+    rows = [{"key":"daily_goal","subject":"","value":st.session_state.daily_goal}]
+    for s in st.session_state.subjects:
+        val = st.session_state.weekly_subject_goals.get(s, 0)
+        rows.append({"key":"weekly","subject":s,"value":val})
+    pd.DataFrame(rows).to_csv(CSV_STUDY_GOALS, index=False)
+
 def view_study():
-    header("📚 Study Tracker（科目×時間×メモ）")
+    header("📚 Study Tracker（科目×時間×メモ×進捗）")
+
+    # ---------- 今日の目標 ----------
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    colg1, colg2 = st.columns([2,1])
+    with colg1:
+        st.write("**今日の勉強目標（分）**")
+        st.session_state.daily_goal = st.number_input("目標分（毎日）", min_value=0, max_value=600, value=int(st.session_state.daily_goal), step=5)
+    with colg2:
+        if st.button("💾 目標を保存"):
+            save_goals_to_csv(); st.success("目標を保存しました。")
+    st.markdown('</div>', unsafe_allow_html=True)
 
     # ---------- 科目管理 ----------
     st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.write("**科目の追加/並べ替え/メモ**")
+    st.write("**科目の追加 / 並べ替え / メモ**")
     colA, colB = st.columns([2,1])
     with colA:
         new_subj = st.text_input("科目を追加", placeholder="例：小論 / 過去問 / 面接 / 実技 など")
@@ -420,8 +457,9 @@ def view_study():
             if name and name not in st.session_state.subjects:
                 st.session_state.subjects.append(name)
                 st.session_state.subject_notes.setdefault(name, "")
-                _df = pd.DataFrame([{"subject": s, "note": st.session_state.subject_notes.get(s,"")} for s in st.session_state.subjects])
-                _df.to_csv(CSV_SUBJECTS, index=False)
+                st.session_state.weekly_subject_goals.setdefault(name, 0)
+                pd.DataFrame([{"subject": s, "note": st.session_state.subject_notes.get(s,"")} for s in st.session_state.subjects]).to_csv(CSV_SUBJECTS, index=False)
+                save_goals_to_csv()
                 st.success(f"「{name}」を追加しました。")
     with colB:
         if st.session_state.subjects:
@@ -430,19 +468,25 @@ def view_study():
                 idx = st.session_state.subjects.index(up_subj)
                 if idx>0:
                     st.session_state.subjects[idx-1], st.session_state.subjects[idx] = st.session_state.subjects[idx], st.session_state.subjects[idx-1]
-                    _df = pd.DataFrame([{"subject": s, "note": st.session_state.subject_notes.get(s,"")} for s in st.session_state.subjects])
-                    _df.to_csv(CSV_SUBJECTS, index=False)
+                    pd.DataFrame([{"subject": s, "note": st.session_state.subject_notes.get(s,"")} for s in st.session_state.subjects]).to_csv(CSV_SUBJECTS, index=False)
 
+    # 科目ごとのメモ＆今週の目標
     if st.session_state.subjects:
         tabs = st.tabs(st.session_state.subjects)
         for i, s in enumerate(st.session_state.subjects):
             with tabs[i]:
-                txt = st.text_area(f"「{s}」のメモ", value=st.session_state.subject_notes.get(s,""),
-                                   placeholder="例：関数文章題のコツ／英単語は朝が楽 など", height=90, key=f"note_{s}")
-                if st.button(f"💾 {s} のメモを保存", key=f"save_{s}"):
+                c1,c2 = st.columns([3,1])
+                with c1:
+                    txt = st.text_area(f"「{s}」のメモ", value=st.session_state.subject_notes.get(s,""),
+                                       placeholder="例：関数文章題のコツ／英単語は朝が楽 など", height=90, key=f"note_{s}")
+                with c2:
+                    goal = st.number_input(f"今週の目標（分）  \n{s}", min_value=0, max_value=2000,
+                                           value=int(st.session_state.weekly_subject_goals.get(s,0)), step=5, key=f"goal_{s}")
+                if st.button(f"💾 {s} を保存", key=f"save_{s}"):
                     st.session_state.subject_notes[s] = txt
-                    _df = pd.DataFrame([{"subject": ss, "note": st.session_state.subject_notes.get(ss,"")} for ss in st.session_state.subjects])
-                    _df.to_csv(CSV_SUBJECTS, index=False)
+                    st.session_state.weekly_subject_goals[s] = int(goal)
+                    pd.DataFrame([{"subject": ss, "note": st.session_state.subject_notes.get(ss,"")} for ss in st.session_state.subjects]).to_csv(CSV_SUBJECTS, index=False)
+                    save_goals_to_csv()
                     st.success("保存しました。")
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -464,47 +508,85 @@ def view_study():
             "minutes": int(minutes), "blocks15": max(1, round(int(minutes)/15)), "feel": feel, "note": note
         }
         append_csv(CSV_STUDY, row)
-        st.session_state.study_last_saved = row
         st.success("記録しました。")
+
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # ---------- 週ビュー（可視化） ----------
+    # ---------- 進捗 & 可視化 ----------
     st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.write("**今週のまとめ**（月曜はじまり）")
+    st.write("**進捗と見える化**")
     df = load_csv(CSV_STUDY)
+    today = datetime.now().date()
     if df.empty:
         st.caption("まだ記録がありません。")
     else:
+        # 整形
         try:
             df["date"] = pd.to_datetime(df["date"]).dt.date
         except: pass
+
+        # 今日
+        td = df[df["date"]==today].copy()
+        total_today = int(td["minutes"].sum()) if not td.empty else 0
+
+        # 今週
         ws, we = week_range()
-        mask = (df["date"] >= ws) & (df["date"] <= we)
-        w = df[mask].copy()
+        w = df[(df["date"]>=ws) & (df["date"]<=we)].copy()
+        total_week = int(w["minutes"].sum()) if not w.empty else 0
+
+        # ✔ 今日の目標 進捗バー
+        st.markdown("**今日の合計**")
+        goal = max(1, int(st.session_state.daily_goal))
+        pct = min(100, int(total_today/goal*100))
+        st.markdown(f"<div class='progress-wrap'><div class='progress-bar'><div style='width:{pct}%'></div></div><div>{total_today}/{goal}分</div></div>", unsafe_allow_html=True)
+
+        # ✔ 科目別（今週）合計 & 進捗（今週目標）
+        st.markdown("**今週の科目別 合計**")
         if w.empty:
-            st.caption("今週の記録はありません。")
+            st.caption("今週の記録はまだありません。")
         else:
             agg = w.groupby("subject", as_index=False)["minutes"].sum().sort_values("minutes", ascending=False)
-            total = int(w["minutes"].sum())
-            st.markdown(f"今週の合計：**{total} 分**")
             st.dataframe(agg.rename(columns={"subject":"科目","minutes":"合計（分）"}), use_container_width=True, hide_index=True)
 
-            # 棒グラフ（matplotlib が無ければ表示スキップ）
+            # 進捗バー（各科目の今週の目標）
+            for _,r in agg.iterrows():
+                s = r["subject"]; done = int(r["minutes"]); g = int(st.session_state.weekly_subject_goals.get(s, 0))
+                if g <= 0: continue
+                p = min(100, int(done/g*100))
+                st.markdown(f"・{s}：<div class='progress-wrap'><div class='progress-bar'><div style='width:{p}%'></div></div><div>{done}/{g}分</div></div>", unsafe_allow_html=True)
+
+            # 棒グラフ（科目×分）
             try:
                 import matplotlib.pyplot as plt
-                fig = plt.figure(figsize=(6,3.2))
+                fig = plt.figure(figsize=(6.5,3.2))
                 plt.bar(agg["subject"], agg["minutes"])
                 plt.title("科目別 合計分（今週）")
-                plt.ylabel("分")
-                plt.xticks(rotation=15, ha="right")
+                plt.ylabel("分"); plt.xticks(rotation=15, ha="right")
                 st.pyplot(fig)
             except Exception:
                 pass
 
-            # 手触りの分布
-            feel_counts = w.groupby("feel")["id"].count().reset_index().rename(columns={"id":"件数"})
-            st.caption("手触りの分布（件数）")
+        # ✔ 直近14日の合計（折れ線）
+        st.markdown("**直近14日の合計（1日ごと）**")
+        last14 = pd.DataFrame({"date": [today - timedelta(days=i) for i in range(13,-1,-1)]})
+        if not df.empty:
+            daily = df.groupby("date", as_index=False)["minutes"].sum()
+            last14 = last14.merge(daily, on="date", how="left").fillna({"minutes":0})
+        try:
+            import matplotlib.pyplot as plt
+            fig2 = plt.figure(figsize=(6.5,3))
+            plt.plot([d.strftime("%m/%d") for d in last14["date"]], last14["minutes"])
+            plt.title("直近14日 合計分"); plt.ylabel("分"); plt.xticks(rotation=30, ha="right")
+            st.pyplot(fig2)
+        except Exception:
+            st.dataframe(last14.rename(columns={"date":"日付","minutes":"分"}), use_container_width=True, hide_index=True)
+
+        # ✔ 手触りの分布
+        st.markdown("**手触りの分布（件数・今週）**")
+        if not w.empty:
+            feel_counts = w.groupby("feel")["subject"].count().reset_index().rename(columns={"subject":"件数"})
             st.dataframe(feel_counts, use_container_width=True, hide_index=True)
+
     st.markdown('</div>', unsafe_allow_html=True)
 
     # ---------- エクスポート ----------
