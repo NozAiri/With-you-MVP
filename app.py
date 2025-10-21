@@ -1,25 +1,54 @@
-import streamlit as st
-# app.py — Sora（明るい星空UI／安全呼吸／やさしい感情整理／自由ジャーナル／一日の振り返り／Study Tracker＋進捗）
+# app.py — Sora (Safe Boot) 真っ白対策版
+# すべてこのファイル一つで動きます。依存エラーは画面に表示され、白画面になりません。
+
 from datetime import datetime, date, timedelta
 from pathlib import Path
-import time, uuid, json, io
+import time, uuid, json, io, os, sys, traceback
 import pandas as pd
 import streamlit as st
 
-# ======================= 基本設定 =======================
+# =============== 初期レンダリング（ここで必ず何か表示して白画面を防止） ===============
 st.set_page_config(page_title="Sora — しんどい夜の2分ノート", page_icon="🌙", layout="centered")
-DATA_DIR = Path("data"); DATA_DIR.mkdir(exist_ok=True)
 
-# CSV 保存先
+st.markdown("## 🌙 Sora — セーフブート中")
+with st.expander("診断パネル（問題があればここに理由が出ます）", expanded=True):
+    st.markdown(f"- Python: `{sys.version.split()[0]}` / Streamlit: `{st.__version__}`")
+    st.markdown(f"- CWD: `{os.getcwd()}`")
+    st.markdown("- このパネルが見えていれば**UI描画は成功**しています。以降の本体読み込みでエラーが出た場合は、ここに赤いボックスで表示します。")
+
+# =============== ユーティリティ ===============
+DATA_DIR = Path("data"); DATA_DIR.mkdir(exist_ok=True)
 CSV_BREATH       = DATA_DIR/"breath.csv"
 CSV_FEEL         = DATA_DIR/"feel.csv"
 CSV_JOURNAL      = DATA_DIR/"journal.csv"
 CSV_DAY          = DATA_DIR/"day.csv"
 CSV_STUDY        = DATA_DIR/"study.csv"
 CSV_SUBJECTS     = DATA_DIR/"subjects.csv"
-CSV_STUDY_GOALS  = DATA_DIR/"study_goals.csv"   # 今日の目標分 & 科目別“今週”目標分
+CSV_STUDY_GOALS  = DATA_DIR/"study_goals.csv"
 
-# セッション状態
+def now_ts() -> str:
+    return datetime.now().isoformat(timespec="seconds")
+
+def load_csv(p: Path) -> pd.DataFrame:
+    if not p.exists(): return pd.DataFrame()
+    try: return pd.read_csv(p)
+    except Exception:
+        return pd.DataFrame()
+
+def append_csv(p: Path, row: dict) -> bool:
+    try:
+        df = load_csv(p); df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
+        df.to_csv(p, index=False); return True
+    except Exception:
+        return False
+
+def week_range(d: date | None = None):
+    d = d or date.today()
+    start = d - timedelta(days=d.weekday())   # 月曜
+    end = start + timedelta(days=6)           # 日曜
+    return start, end
+
+# =============== セッション状態 ===============
 if "view" not in st.session_state: st.session_state.view = "HOME"
 if "first_breath" not in st.session_state: st.session_state.first_breath = False
 if "breath_active" not in st.session_state: st.session_state.breath_active = False
@@ -30,40 +59,38 @@ if "rest_until" not in st.session_state: st.session_state.rest_until = None
 if "em" not in st.session_state: st.session_state.em = {}
 if "tg" not in st.session_state: st.session_state.tg = set()
 
-# 科目リストとメモ（初期値）
-if "subjects" not in st.session_state:
-    if CSV_SUBJECTS.exists():
-        try:
+# 科目・目標の初期化は try で保護（壊れたCSVでも白画面にしない）
+try:
+    if "subjects" not in st.session_state:
+        if CSV_SUBJECTS.exists():
             _sdf = pd.read_csv(CSV_SUBJECTS)
             st.session_state.subjects = _sdf["subject"].dropna().unique().tolist() or ["国語","数学","英語"]
             st.session_state.subject_notes = {r["subject"]: r.get("note","") for _,r in _sdf.iterrows()}
-        except Exception:
+        else:
             st.session_state.subjects = ["国語","数学","英語"]
             st.session_state.subject_notes = {}
-    else:
-        st.session_state.subjects = ["国語","数学","英語"]
-        st.session_state.subject_notes = {}
+except Exception:
+    st.session_state.subjects = ["国語","数学","英語"]
+    st.session_state.subject_notes = {}
 
-# 目標（今日の全体／今週の科目別）
-if "daily_goal" not in st.session_state:
-    if CSV_STUDY_GOALS.exists():
-        try:
+try:
+    if "daily_goal" not in st.session_state:
+        if CSV_STUDY_GOALS.exists():
             _g = pd.read_csv(CSV_STUDY_GOALS)
-            st.session_state.daily_goal = int(_g[_g["key"]=="daily_goal"]["value"].iloc[0]) if (_g["key"]=="daily_goal").any() else 30
+            dg = _g[_g["key"]=="daily_goal"]
+            st.session_state.daily_goal = int(dg["value"].iloc[0]) if not dg.empty else 30
             st.session_state.weekly_subject_goals = {r["subject"]: int(r["value"]) for _,r in _g[_g["key"]=="weekly"].iterrows()}
-        except Exception:
+        else:
             st.session_state.daily_goal = 30
             st.session_state.weekly_subject_goals = {}
-    else:
-        st.session_state.daily_goal = 30
-        st.session_state.weekly_subject_goals = {}
+except Exception:
+    st.session_state.daily_goal = 30
+    st.session_state.weekly_subject_goals = {}
 
-# ======================= スタイル（明るい星空） =======================
+# =============== スタイル（明るい星空＋読みやすい文字） ===============
 st.markdown("""
 <style>
-:root{
-  --text:#1c1630; --muted:#686280; --glass:rgba(255,255,255,.94); --brd:rgba(185,170,255,.28);
-}
+:root{ --text:#1c1630; --muted:#686280; --glass:rgba(255,255,255,.94); --brd:rgba(185,170,255,.28); }
 .stApp{
   background: radial-gradient(1200px 600px at 20% -10%, #fff7fb 0%, #f7f1ff 45%, #ecf9ff 100%);
   position:relative; overflow:hidden;
@@ -78,10 +105,7 @@ st.markdown("""
     radial-gradient(1.8px 1.8px at 25% 70%, #ffffff99 40%, transparent 60%);
   animation: twinkle 6s ease-in-out infinite;
 }
-@keyframes twinkle{
-  0%,100%{opacity:.7; transform:translateY(0)}
-  50%{opacity:1; transform:translateY(-2px)}
-}
+@keyframes twinkle{ 0%,100%{opacity:.7; transform:translateY(0)} 50%{opacity:1; transform:translateY(-2px)} }
 .block-container{ max-width:980px; padding-top:.8rem; padding-bottom:1.6rem }
 h1,h2,h3{ color:var(--text); letter-spacing:.2px }
 .small{ color:var(--muted); font-size:.92rem }
@@ -111,35 +135,13 @@ h1,h2,h3{ color:var(--text); letter-spacing:.2px }
 }
 .count{ font-size:44px; font-weight:900; text-align:center; color:#2f2a3b; margin-top:6px; }
 .badge{ display:inline-block; padding:.35rem .7rem; border-radius:999px; border:1px solid #e6e0ff; background:#fff; font-weight:800 }
-.emoji{ font-size:26px }
 .progress-wrap{ display:flex; align-items:center; gap:10px }
 .progress-bar{ flex:1; height:12px; border-radius:999px; background:#f1ecff; position:relative; overflow:hidden; border:1px solid #e3dcff}
 .progress-bar > div{ position:absolute; left:0; top:0; bottom:0; width:0%; background:linear-gradient(90deg,#a89bff,#7b6cff)}
 </style>
 """, unsafe_allow_html=True)
 
-# ======================= ユーティリティ =======================
-def now_ts() -> str:
-    return datetime.now().isoformat(timespec="seconds")
-
-def load_csv(p: Path) -> pd.DataFrame:
-    if not p.exists(): return pd.DataFrame()
-    try: return pd.read_csv(p)
-    except: return pd.DataFrame()
-
-def append_csv(p: Path, row: dict) -> bool:
-    try:
-        df = load_csv(p); df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
-        df.to_csv(p, index=False); return True
-    except: return False
-
-def week_range(d: date | None = None):
-    d = d or date.today()
-    start = d - timedelta(days=d.weekday())   # 月曜
-    end = start + timedelta(days=6)           # 日曜
-    return start, end
-
-# ======================= ヘッダー（戻る常設） =======================
+# =============== 共通ヘッダ ===============
 def header(title: str):
     cols = st.columns([1,7])
     with cols[0]:
@@ -149,11 +151,11 @@ def header(title: str):
     with cols[1]:
         st.markdown(f"### {title}")
 
-# ======================= HOME =======================
+# =============== 各ビュー ===============
 def view_home():
     st.markdown("## 🌙 Sora — しんどい夜の2分ノート")
     st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.write("**言葉の前に、息をひとつ。** 迷わず “呼吸で落ち着く → 感情を整える → 今日を書いておく → 勉強の進捗を見える化” へ。")
+    st.write("**言葉の前に、息をひとつ。** 迷わず “呼吸で落ち着く → 感情を整える → 今日を書いておく → 勉強の進捗を見える化”。")
     st.markdown('</div>', unsafe_allow_html=True)
 
     st.markdown('<div class="row">', unsafe_allow_html=True)
@@ -162,11 +164,11 @@ def view_home():
         st.markdown('<div class="tile">', unsafe_allow_html=True)
         if st.button("🌬 呼吸で落ち着く（1–3分）", use_container_width=True): st.session_state.view = "BREATH"
         st.markdown('</div>', unsafe_allow_html=True)
-
     with col2:
         st.markdown('<div class="tile alt">', unsafe_allow_html=True)
         if st.button("🙂 感情を整える（3ステップ）", use_container_width=True): st.session_state.view = "FEEL"
         st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
 
     st.markdown('<div class="row">', unsafe_allow_html=True)
     col3, col4 = st.columns(2)
@@ -188,50 +190,39 @@ def view_home():
     if st.button("📦 記録を見る / エクスポート", use_container_width=True): st.session_state.view = "HISTORY"
     st.markdown('</div>', unsafe_allow_html=True)
 
-# ======================= 呼吸（安全×没入） =======================
 def view_breath():
     header("🌬 呼吸で落ち着く")
-
-    # 連続3回で休憩
+    # 休憩
     if st.session_state.rest_until and datetime.now() < st.session_state.rest_until:
         left = int((st.session_state.rest_until - datetime.now()).total_seconds())
-        st.info(f"少し休憩しよう（過換気予防）。{left} 秒後に再開できます。")
-        return
+        st.info(f"少し休憩しよう（過換気予防）。{left} 秒後に再開できます。"); return
     if st.session_state.breath_runs >= 3:
         st.session_state.rest_until = datetime.now() + timedelta(seconds=30)
         st.session_state.breath_runs = 0
 
-    # 初回は90秒固定、以降は選択
     first = not st.session_state.first_breath
     length = 90 if first else st.radio("時間（固定プリセット）", [60,90,180], index=1, horizontal=True)
-
-    # ガイド2種（やさしめ→落ち着きに自動）
-    mode = st.session_state.auto_guide  # soft: 吸4-吐6, calm: 吸5-止2-吐6（止め2秒固定）
+    mode = st.session_state.auto_guide
     guide_name = "吸4・吐6（やさしめ）" if mode=="soft" else "吸5・止2・吐6（落ち着き）"
-    with st.expander("ガイド（自動で切り替わります）", expanded=False):
+    with st.expander("ガイド（自動切替）", expanded=False):
         st.caption(f"いま: **{guide_name}**")
 
     silent = st.toggle("言葉を最小にする（“いっしょに息を / ここにいていい”）", value=True)
-    sound  = st.toggle("そっと効果音を添える（環境によっては無音）", value=False)
+    enable_sound = st.toggle("そっと効果音を添える（無音でもOK）", value=False)
 
     st.markdown('<div class="card">', unsafe_allow_html=True)
-    # シーケンス（止めは2秒固定）
     seq = [("吸う",4),("吐く",6)] if mode=="soft" else [("吸う",5),("止める",2),("吐く",6)]
-
-    # UI部品
     phase = st.empty(); circle = st.empty(); count = st.empty(); bar = st.progress(0)
-
-    # ボタン
     c1,c2 = st.columns(2)
     start = c1.button("開始", use_container_width=True, disabled=st.session_state.breath_active)
     stopb = c2.button("× 停止", use_container_width=True)
     if stopb: st.session_state.breath_stop = True
 
-    # 簡易トーン（依存が無ければ自動で無音）
     def tone(kind:str):
-        if not sound: return
+        # 依存関係が無くても落ちない
+        if not enable_sound: return
         try:
-            import numpy as np, soundfile as sf
+            import numpy as np, soundfile as sf  # 無ければ except
             sr=22050; sec=0.25 if kind!="吸う" else 0.35
             f=220 if kind=="吸う" else (180 if kind=="止める" else 150)
             t=np.linspace(0,sec,int(sr*sec),False)
@@ -241,62 +232,61 @@ def view_breath():
             pass
 
     if start or st.session_state.breath_active:
-        st.session_state.breath_active = True
-        st.session_state.breath_stop = False
-        st.session_state.first_breath = True
-
-        base = sum(t for _,t in seq)
-        cycles = max(1, length // base)
-        remain = length - cycles*base
-        total_ticks = cycles*base + remain
-        tick = 0
-
-        if silent:
-            st.markdown('<div class="center small">いっしょに息を / ここにいていい</div>', unsafe_allow_html=True)
-
-        for _ in range(cycles):
-            for name,sec in seq:
-                if st.session_state.breath_stop: break
-                phase.markdown(f"<span class='phase'>{name}</span>", unsafe_allow_html=True)
-                tone(name)
-                for s in range(sec,0,-1):
-                    if st.session_state.breath_stop: break
-                    scale = 1.12 if name=="吸う" else (1.0 if name=="止める" else 0.88)
-                    circle.markdown(f"<div class='circle-wrap'><div class='breath-circle' style='transform:scale({scale});'></div></div>", unsafe_allow_html=True)
-                    count.markdown(f"<div class='count'>{s}</div>", unsafe_allow_html=True)
-                    tick += 1; bar.progress(min(int(tick/total_ticks*100),100))
-                    time.sleep(1)
-            if st.session_state.breath_stop: break
-
-        # 余り秒（静かに）
-        for r in range(remain,0,-1):
-            if st.session_state.breath_stop: break
-            circle.markdown(f"<div class='circle-wrap'><div class='breath-circle' style='transform:scale(0.88);'></div></div>", unsafe_allow_html=True)
-            count.markdown(f"<div class='count'>{r}</div>", unsafe_allow_html=True)
-            tick += 1; bar.progress(min(int(tick/total_ticks*100),100)); time.sleep(1)
-
-        st.session_state.breath_active = False
-
-        if st.session_state.breath_stop:
-            phase.markdown("<span class='phase'>停止しました</span>", unsafe_allow_html=True)
+        try:
+            st.session_state.breath_active = True
             st.session_state.breath_stop = False
-        else:
-            phase.markdown("<span class='phase'>完了</span>", unsafe_allow_html=True)
-            st.caption("ここまで来たあなたは十分えらい。")
+            st.session_state.first_breath = True
 
-            # 主観チェック → 自動で calm へ
-            feel = st.radio("いまの感じ（任意）", ["変わらない","少し落ち着いた","かなり落ち着いた"], index=1, horizontal=True)
-            st.session_state.breath_runs += 1
-            if feel=="かなり落ち着いた" and st.session_state.auto_guide=="soft":
-                st.session_state.auto_guide = "calm"
+            base = sum(t for _,t in seq)
+            cycles = max(1, length // base)
+            remain = length - cycles*base
+            total_ticks = cycles*base + remain
+            tick = 0
 
-            # 1分タスク（自由）＋ メモ
-            task = st.text_input("1分タスク（任意）", placeholder="例：水を一口 / 窓を少し開ける / 手首を冷水10秒 / 姿勢を1ミリ")
-            note = st.text_input("メモ（任意・非共有）", placeholder="例：胸のつかえが少し軽い")
-            if st.button("💾 保存", type="primary"):
-                row = {"id":str(uuid.uuid4())[:8],"ts":now_ts(),"sec":length,"guide":st.session_state.auto_guide,
-                       "task":task,"note":note}
-                append_csv(CSV_BREATH,row); st.success("保存しました。")
+            if silent:
+                st.markdown('<div class="center small">いっしょに息を / ここにいていい</div>', unsafe_allow_html=True)
+
+            for _ in range(cycles):
+                for name,sec in seq:
+                    if st.session_state.breath_stop: break
+                    phase.markdown(f"<span class='phase'>{name}</span>", unsafe_allow_html=True)
+                    tone(name)
+                    for s in range(sec,0,-1):
+                        if st.session_state.breath_stop: break
+                        scale = 1.12 if name=="吸う" else (1.0 if name=="止める" else 0.88)
+                        circle.markdown(f"<div class='circle-wrap'><div class='breath-circle' style='transform:scale({scale});'></div></div>", unsafe_allow_html=True)
+                        count.markdown(f"<div class='count'>{s}</div>", unsafe_allow_html=True)
+                        tick += 1; bar.progress(min(int(tick/total_ticks*100),100))
+                        time.sleep(1)
+                if st.session_state.breath_stop: break
+
+            for r in range(remain,0,-1):
+                if st.session_state.breath_stop: break
+                circle.markdown(f"<div class='circle-wrap'><div class='breath-circle' style='transform:scale(0.88);'></div></div>", unsafe_allow_html=True)
+                count.markdown(f"<div class='count'>{r}</div>", unsafe_allow_html=True)
+                tick += 1; bar.progress(min(int(tick/total_ticks*100),100)); time.sleep(1)
+
+            st.session_state.breath_active = False
+
+            if st.session_state.breath_stop:
+                phase.markdown("<span class='phase'>停止しました</span>", unsafe_allow_html=True)
+                st.session_state.breath_stop = False
+            else:
+                phase.markdown("<span class='phase'>完了</span>", unsafe_allow_html=True)
+                st.caption("ここまで来たあなたは十分えらい。")
+                feel = st.radio("いまの感じ（任意）", ["変わらない","少し落ち着いた","かなり落ち着いた"], index=1, horizontal=True)
+                st.session_state.breath_runs += 1
+                if feel=="かなり落ち着いた" and st.session_state.auto_guide=="soft":
+                    st.session_state.auto_guide = "calm"
+                task = st.text_input("1分タスク（任意）", placeholder="例：水を一口 / 窓を少し開ける / 手首を冷水10秒 / 姿勢を1ミリ")
+                note = st.text_input("メモ（任意・非共有）", placeholder="例：胸のつかえが少し軽い")
+                if st.button("💾 保存", type="primary"):
+                    row = {"id":str(uuid.uuid4())[:8],"ts":now_ts(),"sec":length,"guide":st.session_state.auto_guide,
+                           "task":task,"note":note}
+                    append_csv(CSV_BREATH,row); st.success("保存しました。")
+        except Exception as e:
+            st.error("呼吸ワークの実行中に問題が発生しました。")
+            st.exception(e)
 
     st.markdown("</div>", unsafe_allow_html=True)
     st.markdown('<div class="card cta">', unsafe_allow_html=True)
@@ -304,15 +294,12 @@ def view_breath():
         st.session_state.view = "HOME"
     st.markdown("</div>", unsafe_allow_html=True)
 
-# ======================= 感情を整える（専門用語なし） =======================
 EMOJIS = [("怒り","😠"),("かなしい","😢"),("ふあん","😟"),("罪悪感","😔"),("はずかしい","😳"),
           ("あせり","😣"),("たいくつ","😐"),("ほっとする","🙂"),("うれしい","😊")]
 TRIGGERS = ["今日の出来事","友だち","家族","部活","クラス","先生","SNS","勉強","宿題","体調","お金","将来"]
 
 def view_feel():
     header("🙂 感情を整える（3ステップ）")
-
-    # ① いまの感情
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.write("**いまの感情は？**（複数OK）")
     em = st.session_state.em
@@ -326,7 +313,6 @@ def view_feel():
                 em.pop(label, None)
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # ② きっかけ
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.write("**きっかけはどれに近い？**（複数OK）")
     tg = st.session_state.tg
@@ -338,7 +324,6 @@ def view_feel():
     free = st.text_input("一言メモ（任意）", placeholder="例：LINEの返事がこなかった")
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # ③ やさしい見かた（ヒント）→ 自分の言葉
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.write("**やさしい見かたのヒント**（そのままでもOK）")
     hint = st.selectbox("しっくりくるもの", [
@@ -351,7 +336,6 @@ def view_feel():
     alt = st.text_area("自分の言葉で置き換える（任意）", value=hint, height=80)
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # 今日の一歩（自由記入）
     st.markdown('<div class="card">', unsafe_allow_html=True)
     step = st.text_input("今日の一歩（1〜3分で終わること・自由記入）",
                          placeholder="例：タイマー1分だけ机に向かう / スタンプだけ送る / 外の光を5分あびる")
@@ -381,7 +365,6 @@ def view_feel():
         st.markdown(f"- 今日の一歩：{r.get('step','')}")
         st.markdown('</div>', unsafe_allow_html=True)
 
-# ======================= 自由ジャーナル =======================
 def view_journal():
     header("📝 自由ジャーナル")
     st.markdown('<div class="card">', unsafe_allow_html=True)
@@ -392,7 +375,6 @@ def view_journal():
         append_csv(CSV_JOURNAL,row); st.success("保存しました。")
     st.markdown('</div>', unsafe_allow_html=True)
 
-# ======================= 一日の振り返り =======================
 def view_day():
     header("📅 一日の振り返り")
     st.markdown('<div class="card">', unsafe_allow_html=True)
@@ -404,7 +386,6 @@ def view_day():
         append_csv(CSV_DAY,row); st.success("保存しました。")
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # 最近の記録
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.write("**最近の記録**")
     df = load_csv(CSV_DAY)
@@ -412,9 +393,8 @@ def view_day():
         st.caption("まだ記録がありません。")
     else:
         try:
-            df["ts"] = pd.to_datetime(df["ts"])
-            df = df.sort_values("ts", ascending=False)
-        except: pass
+            df["ts"] = pd.to_datetime(df["ts"]); df = df.sort_values("ts", ascending=False)
+        except Exception: pass
         for _,r in df.head(10).iterrows():
             st.markdown('<div class="card">', unsafe_allow_html=True)
             st.markdown(f"**🕒 {r.get('ts','')}**")
@@ -424,29 +404,24 @@ def view_day():
             st.markdown('</div>', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
-# ======================= Study Tracker（科目×時間×メモ×進捗） =======================
+# ---- Study Tracker ----
 def save_goals_to_csv():
     rows = [{"key":"daily_goal","subject":"","value":st.session_state.daily_goal}]
     for s in st.session_state.subjects:
-        val = st.session_state.weekly_subject_goals.get(s, 0)
-        rows.append({"key":"weekly","subject":s,"value":val})
+        rows.append({"key":"weekly","subject":s,"value":int(st.session_state.weekly_subject_goals.get(s,0))})
     pd.DataFrame(rows).to_csv(CSV_STUDY_GOALS, index=False)
 
 def view_study():
     header("📚 Study Tracker（科目×時間×メモ×進捗）")
-
-    # ---------- 今日の目標 ----------
     st.markdown('<div class="card">', unsafe_allow_html=True)
     colg1, colg2 = st.columns([2,1])
     with colg1:
         st.write("**今日の勉強目標（分）**")
         st.session_state.daily_goal = st.number_input("目標分（毎日）", min_value=0, max_value=600, value=int(st.session_state.daily_goal), step=5)
     with colg2:
-        if st.button("💾 目標を保存"):
-            save_goals_to_csv(); st.success("目標を保存しました。")
+        if st.button("💾 目標を保存"): save_goals_to_csv(); st.success("目標を保存しました。")
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # ---------- 科目管理 ----------
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.write("**科目の追加 / 並べ替え / メモ**")
     colA, colB = st.columns([2,1])
@@ -459,8 +434,7 @@ def view_study():
                 st.session_state.subject_notes.setdefault(name, "")
                 st.session_state.weekly_subject_goals.setdefault(name, 0)
                 pd.DataFrame([{"subject": s, "note": st.session_state.subject_notes.get(s,"")} for s in st.session_state.subjects]).to_csv(CSV_SUBJECTS, index=False)
-                save_goals_to_csv()
-                st.success(f"「{name}」を追加しました。")
+                save_goals_to_csv(); st.success(f"「{name}」を追加しました。")
     with colB:
         if st.session_state.subjects:
             up_subj = st.selectbox("上に移動", st.session_state.subjects)
@@ -470,7 +444,6 @@ def view_study():
                     st.session_state.subjects[idx-1], st.session_state.subjects[idx] = st.session_state.subjects[idx], st.session_state.subjects[idx-1]
                     pd.DataFrame([{"subject": s, "note": st.session_state.subject_notes.get(s,"")} for s in st.session_state.subjects]).to_csv(CSV_SUBJECTS, index=False)
 
-    # 科目ごとのメモ＆今週の目標
     if st.session_state.subjects:
         tabs = st.tabs(st.session_state.subjects)
         for i, s in enumerate(st.session_state.subjects):
@@ -486,11 +459,9 @@ def view_study():
                     st.session_state.subject_notes[s] = txt
                     st.session_state.weekly_subject_goals[s] = int(goal)
                     pd.DataFrame([{"subject": ss, "note": st.session_state.subject_notes.get(ss,"")} for ss in st.session_state.subjects]).to_csv(CSV_SUBJECTS, index=False)
-                    save_goals_to_csv()
-                    st.success("保存しました。")
+                    save_goals_to_csv(); st.success("保存しました。")
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # ---------- 記録する ----------
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.write("**学習ブロックを記録**（あとからメモ可）")
     col1, col2 = st.columns(2)
@@ -500,74 +471,46 @@ def view_study():
     with col2:
         feel = st.radio("手触り", ["😌 集中できた","😕 難航した","😫 しんどい"], horizontal=False, index=0)
         note = st.text_input("メモ（任意）", placeholder="例：例題→教科書の順が合う／夜より朝が楽 など")
-
     if st.button("🧭 記録する", type="primary"):
-        row = {
-            "id": str(uuid.uuid4())[:8], "ts": now_ts(),
-            "date": datetime.now().date().isoformat(), "subject": subject,
-            "minutes": int(minutes), "blocks15": max(1, round(int(minutes)/15)), "feel": feel, "note": note
-        }
-        append_csv(CSV_STUDY, row)
-        st.success("記録しました。")
-
+        row = {"id": str(uuid.uuid4())[:8], "ts": now_ts(), "date": datetime.now().date().isoformat(),
+               "subject": subject, "minutes": int(minutes), "blocks15": max(1, round(int(minutes)/15)), "feel": feel, "note": note}
+        append_csv(CSV_STUDY, row); st.success("記録しました。")
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # ---------- 進捗 & 可視化 ----------
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.write("**進捗と見える化**")
-    df = load_csv(CSV_STUDY)
-    today = datetime.now().date()
+    df = load_csv(CSV_STUDY); today = datetime.now().date()
     if df.empty:
         st.caption("まだ記録がありません。")
     else:
-        # 整形
-        try:
-            df["date"] = pd.to_datetime(df["date"]).dt.date
-        except: pass
-
-        # 今日
+        try: df["date"] = pd.to_datetime(df["date"]).dt.date
+        except Exception: pass
         td = df[df["date"]==today].copy()
+        ws, we = week_range(); w = df[(df["date"]>=ws) & (df["date"]<=we)].copy()
         total_today = int(td["minutes"].sum()) if not td.empty else 0
-
-        # 今週
-        ws, we = week_range()
-        w = df[(df["date"]>=ws) & (df["date"]<=we)].copy()
-        total_week = int(w["minutes"].sum()) if not w.empty else 0
-
-        # ✔ 今日の目標 進捗バー
         st.markdown("**今日の合計**")
-        goal = max(1, int(st.session_state.daily_goal))
-        pct = min(100, int(total_today/goal*100))
+        goal = max(1, int(st.session_state.daily_goal)); pct = min(100, int(total_today/goal*100))
         st.markdown(f"<div class='progress-wrap'><div class='progress-bar'><div style='width:{pct}%'></div></div><div>{total_today}/{goal}分</div></div>", unsafe_allow_html=True)
 
-        # ✔ 科目別（今週）合計 & 進捗（今週目標）
-        st.markdown("**今週の科目別 合計**")
         if w.empty:
             st.caption("今週の記録はまだありません。")
         else:
             agg = w.groupby("subject", as_index=False)["minutes"].sum().sort_values("minutes", ascending=False)
             st.dataframe(agg.rename(columns={"subject":"科目","minutes":"合計（分）"}), use_container_width=True, hide_index=True)
-
-            # 進捗バー（各科目の今週の目標）
             for _,r in agg.iterrows():
-                s = r["subject"]; done = int(r["minutes"]); g = int(st.session_state.weekly_subject_goals.get(s, 0))
-                if g <= 0: continue
-                p = min(100, int(done/g*100))
-                st.markdown(f"・{s}：<div class='progress-wrap'><div class='progress-bar'><div style='width:{p}%'></div></div><div>{done}/{g}分</div></div>", unsafe_allow_html=True)
-
-            # 棒グラフ（科目×分）
+                s = r["subject"]; done = int(r["minutes"]); g = int(st.session_state.weekly_subject_goals.get(s,0))
+                if g>0:
+                    p = min(100, int(done/g*100))
+                    st.markdown(f"・{s}：<div class='progress-wrap'><div class='progress-bar'><div style='width:{p}%'></div></div><div>{done}/{g}分</div></div>", unsafe_allow_html=True)
             try:
                 import matplotlib.pyplot as plt
                 fig = plt.figure(figsize=(6.5,3.2))
-                plt.bar(agg["subject"], agg["minutes"])
-                plt.title("科目別 合計分（今週）")
-                plt.ylabel("分"); plt.xticks(rotation=15, ha="right")
-                st.pyplot(fig)
+                plt.bar(agg["subject"], agg["minutes"]); plt.title("科目別 合計分（今週）"); plt.ylabel("分")
+                plt.xticks(rotation=15, ha="right"); st.pyplot(fig)
             except Exception:
                 pass
 
-        # ✔ 直近14日の合計（折れ線）
-        st.markdown("**直近14日の合計（1日ごと）**")
+        # 直近14日
         last14 = pd.DataFrame({"date": [today - timedelta(days=i) for i in range(13,-1,-1)]})
         if not df.empty:
             daily = df.groupby("date", as_index=False)["minutes"].sum()
@@ -581,15 +524,13 @@ def view_study():
         except Exception:
             st.dataframe(last14.rename(columns={"date":"日付","minutes":"分"}), use_container_width=True, hide_index=True)
 
-        # ✔ 手触りの分布
-        st.markdown("**手触りの分布（件数・今週）**")
         if not w.empty:
             feel_counts = w.groupby("feel")["subject"].count().reset_index().rename(columns={"subject":"件数"})
+            st.caption("**手触りの分布（件数・今週）**")
             st.dataframe(feel_counts, use_container_width=True, hide_index=True)
 
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # ---------- エクスポート ----------
     st.markdown('<div class="card">', unsafe_allow_html=True)
     full = load_csv(CSV_STUDY)
     if not full.empty:
@@ -597,19 +538,16 @@ def view_study():
         st.download_button("⬇️ Study Tracker（CSV）をダウンロード", data=csv, file_name="study.csv", mime="text/csv")
     st.markdown('</div>', unsafe_allow_html=True)
 
-# ======================= 記録 / エクスポート =======================
 def view_history():
     header("📦 記録とエクスポート")
-
-    # 1) 感情整理
+    # 感情
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.markdown("#### 感情の記録")
     df = load_csv(CSV_FEEL)
-    if df.empty:
-        st.caption("まだ記録がありません。")
+    if df.empty: st.caption("まだ記録がありません。")
     else:
         try: df["ts"]=pd.to_datetime(df["ts"]); df=df.sort_values("ts", ascending=False)
-        except: pass
+        except Exception: pass
         for _,r in df.head(20).iterrows():
             st.markdown('<div class="card">', unsafe_allow_html=True)
             st.markdown(f"**🕒 {r.get('ts','')}**")
@@ -621,73 +559,68 @@ def view_history():
         csv = df.to_csv(index=False).encode("utf-8-sig")
         st.download_button("⬇️ 感情（CSV）", data=csv, file_name="feel.csv", mime="text/csv")
     st.markdown('</div>', unsafe_allow_html=True)
-
-    # 2) 呼吸
+    # 呼吸
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.markdown("#### 呼吸の記録")
     bd = load_csv(CSV_BREATH)
-    if bd.empty:
-        st.caption("まだ記録がありません。")
+    if bd.empty: st.caption("まだ記録がありません。")
     else:
         try: bd["ts"]=pd.to_datetime(bd["ts"]); bd=bd.sort_values("ts", ascending=False)
-        except: pass
+        except Exception: pass
         st.dataframe(bd.rename(columns={"ts":"日時","sec":"時間（秒）","guide":"ガイド","task":"1分タスク","note":"メモ"}),
                      use_container_width=True, hide_index=True)
         csv2 = bd.to_csv(index=False).encode("utf-8-sig")
         st.download_button("⬇️ 呼吸（CSV）", data=csv2, file_name="breath.csv", mime="text/csv")
     st.markdown('</div>', unsafe_allow_html=True)
-
-    # 3) ジャーナル
+    # ジャーナル
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.markdown("#### 自由ジャーナル")
     jd = load_csv(CSV_JOURNAL)
-    if jd.empty:
-        st.caption("まだ記録がありません。")
+    if jd.empty: st.caption("まだ記録がありません。")
     else:
         try: jd["ts"]=pd.to_datetime(jd["ts"]); jd=jd.sort_values("ts", ascending=False)
-        except: pass
+        except Exception: pass
         for _,r in jd.head(20).iterrows():
             st.markdown('<div class="card">', unsafe_allow_html=True)
-            st.markdown(f"**🕒 {r.get('ts','')}**")
-            st.markdown(r.get("text",""))
+            st.markdown(f"**🕒 {r.get('ts','')}**"); st.markdown(r.get("text",""))
             st.markdown('</div>', unsafe_allow_html=True)
         csv3 = jd.to_csv(index=False).encode("utf-8-sig")
         st.download_button("⬇️ ジャーナル（CSV）", data=csv3, file_name="journal.csv", mime="text/csv")
     st.markdown('</div>', unsafe_allow_html=True)
-
-    # 4) 一日の振り返り
+    # 一日の振り返り
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.markdown("#### 一日の振り返り")
     dd = load_csv(CSV_DAY)
-    if dd.empty:
-        st.caption("まだ記録がありません。")
+    if dd.empty: st.caption("まだ記録がありません。")
     else:
         try: dd["ts"]=pd.to_datetime(dd["ts"]); dd=dd.sort_values("ts", ascending=False)
-        except: pass
+        except Exception: pass
         st.dataframe(dd.rename(columns={"ts":"日時","mood":"気分","today":"今日","tomorrow":"明日したいこと"}),
                      use_container_width=True, hide_index=True)
         csv4 = dd.to_csv(index=False).encode("utf-8-sig")
         st.download_button("⬇️ 一日の振り返り（CSV）", data=csv4, file_name="day.csv", mime="text/csv")
     st.markdown('</div>', unsafe_allow_html=True)
-
-    # 5) Study
+    # Study
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.markdown("#### Study Tracker")
     sd = load_csv(CSV_STUDY)
-    if sd.empty:
-        st.caption("まだ記録がありません。")
+    if sd.empty: st.caption("まだ記録がありません。")
     else:
         st.dataframe(sd, use_container_width=True, hide_index=True)
         csv5 = sd.to_csv(index=False).encode("utf-8-sig")
         st.download_button("⬇️ Study（CSV）", data=csv5, file_name="study.csv", mime="text/csv")
     st.markdown('</div>', unsafe_allow_html=True)
 
-# ======================= ルーティング =======================
-if   st.session_state.view == "HOME":    view_home()
-elif st.session_state.view == "BREATH":  view_breath()
-elif st.session_state.view == "FEEL":    view_feel()
-elif st.session_state.view == "JOURNAL": view_journal()
-elif st.session_state.view == "DAY":     view_day()
-elif st.session_state.view == "STUDY":   view_study()
-elif st.session_state.view == "HISTORY": view_history()
-else:                                    view_home()
+# =============== セーフ実行（本体は try で守る） ===============
+try:
+    if   st.session_state.view == "HOME":    view_home()
+    elif st.session_state.view == "BREATH":  view_breath()
+    elif st.session_state.view == "FEEL":    view_feel()
+    elif st.session_state.view == "JOURNAL": view_journal()
+    elif st.session_state.view == "DAY":     view_day()
+    elif st.session_state.view == "STUDY":   view_study()
+    elif st.session_state.view == "HISTORY": view_history()
+    else:                                    view_home()
+except Exception as e:
+    st.error("画面描画中にエラーが発生しました。詳細を下に表示します。")
+    st.code("".join(traceback.format_exception(e)), language="python")
