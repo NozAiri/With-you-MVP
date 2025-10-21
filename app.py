@@ -1,11 +1,17 @@
 # app.py — Sora (Safe Boot) 真っ白対策版
 # すべてこのファイル一つで動きます。依存エラーは画面に表示され、白画面になりません。
 
+# === 最小の先頭レンダリング（本番モード）===
 from datetime import datetime, date, timedelta
 from pathlib import Path
 import time, uuid, json, io, os, sys, traceback
 import pandas as pd
 import streamlit as st
+
+st.set_page_config(page_title="Sora — しんどい夜の2分ノート", page_icon="🌙", layout="centered")
+
+# ここからすぐ本体の処理を続けてOK（診断パネルは表示しない）
+
 
 # =============== 初期レンダリング（ここで必ず何か表示して白画面を防止） ===============
 st.set_page_config(page_title="Sora — しんどい夜の2分ノート", page_icon="🌙", layout="centered")
