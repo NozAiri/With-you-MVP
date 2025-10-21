@@ -1,5 +1,4 @@
 import streamlit as st
-st.set_option('browser.gatherUsageStats', False)
 # app.py — Sora（明るい星空UI／安全呼吸／やさしい感情整理／自由ジャーナル／一日の振り返り／Study Tracker＋進捗）
 from datetime import datetime, date, timedelta
 from pathlib import Path
