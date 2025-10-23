@@ -1,8 +1,8 @@
-# app.py — Sora（パステル版：ナビ修正／多選択感情／行動活性化）
+# app.py — Sora（パステル明るめ＋ナビ修正）
 from __future__ import annotations
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, Tuple, List
+from typing import Dict, Tuple
 import pandas as pd
 import streamlit as st
 import time, json
@@ -15,66 +15,93 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# ---------------- Theme / CSS (pastel) ----------------
+# ---------------- Theme / CSS (light pastel background) ----------------
 def inject_css():
     st.markdown("""
 <style>
 :root{
-  /* pastel navy & dusty pink */
-  --bg:#121429; --panel:#1a1c34; --panel-brd:#343764;
-  --text:#fbfaff; --muted:#c3c6e6; --outline:#9aa0ff;
-  --grad-from:#ffc9d8; --grad-to:#ff9bb9; /* くすみピンク */
-  --chip-brd:rgba(255,189,222,.35);
+  /* 明るめパステル基調 */
+  --bg1:#f7f8ff;     /* ごく薄いブルー */
+  --bg2:#fff4f7;     /* ごく薄いピンク */
+  --panel:#ffffffee; /* ほぼ白パネル（半透明） */
+  --panel-brd:#e6e8f6;
+  --text:#2a2b44;    /* 濃紺グレー（ダーク文字） */
+  --muted:#6d7299;
+  --outline:#9aa0ff;
 
-  --tile-a:#ffd3a8; --tile-b:#ffe8cf;
-  --tile-c:#ffc3d8; --tile-d:#ffe0ef;
-  --tile-e:#d6c8ff; --tile-f:#efe9ff;
-  --tile-g:#bfe9ff; --tile-h:#e7f6ff;
+  /* くすみピンク系アクセント（ボタンやピル） */
+  --grad-from:#ffd7e4;
+  --grad-to:#ffb7cd;
+  --chip-brd:rgba(255,189,222,.45);
+
+  /* タイルの柔らかい配色 */
+  --tile-a:#ffe2b8; --tile-b:#fff1dc;
+  --tile-c:#ffd1e3; --tile-d:#ffe6f2;
+  --tile-e:#e6dcff; --tile-f:#f5f1ff;
+  --tile-g:#d5f1ff; --tile-h:#eef9ff;
 }
-html, body, .stApp{background:var(--bg)}
+
+/* 明るいパステルの背景（ほんのりグラデ＋淡いノイズ影） */
+html, body, .stApp{
+  background: radial-gradient(1200px 600px at 20% -10%, #ffffff 0%, var(--bg1) 40%, transparent 70%),
+              radial-gradient(1000px 520px at 100% 0%,  #ffffff 0%, var(--bg2) 50%, transparent 80%),
+              linear-gradient(180deg, var(--bg1), var(--bg2));
+}
+
+/* コンテナと文字色 */
 .block-container{max-width:980px; padding-top:.4rem; padding-bottom:2rem}
 h1,h2,h3{color:var(--text); letter-spacing:.2px}
-p,label,.stMarkdown,.stTextInput,.stTextArea{color:var(--text); font-size:1.04rem}
+p,label,.stMarkdown,.stTextInput,.stTextArea{color:var(--text); font-size:1.02rem}
 small{color:var(--muted)}
-.card{background:var(--panel); border:1px solid var(--panel-brd); border-radius:20px; padding:18px; margin-bottom:14px;
-      box-shadow:0 18px 36px rgba(10,10,24,.28)}
+.card{
+  background:var(--panel);
+  border:1px solid var(--panel-brd);
+  border-radius:16px; padding:18px; margin-bottom:14px;
+  box-shadow:0 10px 30px rgba(48,56,120,.08)
+}
 
+/* Hero */
 .hero{
-  border:2px solid rgba(255,231,238,.55);
-  background:linear-gradient(180deg, rgba(32,34,70,.55), rgba(26,27,56,.55));
-  padding:22px; border-radius:24px; margin:10px 0 14px;
+  border:1px solid var(--panel-brd);
+  background:#ffffffcc;
+  padding:22px; border-radius:20px; margin:10px 0 14px;
 }
 .hero h1{color:var(--text); font-size:1.45rem; font-weight:900; margin:.2rem 0 1rem}
-.hero .lead{font-size:1.8rem; font-weight:900; color:#ffe3ee; margin:.2rem 0 1.1rem}
-.hero .box{border:2px solid rgba(255,231,238,.55); border-radius:18px; padding:14px; margin:10px 0 14px;
-           background:linear-gradient(180deg, rgba(28,29,66,.65), rgba(23,24,52,.65)); color:var(--text)}
+.hero .lead{font-size:1.8rem; font-weight:900; color:#5d5aa6; margin:.3rem 0 1.0rem}
+.hero .box{
+  border:1px solid var(--panel-brd); border-radius:14px; padding:12px; margin:10px 0 12px;
+  background:#fafbff;
+}
 .hero .actions{display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:10px}
-.hero .chips{display:flex; gap:8px; flex-wrap:wrap; margin:8px 0 0}
 
-/* Topbar nav - always enabled */
-.topbar{position:sticky; top:0; z-index:10; background:rgba(18,20,41,.7); backdrop-filter:blur(8px);
-        border-bottom:1px solid #2a2e5c; margin:0 -12px 8px; padding:8px 12px 10px}
+/* Topbar nav（明るめ） */
+.topbar{
+  position:sticky; top:0; z-index:10;
+  background:#ffffffd9; backdrop-filter:blur(8px);
+  border-bottom:1px solid var(--panel-brd); margin:0 -12px 8px; padding:8px 12px 10px
+}
 .topnav{display:flex; gap:8px; flex-wrap:wrap; margin:2px 0}
 .topnav .nav-btn>button{
-  background:#fcfcff !important; color:#1f2142 !important; border:1px solid #dee0f0 !important;
-  height:auto !important; padding:9px 12px !important; border-radius:12px !important; font-weight:700 !important; font-size:.95rem !important;
+  background:#fff !important; color:#323355 !important; border:1px solid var(--panel-brd) !important;
+  height:auto !important; padding:9px 12px !important; border-radius:999px !important; font-weight:700 !important; font-size:.95rem !important;
+  box-shadow:0 6px 14px rgba(48,56,120,.08) !important;
 }
-.topnav .active>button{background:#f6f6ff !important; border:2px solid var(--outline) !important}
-.nav-hint{font-size:.78rem; color:#aeb2df; margin:0 2px 6px 2px}
+.topnav .active>button{background:#f6f7ff !important; border:2px solid var(--outline) !important}
+.nav-hint{font-size:.78rem; color:#8b8fb5; margin:0 2px 6px 2px}
 
 /* Buttons */
 .stButton>button,.stDownloadButton>button{
   width:100%; padding:12px 16px; border-radius:999px; border:1px solid var(--chip-brd);
-  background:linear-gradient(180deg,var(--grad-from),var(--grad-to)); color:#3a2740; font-weight:900; font-size:1.02rem;
-  box-shadow:0 14px 28px rgba(255,155,185,.18)
+  background:linear-gradient(180deg,var(--grad-from),var(--grad-to)); color:#4a3a46; font-weight:900; font-size:1.02rem;
+  box-shadow:0 10px 24px rgba(240,140,170,.18)
 }
 .stButton>button:hover{filter:brightness(.98)}
 
-/* Home tiles (BIG) */
+/* Home tiles（BIG・カード風） */
 .tile-grid{display:grid; grid-template-columns:1fr 1fr; gap:18px; margin-top:8px}
 .tile .stButton>button{
-  aspect-ratio:1/1; min-height:184px; border-radius:28px; text-align:left; padding:20px; white-space:normal; line-height:1.2;
-  border:none; font-weight:900; font-size:1.16rem; color:#2d2a33; box-shadow:0 16px 32px rgba(8,8,22,.35);
+  aspect-ratio:1/1; min-height:176px; border-radius:22px; text-align:left; padding:18px; white-space:normal; line-height:1.2;
+  border:none; font-weight:900; font-size:1.12rem; color:#2d2a33; box-shadow:0 12px 26px rgba(48,56,120,.12);
   display:flex; align-items:flex-end; justify-content:flex-start;
 }
 .tile-a .stButton>button{background:linear-gradient(160deg,var(--tile-a),var(--tile-b))}
@@ -82,43 +109,47 @@ small{color:var(--muted)}
 .tile-c .stButton>button{background:linear-gradient(160deg,var(--tile-e),var(--tile-f))}
 .tile-d .stButton>button{background:linear-gradient(160deg,var(--tile-g),var(--tile-h))}
 
-/* 呼吸丸 */
+/* 呼吸丸（明るめ） */
 .breath-wrap{display:flex; justify-content:center; align-items:center; padding:8px 0 4px}
 .breath-circle{
   width:220px; height:220px; border-radius:999px;
-  background:radial-gradient(circle at 50% 40%, #ffeef5, #ffd9ea 60%, #e3defd 100%);
-  box-shadow:0 18px 38px rgba(255,170,190,.16), inset 0 -10px 25px rgba(60,60,140,.22);
+  background:radial-gradient(circle at 50% 40%, #fff3f8, #ffe1ee 60%, #f1eeff 100%);
+  box-shadow:0 16px 32px rgba(180,150,210,.14), inset 0 -10px 25px rgba(120,120,180,.15);
   transform:scale(var(--scale, 1)); transition:transform .9s ease-in-out, filter .3s ease-in-out;
-  border:2px solid rgba(255,231,238,.55);
+  border:1px solid #f0ddea;
 }
-.phase-pill{display:inline-block; padding:.2rem .7rem; border-radius:999px; background:rgba(210,206,255,.16);
-  color:#f2f1ff; border:1px solid rgba(180,176,255,.38); font-weight:700}
-.count-box{font-size:40px; font-weight:900; text-align:center; color:#fff; padding:2px 0}
-.subtle{color:#ccd0ff; font-size:.92rem}
+.phase-pill{
+  display:inline-block; padding:.20rem .7rem; border-radius:999px; background:#eef0ff;
+  color:#4a4d88; border:1px solid #dfe3ff; font-weight:700
+}
+.count-box{font-size:40px; font-weight:900; text-align:center; color:#3a3a62; padding:2px 0}
+.subtle{color:#7b7fb0; font-size:.92rem}
 
-/* Emotion pills (SMALL & OUTLINED) — 見た目をBIGタイルと差別化 */
+/* Emotion pills（アウトライン・差別化） */
 .emopills{display:grid; grid-template-columns:repeat(6,1fr); gap:8px}
 .emopills .stButton>button{
-  background:#ffffff !important; color:#1e1e2a !important;
-  border:1px solid #e5e6f7 !important; border-radius:999px !important;
+  background:#fff !important; color:#2d2d3f !important;
+  border:1px solid #e7e9fb !important; border-radius:999px !important;
   box-shadow:none !important; font-weight:700 !important; padding:8px 10px !important;
 }
 .emopills .on>button{border:2px solid #ffb6cc !important; background:#fff6fb !important}
 
-/* Chips */
+/* Chips（行動活性化） */
 .chips{display:flex; gap:8px; flex-wrap:wrap; margin:8px 0 10px}
 .chips .chip-btn>button{
-  background:#fff6fb; color:#3a2144; border:1px solid var(--chip-brd)!important;
-  padding:8px 12px; height:auto; border-radius:999px!important; font-weight:900; box-shadow:0 8px 16px rgba(255,153,188,.10)
+  background:#fff6fb; color:#4a2c50; border:1px solid var(--chip-brd)!important;
+  padding:8px 12px; height:auto; border-radius:999px!important; font-weight:900; box-shadow:0 6px 12px rgba(240,140,170,.10)
 }
 
-/* Inputs */
-textarea, input, .stTextInput>div>div>input{border-radius:14px!important; background:#12142f; color:#f5f3ff; border:1px solid #3a3d66}
+/* Inputs（淡い背景用） */
+textarea, input, .stTextInput>div>div>input{
+  border-radius:12px!important; background:#ffffff; color:var(--text); border:1px solid #e6e8f6
+}
 
 /* Mobile */
 @media (max-width: 680px){
   .tile-grid{grid-template-columns:1fr}
-  .tile .stButton>button{min-height:170px}
+  .tile .stButton>button{min-height:164px}
   .emopills{grid-template-columns:repeat(4,1fr)}
   .block-container{padding-left:1rem; padding-right:1rem}
 }
@@ -129,9 +160,9 @@ inject_css()
 
 # ---------------- Data paths ----------------
 DATA_DIR = Path("data"); DATA_DIR.mkdir(exist_ok=True)
-CBT_CSV    = DATA_DIR / "cbt_entries.csv"    # 互換保存
+CBT_CSV    = DATA_DIR / "cbt_entries.csv"
 BREATH_CSV = DATA_DIR / "breath_sessions.csv"
-MIX_CSV    = DATA_DIR / "mix_note.csv"       # 統合ノート
+MIX_CSV    = DATA_DIR / "mix_note.csv"
 STUDY_CSV  = DATA_DIR / "study_blocks.csv"
 
 def now_ts(): return datetime.now().isoformat(timespec="seconds")
@@ -151,14 +182,10 @@ def append_csv(p: Path, row: dict):
 st.session_state.setdefault("view", "HOME")
 st.session_state.setdefault("breath_mode", "gentle")
 st.session_state.setdefault("breath_running", False)
-st.session_state.setdefault("breath_success", 0)
-st.session_state.setdefault("note", {
-    "emos": [], "reason": "", "oneword": "", "step":"", "switch":"", "memo":"", "sleep_h":6.5
-})
+st.session_state.setdefault("note", {"emos": [], "reason": "", "oneword": "", "step":"", "switch":"", "memo":""})
 
-# ---------------- Top Nav（常に操作可／ページ移動で呼吸停止） ----------------
+# ---------------- Nav helpers ----------------
 def navigate(to_key: str):
-    # ページ移動時は呼吸を停止してナビを常に効かせる
     st.session_state.breath_running = False
     st.session_state.view = to_key
 
@@ -166,12 +193,14 @@ def top_nav():
     st.markdown('<div class="topbar">', unsafe_allow_html=True)
     st.markdown('<div class="nav-hint">ページ移動</div>', unsafe_allow_html=True)
     st.markdown('<div class="topnav">', unsafe_allow_html=True)
+
+    # ★ 「STURDY」→「STUDY」に修正（遷移バグの原因）
     pages = [
-        ("HOME", "🏠 ホーム"),
-        ("BREATH", "🌙 心を休める呼吸ワーク"),
-        ("NOTE", "📝 心を整える"),
-        ("STURDY", "📚 Sturdy Tracker"),
-        ("EXPORT", "⬇️ 記録・エクスポート"),
+        ("HOME",  "🏠 ホーム"),
+        ("BREATH","🌙 心を休める呼吸ワーク"),
+        ("NOTE",  "📝 心を整える"),
+        ("STUDY", "📚 Sturdy Tracker"),
+        ("EXPORT","⬇️ 記録・エクスポート"),
     ]
     cols = st.columns(len(pages))
     for i,(key,label) in enumerate(pages):
@@ -194,10 +223,10 @@ def view_home():
     小さな一歩で“落ち着いた自分”に。データはこの端末だけ。</div>
     <div class="actions">
       <div>""", unsafe_allow_html=True)
-    if st.button("🌙 今すぐ 呼吸をはじめる）", use_container_width=True, key="home_go_breath"):
+    if st.button("🌙 今すぐ 呼吸をはじめる", use_container_width=True, key="home_go_breath"):
         navigate("BREATH")
     st.markdown("</div><div>", unsafe_allow_html=True)
-    if st.button("📝 心を整える）", use_container_width=True, key="home_go_note"):
+    if st.button("📝 心を整える", use_container_width=True, key="home_go_note"):
         navigate("NOTE")
     st.markdown("</div></div>", unsafe_allow_html=True)
 
@@ -218,7 +247,7 @@ def breath_patterns() -> Dict[str, Tuple[int,int,int]]:
     return {"gentle": (4,0,6), "calm": (5,2,6)}
 
 def compute_cycles(target_sec: int, pat: Tuple[int,int,int]) -> int:
-    return max(1, round(sum(pat) and target_sec / sum(pat)))
+    per = sum(pat); return max(1, round(target_sec / per))
 
 def run_breath_session(total_sec: int=90):
     inhale, hold, exhale = breath_patterns()[st.session_state.breath_mode]
@@ -232,12 +261,12 @@ def run_breath_session(total_sec: int=90):
     prog = st.progress(0, text="呼吸セッション")
     elapsed = 0; total = cycles * (inhale + hold + exhale)
 
-    def tick(label, secs, scale_from, scale_to):
+    def tick(label, secs, s_from, s_to):
         nonlocal elapsed
         for t in range(secs,0,-1):
             if not st.session_state.breath_running: return False
             ratio = (secs - t)/(secs-1) if secs>1 else 1
-            scale = scale_from + (scale_to-scale_from)*ratio
+            scale = s_from + (s_to-s_from)*ratio
             phase_box.markdown(f"<span class='phase-pill'>{label}</span>", unsafe_allow_html=True)
             circle_holder.markdown(f"<div class='breath-wrap'><div class='breath-circle' style='--scale:{scale}'></div></div>", unsafe_allow_html=True)
             count_box.markdown(f"<div class='count-box'>{t}</div>", unsafe_allow_html=True)
@@ -262,11 +291,8 @@ def run_breath_session(total_sec: int=90):
     finished = st.session_state.breath_running
     st.session_state.breath_running = False
 
-    if finished:
-        st.success("お疲れ様です")
-        st.session_state.breath_mode = "calm" if st.session_state.breath_mode=="gentle" else "calm"
-    else:
-        st.info("いつでも再開できます。")
+    if finished: st.success("おつかれさま。")
+    else:        st.info("いつでも再開できます。")
 
     note = st.text_input("メモ")
     if st.button("💾 保存", type="primary"):
@@ -286,15 +312,15 @@ def run_breath_session(total_sec: int=90):
 
 def view_breath():
     st.subheader("🌙 心を休める呼吸ワーク（安全設計）")
-    mode_name = "穏やか版（吸4・吐6）" if st.session_state.breath_mode=="gentle" else "落ち着き用（吸5・止2・吐6）"
-    st.caption(f"現在のガイド：{mode_name}（自動最適化）")
+    mode = "穏やか版（吸4・吐6）" if st.session_state.breath_mode=="gentle" else "落ち着き用（吸5・止2・吐6）"
+    st.caption(f"現在のガイド：{mode}（自動最適化）")
     if not st.session_state.breath_running:
         if st.button("開始（約90秒）", type="primary"): run_breath_session(90)
     else:
         st.info("実行中です…")
 
-# ---------------- 心を整える（複数感情／行動活性化） ----------------
-EMOJI_CHOICES = ["😟不安","😢悲しい","😠いらだち","😳恥ずかしい","😊うれしい"]
+# ---------------- 心を整える ----------------
+EMOJI_CHOICES = ["😟不安","😢悲しい","😠いらだち","😳恥ずかしい","😐ぼんやり","🙂安心","😊うれしい"]
 SWITCHES = ["外の光を浴びる","体を少し動かす","誰かと軽くつながる","小さな達成感","環境を整える","ごほうび少し"]
 BA_SUGGEST = ["水を一口","窓を少し開ける","外の光を5分","返信はスタンプだけ","英単語3つだけ","机の上を30秒片付ける"]
 
@@ -302,7 +328,6 @@ def view_note():
     st.subheader("📝 心を整える（2分で完結）")
     n = st.session_state.note
 
-    # 1) 今の気持ち（複数選択）
     st.caption("今の気持ち（複数OK）")
     st.markdown('<div class="emopills">', unsafe_allow_html=True)
     cols = st.columns(6)
@@ -317,13 +342,9 @@ def view_note():
             st.markdown('</div>', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # 2) 理由（一行）※旧きっかけ
-    n["reason"] = st.text_input("その絵文字を選んだ理由（1行）", value=n["reason"], placeholder="例：返信が来ない／提出が近い")
-
-    # 3) 一言メモ（自分の言葉）
+    n["reason"]  = st.text_input("その絵文字を選んだ理由（1行）", value=n["reason"],  placeholder="例：返信が来ない／提出が近い")
     n["oneword"] = st.text_input("いまの気持ちを言葉にすると？（一言）", value=n["oneword"], placeholder="例：胸がざわざわする")
 
-    # 4) 今日の一歩（行動活性化）
     st.caption("今日の一歩（小さく・具体・すぐ始められる）")
     st.markdown("<div class='chips'>", unsafe_allow_html=True)
     for i, tip in enumerate(BA_SUGGEST):
@@ -333,36 +354,32 @@ def view_note():
     st.markdown("</div>", unsafe_allow_html=True)
     n["step"] = st.text_input("やること（自由入力OK）", value=n["step"], placeholder="例：英単語アプリで3つだけ")
 
-    # 5) 気分が上がるスイッチ（旧：価値タグ）
     st.caption("気分が上がるスイッチ")
     n["switch"] = st.selectbox("", SWITCHES, index=SWITCHES.index(n["switch"]) if n["switch"] in SWITCHES else 0, label_visibility="collapsed")
 
-    # 6) メモ（任意／自由）
     n["memo"] = st.text_area("メモ", value=n["memo"], height=70, placeholder="書きたいことがあればどうぞ")
 
-    # 7) 保存
     c1, c2 = st.columns(2)
     with c1:
         if st.button("💾 保存して完了", type="primary"):
-            # 互換形式にも保存
             append_csv(CBT_CSV, {
                 "ts": now_ts(),
                 "emotions": json.dumps({"multi": n["emos"]}, ensure_ascii=False),
-                "triggers": n["reason"], "reappraise": n["oneword"],  # onewordを互換欄へ
+                "triggers": n["reason"], "reappraise": n["oneword"],
                 "action": n["step"], "value": n["switch"]
             })
             append_csv(MIX_CSV, {
                 "ts": now_ts(), "emos": " ".join(n["emos"]), "reason": n["reason"], "oneword": n["oneword"],
                 "step": n["step"], "switch": n["switch"], "memo": n["memo"]
             })
-            st.session_state.note = {"emos": [], "reason":"", "oneword":"", "step":"", "switch":"", "memo":"", "sleep_h":6.5}
+            st.session_state.note = {"emos": [], "reason":"", "oneword":"", "step":"", "switch":"", "memo":""}
             st.success("保存しました。今日はここでおしまいでもOK。")
     with c2:
         if st.button("🧼 入力を初期化"):
-            st.session_state.note = {"emos": [], "reason":"", "oneword":"", "step":"", "switch":"", "memo":"", "sleep_h":6.5}
+            st.session_state.note = {"emos": [], "reason":"", "oneword":"", "step":"", "switch":"", "memo":""}
             st.info("初期化しました。")
 
-# ---------------- Study ----------------
+# ---------------- Sturdy Tracker ----------------
 SUBJ_DEFAULT = ["国語","数学","英語","理科","社会","小論","過去問","面接","実技"]
 MOODS = ["😌集中","😕難航","😫しんどい"]
 
@@ -397,7 +414,7 @@ def view_study():
             pass
     st.markdown('</div>', unsafe_allow_html=True)
 
-# ---------------- 記録・エクスポート ----------------
+# ---------------- Export ----------------
 def view_export():
     st.subheader("⬇️ 記録・エクスポート（CSV）／設定")
     def dl(df: pd.DataFrame, label: str, name: str):
@@ -406,18 +423,7 @@ def view_export():
     dl(load_csv(CBT_CSV),   "2分ノート（互換）", "cbt_entries.csv")
     dl(load_csv(BREATH_CSV),"呼吸", "breath_sessions.csv")
     dl(load_csv(MIX_CSV),   "心を整える（統合）", "mix_note.csv")
-    dl(load_csv(STUDY_CSV), "Study", "study_blocks.csv")
-
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    danger = st.checkbox("⚠️ すべての保存データ（CSV）を削除することに同意します")
-    if st.button("🗑️ すべて削除（取り消し不可）", disabled=not danger):
-        for p in [CBT_CSV,BREATH_CSV,MIX_CSV,STUDY_CSV]:
-            try:
-                if p.exists(): p.unlink()
-            except Exception as e:
-                st.error(f"{p.name}: {e}")
-        st.success("削除しました。")
-    st.markdown('</div>', unsafe_allow_html=True)
+    dl(load_csv(STUDY_CSV), "Sturdy Tracker", "study_blocks.csv")
 
 # ---------------- Router ----------------
 top_nav()
@@ -425,12 +431,12 @@ v = st.session_state.view
 if v=="HOME":    view_home()
 elif v=="BREATH":view_breath()
 elif v=="NOTE":  view_note()
-elif v=="STUDY": view_study()
+elif v=="STUDY": view_study()    # ← キーと一致
 else:            view_export()
 
 # ---------------- Footer ----------------
 st.markdown("""
-<div style="text-align:center; color:var(--muted); margin-top:12px;">
+<div style="text-align:center; color:#8b8fb5; margin-top:12px;">
   <small>※ 個人名や連絡先は記入しないでください。<br>
   とてもつらい場合は、お住まいの地域の相談窓口や専門機関のご利用もご検討ください。</small>
 </div>
