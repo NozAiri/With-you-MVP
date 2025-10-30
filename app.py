@@ -1,4 +1,4 @@
-# app.py — Sora（水色パステル版｜Homeはレスキューのみ・開始前後スコアをレスキューにも記録）
+# app.py — With You.（水色パステル｜レスキュー+リラックス統合版）
 from __future__ import annotations
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -9,7 +9,7 @@ import time, json, os, random
 
 # ---------------- Page config ----------------
 st.set_page_config(
-    page_title="Sora — しんどい夜の2分ノート",
+    page_title="With You.",
     page_icon="🌙",
     layout="centered",
     initial_sidebar_state="collapsed",
@@ -41,7 +41,7 @@ small{color:var(--muted)}
   box-shadow:0 10px 30px rgba(40,80,160,.07)
 }
 
-/* Topbar nav（白×青アウトライン） */
+/* Topbar nav */
 .topbar{
   position:sticky; top:0; z-index:10;
   background:#fffffff2; backdrop-filter:blur(8px);
@@ -57,7 +57,7 @@ small{color:var(--muted)}
 .topnav .active>button{background:#f6fbff !important; border:2px solid var(--outline) !important}
 .nav-hint{font-size:.78rem; color:#6d7fa2; margin:0 2px 6px 2px}
 
-/* Buttons（青グラデ） */
+/* Buttons */
 .stButton>button,.stDownloadButton>button{
   width:100%; padding:12px 16px; border-radius:999px; border:1px solid var(--chip-brd);
   background:linear-gradient(180deg,var(--grad-from),var(--grad-to)); color:#25334a; font-weight:900; font-size:1.02rem;
@@ -65,8 +65,8 @@ small{color:var(--muted)}
 }
 .stButton>button:hover{filter:brightness(.98)}
 
-/* タイル */
-.tile-grid{display:grid; grid-template-columns:1fr; gap:18px; margin-top:8px} /* 1列：重複を排除 */
+/* タイル（ホームは1列＝統合導線のみ） */
+.tile-grid{display:grid; grid-template-columns:1fr; gap:18px; margin-top:8px}
 .tile .stButton>button{
   aspect-ratio:7/2; min-height:76px; border-radius:22px; text-align:center; padding:18px;
   border:none; font-weight:900; font-size:1.12rem; color:#1e2e49; box-shadow:0 12px 26px rgba(40,80,160,.12);
@@ -89,7 +89,6 @@ small{color:var(--muted)}
 
 .phase-pill{display:inline-block; padding:.20rem .7rem; border-radius:999px; background:#edf5ff;
   color:#2c4b77; border:1px solid #d6e7ff; font-weight:700}
-.count-box{font-size:40px; font-weight:900; text-align:center; color:#2b3f60; padding:2px 0}
 .subtle{color:#5d6f92; font-size:.92rem}
 
 /* Emotion pills（白ベース＋青アウトライン） */
@@ -110,7 +109,7 @@ small{color:var(--muted)}
 
 /* 入力 */
 textarea, input, .stTextInput>div>div>input{
-  border-radius:12px!important; background:#ffffff; color:var(--text); border:1px solid #e1e9ff
+  border-radius:12px!important; background:#ffffff; color:#2a3a55; border:1px solid #e1e9ff
 }
 
 /* Mobile */
@@ -124,12 +123,12 @@ textarea, input, .stTextInput>div>div>input{
 
 inject_css()
 
-# 夜は少し彩度を落とす
+# 夜間はやや彩度を落とす
 HOUR = datetime.now().hour
 if (HOUR>=20 or HOUR<5):
     st.markdown("<style>:root{ --muted:#4a5a73; }</style>", unsafe_allow_html=True)
 
-# ---------------- Data paths ----------------
+# ---------------- Data ----------------
 DATA_DIR = Path("data"); DATA_DIR.mkdir(exist_ok=True)
 CBT_CSV    = DATA_DIR / "cbt_entries.csv"
 BREATH_CSV = DATA_DIR / "breath_sessions.csv"
@@ -151,28 +150,25 @@ def append_csv(p: Path, row: dict):
     df.to_csv(tmp, index=False)
     os.replace(tmp, p)
 
-# ---------------- Session defaults ----------------
+# ---------------- Session ----------------
 st.session_state.setdefault("view", "HOME")
-st.session_state.setdefault("breath_mode", "gentle")
+st.session_state.setdefault("breath_mode", "gentle")  # 4-0-6 / 5-2-6
 st.session_state.setdefault("breath_running", False)
 st.session_state.setdefault("note", {"emos": [], "reason": "", "oneword": "", "step":"", "switch":"", "memo":""})
-st.session_state.setdefault("mood_before", None)
-st.session_state.setdefault("_rescue_stage", "start")  # start -> breathe -> after -> write
+st.session_state.setdefault("_session_stage", "before")  # before -> breathe -> after -> write
+st.session_state.setdefault("_before_score", None)
 
 # ---------------- Nav ----------------
 PAGES = [
     ("HOME",   "🏠 ホーム"),
-    ("RESCUE", "🌃 レスキュー"),
-    ("BREATH", "🌬 リラックスする"),
+    ("SESSION","🌙 リラックス & レスキュー"),
     ("NOTE",   "📝 心を整える"),
     ("STUDY",  "📚 Study Tracker"),
     ("EXPORT", "⬇️ 記録・エクスポート"),
 ]
-
 def navigate(to_key: str):
     st.session_state.breath_running = False
     st.session_state.view = to_key
-
 def top_nav():
     st.markdown('<div class="topbar">', unsafe_allow_html=True)
     st.markdown('<div class="nav-hint">ページ移動</div>', unsafe_allow_html=True)
@@ -182,34 +178,28 @@ def top_nav():
         cls = "nav-btn active" if st.session_state.view==key else "nav-btn"
         with cols[i]:
             st.markdown(f'<div class="{cls}">', unsafe_allow_html=True)
-            if st.button(label, key=f"nav_{key}", use_container_width=True):
-                navigate(key)
+            if st.button(label, key=f"nav_{key}", use_container_width=True): navigate(key)
             st.markdown('</div>', unsafe_allow_html=True)
     st.markdown('</div></div>', unsafe_allow_html=True)
 
-# ---------------- Helpers ----------------
+# ---------------- Breath helpers ----------------
 def breath_patterns() -> Dict[str, Tuple[int,int,int]]:
     return {"gentle": (4,0,6), "calm": (5,2,6)}
-
 def compute_cycles(target_sec: int, pat: Tuple[int,int,int]) -> int:
-    per = sum(pat); return max(1, round(target_sec / per))
-
+    return max(1, round(target_sec / sum(pat)))
 def animate_circle(container, phase: str, secs: int):
     anim = {"inhale":"sora-grow", "hold":"sora-steady", "exhale":"sora-shrink"}[phase]
     container.markdown(
         f"<div class='breath-wrap'><div class='breath-circle' style='animation:{anim} {secs}s linear 1 forwards;'></div></div>",
         unsafe_allow_html=True
     )
-
 def run_breath_session(total_sec: int=90):
     inhale, hold, exhale = breath_patterns()[st.session_state.breath_mode]
     cycles = compute_cycles(total_sec, (inhale,hold,exhale))
     st.session_state.breath_running = True
-
     phase_box = st.empty(); circle_holder = st.empty()
     prog = st.progress(0, text="リラックス中")
     elapsed = 0; total = cycles * (inhale + hold + exhale)
-
     for _ in range(cycles):
         if not st.session_state.breath_running: break
         phase_box.markdown("<span class='phase-pill'>吸う</span>", unsafe_allow_html=True)
@@ -218,7 +208,6 @@ def run_breath_session(total_sec: int=90):
             if not st.session_state.breath_running: break
             elapsed += 1; prog.progress(min(int(elapsed/total*100), 100)); time.sleep(1)
         if not st.session_state.breath_running: break
-
         if hold>0:
             phase_box.markdown("<span class='phase-pill'>とまる</span>", unsafe_allow_html=True)
             animate_circle(circle_holder, "hold", hold)
@@ -226,16 +215,12 @@ def run_breath_session(total_sec: int=90):
                 if not st.session_state.breath_running: break
                 elapsed += 1; prog.progress(min(int(elapsed/total*100), 100)); time.sleep(1)
             if not st.session_state.breath_running: break
-
         phase_box.markdown("<span class='phase-pill'>はく</span>", unsafe_allow_html=True)
         animate_circle(circle_holder, "exhale", exhale)
         for _ in range(exhale):
             if not st.session_state.breath_running: break
             elapsed += 1; prog.progress(min(int(elapsed/total*100), 100)); time.sleep(1)
-
-    finished = st.session_state.breath_running
     st.session_state.breath_running = False
-    return finished
 
 # ---------------- KPIs ----------------
 def last7_kpis() -> dict:
@@ -245,7 +230,7 @@ def last7_kpis() -> dict:
         df["ts"] = pd.to_datetime(df["ts"])
         view = df[df["ts"] >= datetime.now() - timedelta(days=7)]
         breath = view[view["mode"]=="breath"]
-        steps  = view[(view["mode"].isin(["note","rescue"])) & (view["step"].astype(str)!="")]
+        steps  = view[(view["step"].astype(str)!="")]  # 統合フロー/心を整える/どちらもカバー
         delta_avg = float(breath["delta"].dropna().astype(float).mean()) if not breath.empty else 0.0
         return {"breath": len(breath), "delta_avg": round(delta_avg,2), "steps": len(steps)}
     except Exception:
@@ -271,115 +256,96 @@ def view_home():
     with c3: st.markdown(f'<div class="kpi"><div class="num">{k["steps"]}</div><div class="lab">今からすること</div></div>', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # 主ボタンは「レスキュー」だけ
     st.markdown('<div class="card"><div class="tile-grid">', unsafe_allow_html=True)
     st.markdown('<div class="tile tile-a">', unsafe_allow_html=True)
-    if st.button("🌃 レスキュー", key="tile_rescue"): navigate("RESCUE")
+    if st.button("🌙 はじめる（リラックス & レスキュー）", key="tile_session"): navigate("SESSION")
     st.markdown('</div>', unsafe_allow_html=True)
     st.markdown('</div></div>', unsafe_allow_html=True)
 
-    # 他ページへの軽い導線（重複排除のためボタンは出さない）
-    st.caption("※ リラックスのみ行いたいときは上部ナビから「リラックスする」へ。")
+def view_session():
+    st.subheader("🌙 リラックス & レスキュー")
+    stage = st.session_state._session_stage
 
-def view_breath():
-    st.subheader("🌬 リラックスする（90秒）")
-    st.caption("吸う→とまる→はく。円がなめらかに拡大・縮小します。")
-
-    if st.session_state.get("mood_before") is None and not st.session_state.breath_running:
-        st.session_state.mood_before = st.slider("いまの気分（-3 とてもつらい / +3 とても楽）", -3, 3, -1)
-
-    col_stop, col_hint = st.columns([1,2])
-    with col_stop:
-        if st.session_state.breath_running:
-            if st.button("× 停止", use_container_width=True): st.session_state.breath_running=False
-    with col_hint:
-        st.markdown('<div class="subtle">吐く息は長めに。無理はしないでOK。</div>', unsafe_allow_html=True)
-
-    if not st.session_state.breath_running:
-        if st.button("開始（約90秒）", type="primary"): run_breath_session(90)
-    else:
-        st.info("実行中です…")
-
-    # 完了後の記録
-    if st.session_state.get("mood_before") is not None and not st.session_state.breath_running:
-        st.markdown("#### 終わったあとの感じ")
-        mood_after = st.slider("いまの気分（-3 とてもつらい / +3 とても楽）", -3, 3, 0)
-        before = int(st.session_state.get("mood_before",-1))
-        delta = int(mood_after) - before
-        st.caption(f"気分の変化：**{delta:+d}**")
-        note = st.text_input("メモ")
-        if st.button("💾 保存", type="primary"):
-            inhale, hold, exhale = breath_patterns()[st.session_state.breath_mode]
-            append_csv(BREATH_CSV, {
-                "ts": now_ts(), "mode": st.session_state.breath_mode,
-                "target_sec": 90, "inhale": inhale, "hold": hold, "exhale": exhale,
-                "mood_before": before, "mood_after": int(mood_after), "delta": delta, "note": note
-            })
-            append_csv(MIX_CSV, {
-                "ts": now_ts(), "mode":"breath", "mood_before": before, "mood_after": int(mood_after), "delta": delta
-            })
-            st.success("保存しました。ここまでで十分。")
-            st.session_state.mood_before = None
-
-# 行動活性化の選択肢
-SWITCHES = ["外の光を浴びる","体を少し動かす","誰かと軽くつながる","小さな達成感","環境を整える","ごほうび少し"]
-EMOJI_CHOICES = ["😟不安","😢悲しい","😠いらだち","😳恥ずかしい","😐ぼんやり","🙂安心","😊うれしい"]
-
-def view_rescue():
-    st.subheader("🌃 レスキュー")
-    stage = st.session_state.get("_rescue_stage","start")
-
-    # 1) 開始前の気分 → リラックス
-    if stage=="start":
+    # 1) 前スコア
+    if stage=="before":
         st.caption("ここにいていいよ。90秒だけ、一緒に息。")
-        st.session_state.mood_before = st.slider("いまの気分（-3 とてもつらい / +3 とても楽）", -3, 3, -2, key="rescue_before")
-        if st.button("🌙 リラックスをはじめる（90秒）", type="primary"):
+        st.session_state._before_score = st.slider("いまの気分（-3 とてもつらい / +3 とても楽）", -3, 3, -2)
+        if st.button("リラックスをはじめる（90秒）", type="primary"):
+            st.session_state._session_stage = "breathe"
             run_breath_session(90)
-            st.session_state._rescue_stage = "after"
+            st.session_state._session_stage = "after"
             return
 
-    # 2) 終了後のスコアを記録（Δも）
+    # 2) 後スコア（Δを保存）
     if stage=="after":
         st.markdown("#### 終わったあとの感じ")
-        mood_after = st.slider("いまの気分（-3 とてもつらい / +3 とても楽）", -3, 3, 0, key="rescue_after")
-        before = int(st.session_state.get("rescue_before", st.session_state.get("mood_before",-2)))
-        delta = int(mood_after) - before
+        after_score = st.slider("いまの気分（-3 とてもつらい / +3 とても楽）", -3, 3, 0, key="after_slider")
+        before = int(st.session_state.get("_before_score",-2))
+        delta = int(after_score) - before
         st.caption(f"気分の変化：**{delta:+d}**")
         if st.button("💾 リラックスの記録を保存", type="primary"):
             inhale, hold, exhale = breath_patterns()[st.session_state.breath_mode]
             append_csv(BREATH_CSV, {
                 "ts": now_ts(), "mode": st.session_state.breath_mode,
                 "target_sec": 90, "inhale": inhale, "hold": hold, "exhale": exhale,
-                "mood_before": before, "mood_after": int(mood_after), "delta": delta, "note": ""
+                "mood_before": before, "mood_after": int(after_score), "delta": delta, "note": ""
             })
             append_csv(MIX_CSV, {
-                "ts": now_ts(), "mode":"breath", "mood_before": before, "mood_after": int(mood_after), "delta": delta
+                "ts": now_ts(), "mode":"breath", "mood_before": before, "mood_after": int(after_score), "delta": delta
             })
             st.success("保存しました。次へ。")
-            st.session_state._rescue_stage = "write"
+            st.session_state._session_stage = "write"
             return
 
-    # 3) 自由記述＋行動活性化
+    # 3) 記述（理由/気持ち/今からすること/スイッチ/メモ）
     if stage=="write":
-        st.markdown("#### いまのこと")
-        reason = st.text_area("理由や状況")
-        feeling = st.text_area("いまの気持ちを言葉にする")
-        step = st.text_input("今からすること（自分の言葉で）")
-        switch = st.selectbox("気分を上げるスイッチ", SWITCHES)
-        memo = st.text_area("メモ", height=80)
+        EMOJI_CHOICES = ["😟不安","😢悲しい","😠いらだち","😳恥ずかしい","😐ぼんやり","🙂安心","😊うれしい"]
+        SWITCHES = ["外の光を浴びる","体を少し動かす","誰かと軽くつながる","小さな達成感","環境を整える","ごほうび少し"]
+
+        st.caption("いまの気持ち（複数OK）")
+        st.markdown('<div class="emopills">', unsafe_allow_html=True)
+        if "note" not in st.session_state: st.session_state.note = {"emos": [], "reason": "", "oneword": "", "step":"", "switch":"", "memo":""}
+        n = st.session_state.note
+        cols = st.columns(6)
+        for i, label in enumerate(EMOJI_CHOICES):
+            with cols[i%6]:
+                sel = label in n["emos"]
+                cls = "on" if sel else ""
+                st.markdown(f'<div class="{cls}">', unsafe_allow_html=True)
+                if st.button(("✓ " if sel else "") + label, key=f"emo_s_{i}"):
+                    if sel: n["emos"].remove(label)
+                    else:   n["emos"].append(label)
+                st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        n["reason"]  = st.text_area("理由や状況", value=n["reason"])
+        n["oneword"] = st.text_area("いまの気持ちを言葉にする", value=n["oneword"])
+        n["step"]    = st.text_input("今からすること（自分の言葉で）", value=n["step"])
+        n["switch"]  = st.selectbox("気分を上げるスイッチ", SWITCHES, index=SWITCHES.index(n["switch"]) if n["switch"] in SWITCHES else 0)
+        n["memo"]    = st.text_area("メモ", value=n["memo"], height=80)
+
         if st.button("💾 保存して完了", type="primary"):
+            append_csv(CBT_CSV, {
+                "ts": now_ts(),
+                "emotions": json.dumps({"multi": n["emos"]}, ensure_ascii=False),
+                "triggers": n["reason"], "reappraise": n["oneword"], "action": n["step"], "value": n["switch"]
+            })
             append_csv(MIX_CSV, {
-                "ts": now_ts(), "mode":"rescue",
-                "reason": reason, "oneword": feeling, "step": step, "switch": switch, "memo": memo
+                "ts": now_ts(), "mode":"session", "emos":" ".join(n["emos"]),
+                "reason": n["reason"], "oneword": n["oneword"], "step": n["step"], "switch": n["switch"], "memo": n["memo"]
             })
             st.success("できたらOK。今日はここまでで大丈夫。")
-            st.session_state._rescue_stage = "start"
-            st.session_state.mood_before = None
-            st.session_state.rescue_before = None
+            st.session_state._session_stage = "before"
+            st.session_state._before_score = None
+            st.session_state.note = {"emos": [], "reason": "", "oneword": "", "step":"", "switch":"", "memo":""}
 
 def view_note():
+    # 既存の「心を整える」は維持（自由記述＋スイッチ）
     st.subheader("📝 心を整える")
+    if "note" not in st.session_state: st.session_state.note = {"emos": [], "reason": "", "oneword": "", "step":"", "switch":"", "memo":""}
     n = st.session_state.note
+    EMOJI_CHOICES = ["😟不安","😢悲しい","😠いらだち","😳恥ずかしい","😐ぼんやり","🙂安心","😊うれしい"]
+    SWITCHES = ["外の光を浴びる","体を少し動かす","誰かと軽くつながる","小さな達成感","環境を整える","ごほうび少し"]
 
     st.caption("いまの気持ち（複数OK）")
     st.markdown('<div class="emopills">', unsafe_allow_html=True)
@@ -389,7 +355,7 @@ def view_note():
             sel = label in n["emos"]
             cls = "on" if sel else ""
             st.markdown(f'<div class="{cls}">', unsafe_allow_html=True)
-            if st.button(("✓ " if sel else "") + label, key=f"emo_{i}"):
+            if st.button(("✓ " if sel else "") + label, key=f"emo_n_{i}"):
                 if sel: n["emos"].remove(label)
                 else:   n["emos"].append(label)
             st.markdown('</div>', unsafe_allow_html=True)
@@ -398,7 +364,7 @@ def view_note():
     n["reason"]  = st.text_area("理由や状況", value=n["reason"])
     n["oneword"] = st.text_area("いまの気持ちを言葉にする", value=n["oneword"])
     n["step"]    = st.text_input("今からすること（自分の言葉で）", value=n["step"])
-    n["switch"]  = st.selectbox("気分を上げるスイッチ", ["外の光を浴びる","体を少し動かす","誰かと軽くつながる","小さな達成感","環境を整える","ごほうび少し"], index=0)
+    n["switch"]  = st.selectbox("気分を上げるスイッチ", SWITCHES, index=SWITCHES.index(n["switch"]) if n["switch"] in SWITCHES else 0)
     n["memo"]    = st.text_area("メモ", value=n["memo"], height=80)
 
     if st.button("💾 保存して完了", type="primary"):
@@ -414,9 +380,8 @@ def view_note():
         st.session_state.note = {"emos": [], "reason":"", "oneword":"", "step":"", "switch":"", "memo":""}
         st.success("保存しました。ここまでで十分。")
 
-# ---------------- Study Tracker（手入力→一覧） ----------------
+# ---- Study Tracker（前版のまま）/ Export もそのまま ----
 DEFAULT_MOODS = ["順調","難航","しんどい","集中","だるい","眠い","その他"]
-
 def view_study():
     st.subheader("📚 Study Tracker（学習時間の記録）")
     st.caption("時間は手入力。あとで一覧で見返せます。")
@@ -432,9 +397,7 @@ def view_study():
         note = st.text_input("メモ")
 
     if st.button("💾 記録", type="primary"):
-        append_csv(STUDY_CSV, {
-            "ts": now_ts(),"subject":subject.strip(),"minutes":int(minutes),"mood":mood,"memo":note
-        })
+        append_csv(STUDY_CSV, {"ts": now_ts(),"subject":subject.strip(),"minutes":int(minutes),"mood":mood,"memo":note})
         st.success("保存しました。")
 
     st.markdown('<div class="card">', unsafe_allow_html=True)
@@ -458,37 +421,31 @@ def view_study():
             st.caption("集計時にエラーが発生しました。")
     st.markdown('</div>', unsafe_allow_html=True)
 
-# ---------------- Export ----------------
 def export_and_wipe(label: str, path: Path, download_name: str):
     df = load_csv(path)
     if df.empty:
-        st.caption(f"{label}：まだデータがありません")
-        return
+        st.caption(f"{label}：まだデータがありません"); return
     data = df.to_csv(index=False).encode("utf-8-sig")
     dl = st.download_button(f"⬇️ {label} を保存", data, file_name=download_name, mime="text/csv", key=f"dl_{download_name}")
     if dl and st.button(f"🗑 {label} をこの端末から消去する", type="secondary", key=f"wipe_{download_name}"):
-        try:
-            path.unlink(missing_ok=True)
-            st.success("端末から安全に消去しました。")
-        except Exception:
-            st.warning("消去に失敗しました。ファイルが開かれていないか確認してください。")
+        try: path.unlink(missing_ok=True); st.success("端末から安全に消去しました。")
+        except Exception: st.warning("消去に失敗しました。ファイルが開かれていないか確認してください。")
 
 def view_export():
     st.subheader("⬇️ 記録・エクスポート（CSV）／安全消去")
     export_and_wipe("心を整える（互換）", CBT_CSV,   "cbt_entries.csv")
-    export_and_wipe("リラックスする",       BREATH_CSV, "breath_sessions.csv")
+    export_and_wipe("リラックス",           BREATH_CSV, "breath_sessions.csv")
     export_and_wipe("心を整える（統合）",   MIX_CSV,   "mix_note.csv")
     export_and_wipe("Study Tracker",       STUDY_CSV,  "study_blocks.csv")
 
 # ---------------- Router ----------------
 top_nav()
 v = st.session_state.view
-if v=="HOME":    view_home()
-elif v=="RESCUE":view_rescue()
-elif v=="BREATH":view_breath()
-elif v=="NOTE":  view_note()
-elif v=="STUDY": view_study()
-else:            view_export()
+if v=="HOME":      view_home()
+elif v=="SESSION": view_session()
+elif v=="NOTE":    view_note()
+elif v=="STUDY":   view_study()
+else:              view_export()
 
 # ---------------- Footer ----------------
 st.markdown("""
@@ -497,4 +454,3 @@ st.markdown("""
   とてもつらい場合は、お住まいの地域の相談窓口や専門機関のご利用もご検討ください。</small>
 </div>
 """, unsafe_allow_html=True)
-
