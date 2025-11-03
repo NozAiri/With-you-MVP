@@ -1,11 +1,14 @@
-# app.py — With You.（水色パステル｜ロール別：運営=全体/利用者=自分のみ）
+# app.py — With You.（水色パステル｜Firestoreストレージ版・運営=全体/利用者=自分のみ）
 from __future__ import annotations
-from datetime import datetime, timedelta
-from pathlib import Path
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Tuple, List
 import pandas as pd
 import streamlit as st
-import time, json, os, random, glob
+import time, json
+
+# ==== Firestore ====
+from google.cloud import firestore
+import google.oauth2.service_account as service_account
 
 # ================= Page config =================
 st.set_page_config(
@@ -126,61 +129,68 @@ HOUR = datetime.now().hour
 if (HOUR>=20 or HOUR<5):
     st.markdown("<style>:root{ --muted:#4a5a73; }</style>", unsafe_allow_html=True)
 
-# ================= Storage abstraction =================
-DATA_DIR = Path("data"); (DATA_DIR / "users").mkdir(parents=True, exist_ok=True)
+# ================= Firestore Storage abstraction =================
+def firestore_client():
+    creds = service_account.Credentials.from_service_account_info(st.secrets["FIREBASE_SERVICE_ACCOUNT"])
+    return firestore.Client(project=st.secrets["FIREBASE_SERVICE_ACCOUNT"]["project_id"], credentials=creds)
+
+DB = firestore_client()
 
 class Storage:
-    CBT = "cbt_entries.csv"
-    BREATH = "breath_sessions.csv"
-    MIX = "mix_note.csv"
-    STUDY = "study_blocks.csv"
+    # Firestore collections
+    CBT = "cbt_entries"
+    BREATH = "breath_sessions"
+    MIX = "mix_note"
+    STUDY = "study_blocks"
 
     @staticmethod
-    def user_dir(user_id: str) -> Path:
-        p = DATA_DIR / "users" / user_id
-        p.mkdir(parents=True, exist_ok=True)
-        return p
+    def now_ts_iso():
+        # ISO文字列はCSVダウンロード時に使う。DBには Timestamp で保存。
+        return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
 
     @staticmethod
-    def user_path(user_id: str, filename: str) -> Path:
-        return Storage.user_dir(user_id) / filename
+    def append_user(table: str, user_id: str, row: dict):
+        row = dict(row)  # コピー
+        # Firestore: ts フィールドは Timestamp としても持つ（並べ替え用）
+        # 文字列 ts が来ていない場合に備え、両方入れておく
+        if "ts" not in row:
+            row["ts"] = firestore.SERVER_TIMESTAMP
+            row["_ts_iso"] = Storage.now_ts_iso()
+        else:
+            # 文字列tsを保持しつつ、Timestampも入れる
+            row["_ts_iso"] = row["ts"]
+            row["ts"] = firestore.SERVER_TIMESTAMP
+        row["user_id"] = user_id
+        DB.collection(table).add(row)
 
     @staticmethod
-    def load_csv(path: Path) -> pd.DataFrame:
-        if path.exists():
-            try:
-                return pd.read_csv(path)
-            except Exception:
-                return pd.DataFrame()
-        return pd.DataFrame()
+    def load_user(table: str, user_id: str) -> pd.DataFrame:
+        docs = DB.collection(table).where("user_id", "==", user_id).order_by("ts", direction=firestore.Query.DESCENDING).stream()
+        rows = []
+        for d in docs:
+            data = d.to_dict()
+            # Firestore Timestampはpandasに入れやすいようにISO文字列へ
+            ts = data.get("ts")
+            if ts: data["ts"] = ts.astimezone().isoformat(timespec="seconds")
+            else:  data["ts"] = data.get("_ts_iso")
+            rows.append(data)
+        return pd.DataFrame(rows)
 
     @staticmethod
-    def append_csv(path: Path, row: dict):
-        tmp = path.with_suffix(path.suffix + f".tmp.{random.randint(1_000_000, 9_999_999)}")
-        df = Storage.load_csv(path)
-        df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
-        df.to_csv(tmp, index=False)
-        os.replace(tmp, path)
-
-    @staticmethod
-    def list_users() -> List[str]:
-        base = DATA_DIR / "users"
-        base.mkdir(exist_ok=True, parents=True)
-        return sorted([p.name for p in base.glob("*") if p.is_dir()])
-
-    @staticmethod
-    def load_all(filename: str) -> pd.DataFrame:
-        frames = []
-        for uid in Storage.list_users():
-            p = Storage.user_path(uid, filename)
-            df = Storage.load_csv(p)
-            if not df.empty:
-                df["__user_id"] = uid
-                frames.append(df)
-        return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+    def load_all(table: str) -> pd.DataFrame:
+        # 全件を時刻順で取得（件数が増えるなら期間絞りやBigQuery連携をご検討）
+        docs = DB.collection(table).order_by("ts", direction=firestore.Query.DESCENDING).stream()
+        rows = []
+        for d in docs:
+            data = d.to_dict()
+            ts = data.get("ts")
+            if ts: data["ts"] = ts.astimezone().isoformat(timespec="seconds")
+            else:  data["ts"] = data.get("_ts_iso")
+            rows.append(data)
+        return pd.DataFrame(rows)
 
 # ================= Utils & Session =================
-def now_ts(): return datetime.now().isoformat(timespec="seconds")
+def now_ts_iso(): return Storage.now_ts_iso()
 
 st.session_state.setdefault("view", "HOME")
 st.session_state.setdefault("breath_mode", "gentle")  # 4-0-6 / 5-2-6
@@ -193,7 +203,6 @@ st.session_state.setdefault("user_id", "")
 st.session_state.setdefault("_auth_ok", False)
 
 def admin_pass() -> str:
-    # Streamlit Cloud → Secrets から読む。無ければ開発用デフォルト。
     try:
         return st.secrets["ADMIN_PASS"]
     except Exception:
@@ -256,7 +265,6 @@ def top_nav():
     who = "運営" if st.session_state.role=="admin" else f"利用者（{st.session_state.user_id}）"
     st.markdown(f'<div class="nav-hint">ログイン中：{who}</div>', unsafe_allow_html=True)
 
-    # ページ構成（運営だけ DASH を見る）
     pages = [
         ("HOME",   "🏠 ホーム"),
         ("SESSION","🌙 リラックス & レスキュー"),
@@ -322,7 +330,7 @@ def run_breath_session(total_sec: int=90):
 
 # ================= KPI helpers =================
 def last7_kpis_user(user_id: str) -> dict:
-    df = Storage.load_csv(Storage.user_path(user_id, Storage.MIX))
+    df = Storage.load_user(Storage.MIX, user_id)
     if df.empty: return {"breath":0, "delta_avg":0.0, "steps":0}
     try:
         df["ts"] = pd.to_datetime(df["ts"])
@@ -343,7 +351,7 @@ def last7_kpis_all() -> dict:
         breath = view[view["mode"]=="breath"]
         steps  = view[(view.get("step", pd.Series(dtype=str)).astype(str) != "")]
         delta_avg = float(breath["delta"].dropna().astype(float).mean()) if not breath.empty else 0.0
-        users = df["__user_id"].nunique() if "__user_id" in df.columns else 0
+        users = df["user_id"].nunique() if "user_id" in df.columns else 0
         return {"breath": len(breath), "delta_avg": round(delta_avg,2), "steps": len(steps), "users": users}
     except Exception:
         return {"breath":0, "delta_avg":0.0, "steps":0, "users":0}
@@ -355,7 +363,7 @@ def view_home_user():
   <h2 style="margin:.2rem 0 1rem 0;">言葉の前に、息をひとつ。</h2>
   <div style="font-weight:900; color:#2767c9; font-size:1.3rem; margin-bottom:.6rem;">短い時間で、少し楽に。</div>
   <div style="border:1px solid var(--panel-brd); border-radius:14px; padding:12px; background:#f8fbff;">
-    90秒のリラックス → 絵文字で気持ちを並べる → 今からすることを自分の言葉で決める。データはこの端末だけ。
+    90秒のリラックス → 絵文字で気持ちを並べる → 今からすることを自分の言葉で決める。データは安全に保存されます。
   </div>
 </div>
 """, unsafe_allow_html=True)
@@ -396,13 +404,13 @@ def view_session():
         if st.button("💾 リラックスの記録を保存", type="primary"):
             inhale, hold, exhale = breath_patterns()[st.session_state.breath_mode]
             uid = st.session_state.user_id
-            Storage.append_csv(Storage.user_path(uid, Storage.BREATH), {
-                "ts": now_ts(), "mode": st.session_state.breath_mode,
+            Storage.append_user(Storage.BREATH, uid, {
+                "ts": now_ts_iso(), "mode": st.session_state.breath_mode,
                 "target_sec": 90, "inhale": inhale, "hold": hold, "exhale": exhale,
                 "mood_before": before, "mood_after": int(after_score), "delta": delta, "note": ""
             })
-            Storage.append_csv(Storage.user_path(uid, Storage.MIX), {
-                "ts": now_ts(), "mode":"breath", "mood_before": before, "mood_after": int(after_score), "delta": delta
+            Storage.append_user(Storage.MIX, uid, {
+                "ts": now_ts_iso(), "mode":"breath", "mood_before": before, "mood_after": int(after_score), "delta": delta
             })
             st.success("保存しました。次へ。")
             st.session_state._session_stage = "write"
@@ -436,13 +444,13 @@ def view_session():
 
         if st.button("💾 保存して完了", type="primary"):
             uid = st.session_state.user_id
-            Storage.append_csv(Storage.user_path(uid, Storage.CBT), {
-                "ts": now_ts(),
+            Storage.append_user(Storage.CBT, uid, {
+                "ts": now_ts_iso(),
                 "emotions": json.dumps({"multi": n["emos"]}, ensure_ascii=False),
                 "triggers": n["reason"], "reappraise": n["oneword"], "action": n["step"], "value": n["switch"]
             })
-            Storage.append_csv(Storage.user_path(uid, Storage.MIX), {
-                "ts": now_ts(), "mode":"session", "emos":" ".join(n["emos"]),
+            Storage.append_user(Storage.MIX, uid, {
+                "ts": now_ts_iso(), "mode":"session", "emos":" ".join(n["emos"]),
                 "reason": n["reason"], "oneword": n["oneword"], "step": n["step"], "switch": n["switch"], "memo": n["memo"]
             })
             st.success("できたらOK。今日はここまでで大丈夫。")
@@ -479,13 +487,13 @@ def view_note():
 
     if st.button("💾 保存して完了", type="primary"):
         uid = st.session_state.user_id
-        Storage.append_csv(Storage.user_path(uid, Storage.CBT), {
-            "ts": now_ts(),
+        Storage.append_user(Storage.CBT, uid, {
+            "ts": now_ts_iso(),
             "emotions": json.dumps({"multi": n["emos"]}, ensure_ascii=False),
             "triggers": n["reason"], "reappraise": n["oneword"], "action": n["step"], "value": n["switch"]
         })
-        Storage.append_csv(Storage.user_path(uid, Storage.MIX), {
-            "ts": now_ts(), "mode":"note", "emos":" ".join(n["emos"]),
+        Storage.append_user(Storage.MIX, uid, {
+            "ts": now_ts_iso(), "mode":"note", "emos":" ".join(n["emos"]),
             "reason": n["reason"], "oneword": n["oneword"], "step": n["step"], "switch": n["switch"], "memo": n["memo"]
         })
         st.session_state.note = {"emos": [], "reason":"", "oneword":"", "step":"", "switch":"", "memo":""}
@@ -508,12 +516,12 @@ def view_study():
 
     if st.button("💾 記録", type="primary"):
         uid = st.session_state.user_id
-        Storage.append_csv(Storage.user_path(uid, Storage.STUDY), {"ts": now_ts(),"subject":subject.strip(),"minutes":int(minutes),"mood":mood,"memo":note})
+        Storage.append_user(Storage.STUDY, uid, {"ts": now_ts_iso(),"subject":subject.strip(),"minutes":int(minutes),"mood":mood,"memo":note})
         st.success("保存しました。")
 
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.markdown("#### 一覧")
-    df = Storage.load_csv(Storage.user_path(st.session_state.user_id, Storage.STUDY))
+    df = Storage.load_user(Storage.STUDY, st.session_state.user_id)
     if df.empty:
         st.caption("まだ記録がありません。")
     else:
@@ -534,25 +542,19 @@ def view_study():
 
 def export_and_wipe_user():
     uid = st.session_state.user_id
-    st.subheader("⬇️ 記録・エクスポート（CSV）／安全消去")
-    for label, fname in [
+    st.subheader("⬇️ 記録・エクスポート（CSV）")
+    for label, table in [
         ("心を整える（互換）", Storage.CBT),
-        ("リラックス", Storage.BREATH),
+        ("リラックス",         Storage.BREATH),
         ("心を整える（統合）", Storage.MIX),
-        ("Study Tracker", Storage.STUDY),
+        ("Study Tracker",     Storage.STUDY),
     ]:
-        path = Storage.user_path(uid, fname)
-        df = Storage.load_csv(path)
+        df = Storage.load_user(table, uid)
         if df.empty:
             st.caption(f"{label}：まだデータがありません")
             continue
         data = df.to_csv(index=False).encode("utf-8-sig")
-        dl = st.download_button(f"⬇️ {label} を保存", data, file_name=f"{uid}_{fname}", mime="text/csv", key=f"dl_{uid}_{fname}")
-        if dl and st.button(f"🗑 {label} をこの端末から消去する", type="secondary", key=f"wipe_{uid}_{fname}"):
-            try:
-                path.unlink(missing_ok=True); st.success("端末から安全に消去しました。")
-            except Exception:
-                st.warning("消去に失敗しました。ファイルが開かれていないか確認してください。")
+        st.download_button(f"⬇️ {label} を保存（CSV）", data, file_name=f"{uid}_{table}.csv", mime="text/csv", key=f"dl_{uid}_{table}")
 
 # ================= Views (Admin) =================
 def view_admin_dash():
@@ -566,7 +568,6 @@ def view_admin_dash():
     with c3: st.markdown(f'<div class="kpi"><div class="num">{k["delta_avg"]:+.2f}</div><div class="lab">直近7日 平均Δ</div></div>', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # --- 最近の記録（統合）
     st.markdown("#### ⏱ 最近の記録（最新50件・モード混在）")
     df = Storage.load_all(Storage.MIX)
     if df.empty:
@@ -575,14 +576,13 @@ def view_admin_dash():
         try:
             df["ts"] = pd.to_datetime(df["ts"])
             df = df.sort_values("ts", ascending=False).head(50)
-            cols = ["ts","__user_id","mode","mood_before","mood_after","delta","emos","step","switch","memo"]
+            cols = ["ts","user_id","mode","mood_before","mood_after","delta","emos","step","switch","memo"]
             cols = [c for c in cols if c in df.columns]
-            show = df[cols].rename(columns={"ts":"日時","__user_id":"ユーザーID","mode":"モード","mood_before":"前","mood_after":"後","delta":"Δ","emos":"感情","step":"行動","switch":"スイッチ","memo":"メモ"})
+            show = df[cols].rename(columns={"ts":"日時","user_id":"ユーザーID","mode":"モード","mood_before":"前","mood_after":"後","delta":"Δ","emos":"感情","step":"行動","switch":"スイッチ","memo":"メモ"})
             st.dataframe(show, use_container_width=True, hide_index=True)
         except Exception:
             st.warning("一覧表示に失敗しました。")
 
-    # --- 感情分布（頻出）
     st.markdown("#### 😊 感情タグの頻度（上位）")
     emo_counts = {}
     df_note = Storage.load_all(Storage.MIX)
@@ -595,29 +595,27 @@ def view_admin_dash():
     else:
         st.caption("データなし")
 
-    # --- 行動（今からすること）
     st.markdown("#### 📝 『今からすること』最新（ユーザー横断・30件）")
     if not df.empty and "step" in df.columns:
-        latest_steps = df.sort_values("ts", ascending=False)[["ts","__user_id","step"]].dropna().head(30)
-        latest_steps = latest_steps.rename(columns={"ts":"日時","__user_id":"ユーザーID","step":"今からすること"})
+        latest_steps = df.sort_values("ts", ascending=False)[["ts","user_id","step"]].dropna().head(30)
+        latest_steps = latest_steps.rename(columns={"ts":"日時","user_id":"ユーザーID","step":"今からすること"})
         st.dataframe(latest_steps, use_container_width=True, hide_index=True)
     else:
         st.caption("データなし")
 
-    # --- フルエクスポート
-    st.markdown("#### ⬇️ 一括エクスポート")
-    for label, fname in [
+    st.markdown("#### ⬇️ 一括エクスポート（CSV）")
+    for label, table in [
         ("心を整える（互換）", Storage.CBT),
         ("リラックス",         Storage.BREATH),
         ("心を整える（統合）", Storage.MIX),
         ("Study Tracker",     Storage.STUDY),
     ]:
-        all_df = Storage.load_all(fname)
+        all_df = Storage.load_all(table)
         if all_df.empty:
             st.caption(f"{label}：データなし")
             continue
         data = all_df.to_csv(index=False).encode("utf-8-sig")
-        st.download_button(f"⬇️ 全ユーザー {label} を保存（CSV）", data, file_name=f"ALL_{fname}", mime="text/csv", key=f"dl_all_{fname}")
+        st.download_button(f"⬇️ 全ユーザー {label} を保存（CSV）", data, file_name=f"ALL_{table}.csv", mime="text/csv", key=f"dl_all_{table}")
 
 # ================= Router =================
 def view_export_router():
@@ -632,7 +630,6 @@ def main_router():
     v = st.session_state.view
     if v=="HOME":
         if st.session_state.role == "admin":
-            # 運営のHOMEは軽く説明
             st.markdown("### ようこそ（運営）\n集計は「📊 運営ダッシュボード」から確認できます。")
         else:
             view_home_user()
