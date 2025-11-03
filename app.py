@@ -1,13 +1,13 @@
-# app.py — With You.（水色パステル｜レスキュー+リラックス統合版）
+# app.py — With You.（水色パステル｜ロール別：運営=全体/利用者=自分のみ）
 from __future__ import annotations
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import Dict, Tuple, List
 import pandas as pd
 import streamlit as st
-import time, json, os, random
+import time, json, os, random, glob
 
-# ---------------- Page config ----------------
+# ================= Page config =================
 st.set_page_config(
     page_title="With You.",
     page_icon="🌙",
@@ -15,7 +15,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# ---------------- Theme / CSS (pastel blue) ----------------
+# ================= Theme / CSS (pastel blue) =================
 def inject_css():
     st.markdown("""
 <style>
@@ -65,7 +65,7 @@ small{color:var(--muted)}
 }
 .stButton>button:hover{filter:brightness(.98)}
 
-/* タイル（ホームは1列＝統合導線のみ） */
+/* タイル */
 .tile-grid{display:grid; grid-template-columns:1fr; gap:18px; margin-top:8px}
 .tile .stButton>button{
   aspect-ratio:7/2; min-height:76px; border-radius:22px; text-align:center; padding:18px;
@@ -122,59 +122,154 @@ textarea, input, .stTextInput>div>div>input{
 """, unsafe_allow_html=True)
 
 inject_css()
-
-# 夜間はやや彩度を落とす
 HOUR = datetime.now().hour
 if (HOUR>=20 or HOUR<5):
     st.markdown("<style>:root{ --muted:#4a5a73; }</style>", unsafe_allow_html=True)
 
-# ---------------- Data ----------------
-DATA_DIR = Path("data"); DATA_DIR.mkdir(exist_ok=True)
-CBT_CSV    = DATA_DIR / "cbt_entries.csv"
-BREATH_CSV = DATA_DIR / "breath_sessions.csv"
-MIX_CSV    = DATA_DIR / "mix_note.csv"
-STUDY_CSV  = DATA_DIR / "study_blocks.csv"
+# ================= Storage abstraction =================
+DATA_DIR = Path("data"); (DATA_DIR / "users").mkdir(parents=True, exist_ok=True)
 
+class Storage:
+    CBT = "cbt_entries.csv"
+    BREATH = "breath_sessions.csv"
+    MIX = "mix_note.csv"
+    STUDY = "study_blocks.csv"
+
+    @staticmethod
+    def user_dir(user_id: str) -> Path:
+        p = DATA_DIR / "users" / user_id
+        p.mkdir(parents=True, exist_ok=True)
+        return p
+
+    @staticmethod
+    def user_path(user_id: str, filename: str) -> Path:
+        return Storage.user_dir(user_id) / filename
+
+    @staticmethod
+    def load_csv(path: Path) -> pd.DataFrame:
+        if path.exists():
+            try:
+                return pd.read_csv(path)
+            except Exception:
+                return pd.DataFrame()
+        return pd.DataFrame()
+
+    @staticmethod
+    def append_csv(path: Path, row: dict):
+        tmp = path.with_suffix(path.suffix + f".tmp.{random.randint(1_000_000, 9_999_999)}")
+        df = Storage.load_csv(path)
+        df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
+        df.to_csv(tmp, index=False)
+        os.replace(tmp, path)
+
+    @staticmethod
+    def list_users() -> List[str]:
+        base = DATA_DIR / "users"
+        base.mkdir(exist_ok=True, parents=True)
+        return sorted([p.name for p in base.glob("*") if p.is_dir()])
+
+    @staticmethod
+    def load_all(filename: str) -> pd.DataFrame:
+        frames = []
+        for uid in Storage.list_users():
+            p = Storage.user_path(uid, filename)
+            df = Storage.load_csv(p)
+            if not df.empty:
+                df["__user_id"] = uid
+                frames.append(df)
+        return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+# ================= Utils & Session =================
 def now_ts(): return datetime.now().isoformat(timespec="seconds")
 
-def load_csv(p: Path) -> pd.DataFrame:
-    if p.exists():
-        try: return pd.read_csv(p)
-        except Exception: return pd.DataFrame()
-    return pd.DataFrame()
-
-def append_csv(p: Path, row: dict):
-    tmp = p.with_suffix(p.suffix + f".tmp.{random.randint(1_000_000, 9_999_999)}")
-    df = load_csv(p)
-    df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
-    df.to_csv(tmp, index=False)
-    os.replace(tmp, p)
-
-# ---------------- Session ----------------
 st.session_state.setdefault("view", "HOME")
 st.session_state.setdefault("breath_mode", "gentle")  # 4-0-6 / 5-2-6
 st.session_state.setdefault("breath_running", False)
 st.session_state.setdefault("note", {"emos": [], "reason": "", "oneword": "", "step":"", "switch":"", "memo":""})
 st.session_state.setdefault("_session_stage", "before")  # before -> breathe -> after -> write
 st.session_state.setdefault("_before_score", None)
+st.session_state.setdefault("role", None)  # "user" or "admin"
+st.session_state.setdefault("user_id", "")
+st.session_state.setdefault("_auth_ok", False)
 
-# ---------------- Nav ----------------
-PAGES = [
-    ("HOME",   "🏠 ホーム"),
-    ("SESSION","🌙 リラックス & レスキュー"),
-    ("NOTE",   "📝 心を整える"),
-    ("STUDY",  "📚 Study Tracker"),
-    ("EXPORT", "⬇️ 記録・エクスポート"),
-]
+def admin_pass() -> str:
+    # Streamlit Cloud → Secrets から読む。無ければ開発用デフォルト。
+    try:
+        return st.secrets["ADMIN_PASS"]
+    except Exception:
+        return "admin123"
+
+# ================= Auth =================
+def auth_ui() -> bool:
+    if st.session_state._auth_ok:
+        return True
+
+    with st.container():
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.markdown("### 🔐 ログイン")
+        tab_user, tab_admin = st.tabs(["利用者として入る", "運営として入る"])
+
+        with tab_user:
+            st.caption("ユーザーID（例：学校コード＋匿名IDなど）。ご自身の記録だけが表示・保存されます。")
+            uid = st.text_input("ユーザーID", placeholder="例: omu-2025-xxxx", key="login_uid")
+            if st.button("➡️ 入る（利用者）", type="primary", key="btn_login_user"):
+                uid = uid.strip()
+                if uid == "":
+                    st.warning("ユーザーIDを入力してください。")
+                else:
+                    st.session_state.user_id = uid
+                    st.session_state.role = "user"
+                    st.session_state._auth_ok = True
+                    st.success(f"ようこそ。ユーザーID: {uid}")
+                    return True
+
+        with tab_admin:
+            st.caption("運営パスコードを入力してください。全体の集計が閲覧できます。")
+            pw = st.text_input("運営パスコード", type="password", key="login_admin_pw")
+            if st.button("➡️ 入る（運営）", type="secondary", key="btn_login_admin"):
+                if pw == admin_pass():
+                    st.session_state.user_id = "_admin_"
+                    st.session_state.role = "admin"
+                    st.session_state._auth_ok = True
+                    st.success("運営ログイン完了。")
+                    return True
+                else:
+                    st.error("パスコードが違います。")
+
+        st.markdown("</div>", unsafe_allow_html=True)
+    return False
+
+def logout_btn():
+    with st.sidebar:
+        if st.button("🚪 ログアウト"):
+            for k in ["_auth_ok","role","user_id"]:
+                st.session_state[k] = None if k=="role" else ""
+            st.rerun()
+
+# ================= Nav =================
 def navigate(to_key: str):
     st.session_state.breath_running = False
     st.session_state.view = to_key
+
 def top_nav():
     st.markdown('<div class="topbar">', unsafe_allow_html=True)
-    st.markdown('<div class="nav-hint">ページ移動</div>', unsafe_allow_html=True)
+    who = "運営" if st.session_state.role=="admin" else f"利用者（{st.session_state.user_id}）"
+    st.markdown(f'<div class="nav-hint">ログイン中：{who}</div>', unsafe_allow_html=True)
+
+    # ページ構成（運営だけ DASH を見る）
+    pages = [
+        ("HOME",   "🏠 ホーム"),
+        ("SESSION","🌙 リラックス & レスキュー"),
+        ("NOTE",   "📝 心を整える"),
+        ("STUDY",  "📚 Study Tracker"),
+        ("EXPORT", "⬇️ 記録・エクスポート"),
+    ]
+    if st.session_state.role == "admin":
+        pages.insert(1, ("DASH", "📊 運営ダッシュボード"))
+
     st.markdown('<div class="topnav">', unsafe_allow_html=True)
-    cols = st.columns(len(PAGES))
-    for i,(key,label) in enumerate(PAGES):
+    cols = st.columns(len(pages))
+    for i,(key,label) in enumerate(pages):
         cls = "nav-btn active" if st.session_state.view==key else "nav-btn"
         with cols[i]:
             st.markdown(f'<div class="{cls}">', unsafe_allow_html=True)
@@ -182,17 +277,20 @@ def top_nav():
             st.markdown('</div>', unsafe_allow_html=True)
     st.markdown('</div></div>', unsafe_allow_html=True)
 
-# ---------------- Breath helpers ----------------
+# ================= Breath helpers =================
 def breath_patterns() -> Dict[str, Tuple[int,int,int]]:
     return {"gentle": (4,0,6), "calm": (5,2,6)}
+
 def compute_cycles(target_sec: int, pat: Tuple[int,int,int]) -> int:
     return max(1, round(target_sec / sum(pat)))
+
 def animate_circle(container, phase: str, secs: int):
     anim = {"inhale":"sora-grow", "hold":"sora-steady", "exhale":"sora-shrink"}[phase]
     container.markdown(
         f"<div class='breath-wrap'><div class='breath-circle' style='animation:{anim} {secs}s linear 1 forwards;'></div></div>",
         unsafe_allow_html=True
     )
+
 def run_breath_session(total_sec: int=90):
     inhale, hold, exhale = breath_patterns()[st.session_state.breath_mode]
     cycles = compute_cycles(total_sec, (inhale,hold,exhale))
@@ -222,22 +320,36 @@ def run_breath_session(total_sec: int=90):
             elapsed += 1; prog.progress(min(int(elapsed/total*100), 100)); time.sleep(1)
     st.session_state.breath_running = False
 
-# ---------------- KPIs ----------------
-def last7_kpis() -> dict:
-    df = load_csv(MIX_CSV)
+# ================= KPI helpers =================
+def last7_kpis_user(user_id: str) -> dict:
+    df = Storage.load_csv(Storage.user_path(user_id, Storage.MIX))
     if df.empty: return {"breath":0, "delta_avg":0.0, "steps":0}
     try:
         df["ts"] = pd.to_datetime(df["ts"])
         view = df[df["ts"] >= datetime.now() - timedelta(days=7)]
         breath = view[view["mode"]=="breath"]
-        steps  = view[(view["step"].astype(str)!="")]  # 統合フロー/心を整える/どちらもカバー
+        steps  = view[(view.get("step", pd.Series(dtype=str)).astype(str) != "")]
         delta_avg = float(breath["delta"].dropna().astype(float).mean()) if not breath.empty else 0.0
         return {"breath": len(breath), "delta_avg": round(delta_avg,2), "steps": len(steps)}
     except Exception:
         return {"breath":0, "delta_avg":0.0, "steps":0}
 
-# ---------------- Views ----------------
-def view_home():
+def last7_kpis_all() -> dict:
+    df = Storage.load_all(Storage.MIX)
+    if df.empty: return {"breath":0, "delta_avg":0.0, "steps":0, "users":0}
+    try:
+        df["ts"] = pd.to_datetime(df["ts"])
+        view = df[df["ts"] >= datetime.now() - timedelta(days=7)]
+        breath = view[view["mode"]=="breath"]
+        steps  = view[(view.get("step", pd.Series(dtype=str)).astype(str) != "")]
+        delta_avg = float(breath["delta"].dropna().astype(float).mean()) if not breath.empty else 0.0
+        users = df["__user_id"].nunique() if "__user_id" in df.columns else 0
+        return {"breath": len(breath), "delta_avg": round(delta_avg,2), "steps": len(steps), "users": users}
+    except Exception:
+        return {"breath":0, "delta_avg":0.0, "steps":0, "users":0}
+
+# ================= Views (User) =================
+def view_home_user():
     st.markdown("""
 <div class="card">
   <h2 style="margin:.2rem 0 1rem 0;">言葉の前に、息をひとつ。</h2>
@@ -248,7 +360,7 @@ def view_home():
 </div>
 """, unsafe_allow_html=True)
 
-    k = last7_kpis()
+    k = last7_kpis_user(st.session_state.user_id)
     st.markdown('<div class="kpi-grid">', unsafe_allow_html=True)
     c1,c2,c3 = st.columns(3)
     with c1: st.markdown(f'<div class="kpi"><div class="num">{k["breath"]}</div><div class="lab">リラックス回数</div></div>', unsafe_allow_html=True)
@@ -266,7 +378,6 @@ def view_session():
     st.subheader("🌙 リラックス & レスキュー")
     stage = st.session_state._session_stage
 
-    # 1) 前スコア
     if stage=="before":
         st.caption("ここにいていいよ。90秒だけ、一緒に息。")
         st.session_state._before_score = st.slider("いまの気分（-3 とてもつらい / +3 とても楽）", -3, 3, -2)
@@ -276,7 +387,6 @@ def view_session():
             st.session_state._session_stage = "after"
             return
 
-    # 2) 後スコア（Δを保存）
     if stage=="after":
         st.markdown("#### 終わったあとの感じ")
         after_score = st.slider("いまの気分（-3 とてもつらい / +3 とても楽）", -3, 3, 0, key="after_slider")
@@ -285,19 +395,19 @@ def view_session():
         st.caption(f"気分の変化：**{delta:+d}**")
         if st.button("💾 リラックスの記録を保存", type="primary"):
             inhale, hold, exhale = breath_patterns()[st.session_state.breath_mode]
-            append_csv(BREATH_CSV, {
+            uid = st.session_state.user_id
+            Storage.append_csv(Storage.user_path(uid, Storage.BREATH), {
                 "ts": now_ts(), "mode": st.session_state.breath_mode,
                 "target_sec": 90, "inhale": inhale, "hold": hold, "exhale": exhale,
                 "mood_before": before, "mood_after": int(after_score), "delta": delta, "note": ""
             })
-            append_csv(MIX_CSV, {
+            Storage.append_csv(Storage.user_path(uid, Storage.MIX), {
                 "ts": now_ts(), "mode":"breath", "mood_before": before, "mood_after": int(after_score), "delta": delta
             })
             st.success("保存しました。次へ。")
             st.session_state._session_stage = "write"
             return
 
-    # 3) 記述（理由/気持ち/今からすること/スイッチ/メモ）
     if stage=="write":
         EMOJI_CHOICES = ["😟不安","😢悲しい","😠いらだち","😳恥ずかしい","😐ぼんやり","🙂安心","😊うれしい"]
         SWITCHES = ["外の光を浴びる","体を少し動かす","誰かと軽くつながる","小さな達成感","環境を整える","ごほうび少し"]
@@ -325,12 +435,13 @@ def view_session():
         n["memo"]    = st.text_area("メモ", value=n["memo"], height=80)
 
         if st.button("💾 保存して完了", type="primary"):
-            append_csv(CBT_CSV, {
+            uid = st.session_state.user_id
+            Storage.append_csv(Storage.user_path(uid, Storage.CBT), {
                 "ts": now_ts(),
                 "emotions": json.dumps({"multi": n["emos"]}, ensure_ascii=False),
                 "triggers": n["reason"], "reappraise": n["oneword"], "action": n["step"], "value": n["switch"]
             })
-            append_csv(MIX_CSV, {
+            Storage.append_csv(Storage.user_path(uid, Storage.MIX), {
                 "ts": now_ts(), "mode":"session", "emos":" ".join(n["emos"]),
                 "reason": n["reason"], "oneword": n["oneword"], "step": n["step"], "switch": n["switch"], "memo": n["memo"]
             })
@@ -340,7 +451,6 @@ def view_session():
             st.session_state.note = {"emos": [], "reason": "", "oneword": "", "step":"", "switch":"", "memo":""}
 
 def view_note():
-    # 既存の「心を整える」は維持（自由記述＋スイッチ）
     st.subheader("📝 心を整える")
     if "note" not in st.session_state: st.session_state.note = {"emos": [], "reason": "", "oneword": "", "step":"", "switch":"", "memo":""}
     n = st.session_state.note
@@ -368,19 +478,19 @@ def view_note():
     n["memo"]    = st.text_area("メモ", value=n["memo"], height=80)
 
     if st.button("💾 保存して完了", type="primary"):
-        append_csv(CBT_CSV, {
+        uid = st.session_state.user_id
+        Storage.append_csv(Storage.user_path(uid, Storage.CBT), {
             "ts": now_ts(),
             "emotions": json.dumps({"multi": n["emos"]}, ensure_ascii=False),
             "triggers": n["reason"], "reappraise": n["oneword"], "action": n["step"], "value": n["switch"]
         })
-        append_csv(MIX_CSV, {
+        Storage.append_csv(Storage.user_path(uid, Storage.MIX), {
             "ts": now_ts(), "mode":"note", "emos":" ".join(n["emos"]),
             "reason": n["reason"], "oneword": n["oneword"], "step": n["step"], "switch": n["switch"], "memo": n["memo"]
         })
         st.session_state.note = {"emos": [], "reason":"", "oneword":"", "step":"", "switch":"", "memo":""}
         st.success("保存しました。ここまでで十分。")
 
-# ---- Study Tracker（前版のまま）/ Export もそのまま ----
 DEFAULT_MOODS = ["順調","難航","しんどい","集中","だるい","眠い","その他"]
 def view_study():
     st.subheader("📚 Study Tracker（学習時間の記録）")
@@ -397,12 +507,13 @@ def view_study():
         note = st.text_input("メモ")
 
     if st.button("💾 記録", type="primary"):
-        append_csv(STUDY_CSV, {"ts": now_ts(),"subject":subject.strip(),"minutes":int(minutes),"mood":mood,"memo":note})
+        uid = st.session_state.user_id
+        Storage.append_csv(Storage.user_path(uid, Storage.STUDY), {"ts": now_ts(),"subject":subject.strip(),"minutes":int(minutes),"mood":mood,"memo":note})
         st.success("保存しました。")
 
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.markdown("#### 一覧")
-    df = load_csv(STUDY_CSV)
+    df = Storage.load_csv(Storage.user_path(st.session_state.user_id, Storage.STUDY))
     if df.empty:
         st.caption("まだ記録がありません。")
     else:
@@ -421,33 +532,136 @@ def view_study():
             st.caption("集計時にエラーが発生しました。")
     st.markdown('</div>', unsafe_allow_html=True)
 
-def export_and_wipe(label: str, path: Path, download_name: str):
-    df = load_csv(path)
-    if df.empty:
-        st.caption(f"{label}：まだデータがありません"); return
-    data = df.to_csv(index=False).encode("utf-8-sig")
-    dl = st.download_button(f"⬇️ {label} を保存", data, file_name=download_name, mime="text/csv", key=f"dl_{download_name}")
-    if dl and st.button(f"🗑 {label} をこの端末から消去する", type="secondary", key=f"wipe_{download_name}"):
-        try: path.unlink(missing_ok=True); st.success("端末から安全に消去しました。")
-        except Exception: st.warning("消去に失敗しました。ファイルが開かれていないか確認してください。")
-
-def view_export():
+def export_and_wipe_user():
+    uid = st.session_state.user_id
     st.subheader("⬇️ 記録・エクスポート（CSV）／安全消去")
-    export_and_wipe("心を整える（互換）", CBT_CSV,   "cbt_entries.csv")
-    export_and_wipe("リラックス",           BREATH_CSV, "breath_sessions.csv")
-    export_and_wipe("心を整える（統合）",   MIX_CSV,   "mix_note.csv")
-    export_and_wipe("Study Tracker",       STUDY_CSV,  "study_blocks.csv")
+    for label, fname in [
+        ("心を整える（互換）", Storage.CBT),
+        ("リラックス", Storage.BREATH),
+        ("心を整える（統合）", Storage.MIX),
+        ("Study Tracker", Storage.STUDY),
+    ]:
+        path = Storage.user_path(uid, fname)
+        df = Storage.load_csv(path)
+        if df.empty:
+            st.caption(f"{label}：まだデータがありません")
+            continue
+        data = df.to_csv(index=False).encode("utf-8-sig")
+        dl = st.download_button(f"⬇️ {label} を保存", data, file_name=f"{uid}_{fname}", mime="text/csv", key=f"dl_{uid}_{fname}")
+        if dl and st.button(f"🗑 {label} をこの端末から消去する", type="secondary", key=f"wipe_{uid}_{fname}"):
+            try:
+                path.unlink(missing_ok=True); st.success("端末から安全に消去しました。")
+            except Exception:
+                st.warning("消去に失敗しました。ファイルが開かれていないか確認してください。")
 
-# ---------------- Router ----------------
-top_nav()
-v = st.session_state.view
-if v=="HOME":      view_home()
-elif v=="SESSION": view_session()
-elif v=="NOTE":    view_note()
-elif v=="STUDY":   view_study()
-else:              view_export()
+# ================= Views (Admin) =================
+def view_admin_dash():
+    st.subheader("📊 運営ダッシュボード（全体）")
 
-# ---------------- Footer ----------------
+    k = last7_kpis_all()
+    st.markdown('<div class="kpi-grid">', unsafe_allow_html=True)
+    c1,c2,c3 = st.columns(3)
+    with c1: st.markdown(f'<div class="kpi"><div class="num">{k["users"]}</div><div class="lab">利用ユーザー数（累計）</div></div>', unsafe_allow_html=True)
+    with c2: st.markdown(f'<div class="kpi"><div class="num">{k["breath"]}</div><div class="lab">直近7日 リラックス回数</div></div>', unsafe_allow_html=True)
+    with c3: st.markdown(f'<div class="kpi"><div class="num">{k["delta_avg"]:+.2f}</div><div class="lab">直近7日 平均Δ</div></div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    # --- 最近の記録（統合）
+    st.markdown("#### ⏱ 最近の記録（最新50件・モード混在）")
+    df = Storage.load_all(Storage.MIX)
+    if df.empty:
+        st.caption("データなし")
+    else:
+        try:
+            df["ts"] = pd.to_datetime(df["ts"])
+            df = df.sort_values("ts", ascending=False).head(50)
+            cols = ["ts","__user_id","mode","mood_before","mood_after","delta","emos","step","switch","memo"]
+            cols = [c for c in cols if c in df.columns]
+            show = df[cols].rename(columns={"ts":"日時","__user_id":"ユーザーID","mode":"モード","mood_before":"前","mood_after":"後","delta":"Δ","emos":"感情","step":"行動","switch":"スイッチ","memo":"メモ"})
+            st.dataframe(show, use_container_width=True, hide_index=True)
+        except Exception:
+            st.warning("一覧表示に失敗しました。")
+
+    # --- 感情分布（頻出）
+    st.markdown("#### 😊 感情タグの頻度（上位）")
+    emo_counts = {}
+    df_note = Storage.load_all(Storage.MIX)
+    if not df_note.empty and "emos" in df_note.columns:
+        for v in df_note["emos"].dropna().astype(str):
+            for tag in v.split():
+                emo_counts[tag] = emo_counts.get(tag, 0) + 1
+        emo_df = pd.DataFrame(sorted(emo_counts.items(), key=lambda x:-x[1]), columns=["感情タグ","件数"]).head(20)
+        st.dataframe(emo_df, use_container_width=True, hide_index=True)
+    else:
+        st.caption("データなし")
+
+    # --- 行動（今からすること）
+    st.markdown("#### 📝 『今からすること』最新（ユーザー横断・30件）")
+    if not df.empty and "step" in df.columns:
+        latest_steps = df.sort_values("ts", ascending=False)[["ts","__user_id","step"]].dropna().head(30)
+        latest_steps = latest_steps.rename(columns={"ts":"日時","__user_id":"ユーザーID","step":"今からすること"})
+        st.dataframe(latest_steps, use_container_width=True, hide_index=True)
+    else:
+        st.caption("データなし")
+
+    # --- フルエクスポート
+    st.markdown("#### ⬇️ 一括エクスポート")
+    for label, fname in [
+        ("心を整える（互換）", Storage.CBT),
+        ("リラックス",         Storage.BREATH),
+        ("心を整える（統合）", Storage.MIX),
+        ("Study Tracker",     Storage.STUDY),
+    ]:
+        all_df = Storage.load_all(fname)
+        if all_df.empty:
+            st.caption(f"{label}：データなし")
+            continue
+        data = all_df.to_csv(index=False).encode("utf-8-sig")
+        st.download_button(f"⬇️ 全ユーザー {label} を保存（CSV）", data, file_name=f"ALL_{fname}", mime="text/csv", key=f"dl_all_{fname}")
+
+# ================= Router =================
+def view_export_router():
+    if st.session_state.role == "admin":
+        st.info("運営アカウントでは個別消去は行いません。フルエクスポートはダッシュボード下部にあります。")
+        st.caption("※ 個別端末の消去は利用者本人の画面から行ってください。")
+    else:
+        export_and_wipe_user()
+
+def main_router():
+    top_nav()
+    v = st.session_state.view
+    if v=="HOME":
+        if st.session_state.role == "admin":
+            # 運営のHOMEは軽く説明
+            st.markdown("### ようこそ（運営）\n集計は「📊 運営ダッシュボード」から確認できます。")
+        else:
+            view_home_user()
+    elif v=="DASH" and st.session_state.role=="admin":
+        view_admin_dash()
+    elif v=="SESSION":
+        if st.session_state.role == "admin":
+            st.info("運営モードでは個人の記録は行いません。利用者としてログインしてください。")
+        else:
+            view_session()
+    elif v=="NOTE":
+        if st.session_state.role == "admin":
+            st.info("運営モードでは記入できません。利用者としてログインしてください。")
+        else:
+            view_note()
+    elif v=="STUDY":
+        if st.session_state.role == "admin":
+            st.info("運営モードでは記録できません。利用者としてログインしてください。")
+        else:
+            view_study()
+    else:
+        view_export_router()
+
+# ================= App =================
+if auth_ui():
+    logout_btn()
+    main_router()
+
+# ================= Footer =================
 st.markdown("""
 <div style="text-align:center; color:#5a6b86; margin-top:12px;">
   <small>※ 個人名や連絡先は記入しないでください。<br>
