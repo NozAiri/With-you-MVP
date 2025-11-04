@@ -37,7 +37,7 @@ html, body, .stApp{
 .block-container{max-width:980px; padding-top:.4rem; padding-bottom:2rem}
 h1,h2,h3{color:var(--text); letter-spacing:.2px}
 p,label,.stMarkdown,.stTextInput,.stTextArea{color:var(--text); font-size:1.02rem}
-small{color:var(--muted)}
+small{color:#5a6b86}
 .card{
   background:var(--panel); border:1px solid var(--panel-brd);
   border-radius:16px; padding:18px; margin-bottom:14px;
@@ -280,7 +280,7 @@ def top_nav():
         ("SESSION","🌙 リラックス & レスキュー"),
         ("NOTE",   "📝 心を整える"),
         ("STUDY",  "📚 Study Tracker"),
-        ("REVIEW", "📒 ふりかえり"),   # ====== C. ナビに追加 ======
+        ("REVIEW", "📒 ふりかえり"),   # 追加
         ("EXPORT", "⬇️ 記録・エクスポート"),
     ]
     if st.session_state.role == "admin":
@@ -551,19 +551,22 @@ def view_study():
             st.caption("集計時にエラーが発生しました。")
     st.markdown('</div>', unsafe_allow_html=True)
 
-# ====== E. “ふりかえり”画面の本体 ======
+# ====== E. “ふりかえり”画面の本体（キー重複対策済み） ======
 def view_review():
     st.subheader("📒 ふりかえり（アプリ内で一覧・編集・削除）")
     tabs = st.tabs(["心の記録（NOTE/SESSION）", "Study Tracker", "リラックス"])
     uid = st.session_state.user_id
 
-    def date_filter_ui(df):
+    # キー衝突を避けるため prefix を受け取り、date_input に key を付ける
+    def date_filter_ui(df, prefix: str):
         if df.empty: return df
         df["ts"] = pd.to_datetime(df["ts"])
         today = datetime.now().date()
         c1, c2 = st.columns(2)
-        with c1:  since = st.date_input("開始日", value=today - timedelta(days=14))
-        with c2:  until = st.date_input("終了日", value=today)
+        with c1:
+            since = st.date_input("開始日", value=today - timedelta(days=14), key=f"{prefix}_since")
+        with c2:
+            until = st.date_input("終了日", value=today, key=f"{prefix}_until")
         return df[(df["ts"].dt.date >= since) & (df["ts"].dt.date <= until)].copy()
 
     # --- mix_note ---
@@ -572,7 +575,7 @@ def view_review():
         if df.empty:
             st.caption("まだ記録がありません。")
         else:
-            df = date_filter_ui(df).sort_values("ts", ascending=False)
+            df = date_filter_ui(df, "mix").sort_values("ts", ascending=False)
             show_cols = [c for c in ["ts","mode","emos","oneword","step","switch","memo","_id"] if c in df.columns]
             st.markdown("#### 一覧")
             st.dataframe(df[show_cols].rename(columns={
@@ -582,16 +585,16 @@ def view_review():
             st.markdown("#### 編集 / 削除")
             options = [f'{i+1}. {r["ts"]} | {r.get("mode","")}: {r.get("oneword","")}' for i, r in df.iterrows()]
             if options:
-                choice = st.selectbox("編集する記録を選択", options, index=0)
+                choice = st.selectbox("編集する記録を選択", options, index=0, key="sel_mix")
                 i = int(choice.split(".")[0]) - 1
                 row = df.iloc[i]
-                new_one = st.text_input("ことば（oneword）", value=row.get("oneword",""))
-                new_step = st.text_input("今からすること（step）", value=row.get("step",""))
-                new_memo = st.text_area("メモ", value=row.get("memo",""), height=80)
-                if st.button("💾 更新する"):
+                new_one = st.text_input("ことば（oneword）", value=row.get("oneword",""), key="mix_one")
+                new_step = st.text_input("今からすること（step）", value=row.get("step",""), key="mix_step")
+                new_memo = st.text_area("メモ", value=row.get("memo",""), height=80, key="mix_memo")
+                if st.button("💾 更新する", key="upd_mix"):
                     Storage.update_doc(Storage.MIX, row["_id"], {"oneword":new_one, "step":new_step, "memo":new_memo})
                     st.success("更新しました。画面を再読み込みすると反映されます。")
-                if st.button("🗑️ この記録を削除"):
+                if st.button("🗑️ この記録を削除", key="del_mix"):
                     Storage.delete_doc(Storage.MIX, row["_id"])
                     st.success("削除しました。画面を再読み込みすると反映されます。")
 
@@ -601,7 +604,7 @@ def view_review():
         if df.empty:
             st.caption("まだ記録がありません。")
         else:
-            df = date_filter_ui(df).sort_values("ts", ascending=False)
+            df = date_filter_ui(df, "study").sort_values("ts", ascending=False)
             st.markdown("#### 一覧")
             show = df[["ts","subject","minutes","mood","memo","_id"]].rename(
                 columns={"ts":"日時","subject":"科目","minutes":"分","mood":"雰囲気","memo":"メモ","_id":"ID"}
@@ -619,10 +622,10 @@ def view_review():
                 choice = st.selectbox("編集する記録を選択", options, index=0, key="sel_study")
                 i = int(choice.split(".")[0]) - 1
                 row = df.iloc[i]
-                new_subj = st.text_input("科目", value=row.get("subject",""))
-                new_min  = st.number_input("学習時間（分）", min_value=1, max_value=600, value=int(row.get("minutes",30)), step=5)
-                new_mood = st.text_input("雰囲気", value=row.get("mood",""))
-                new_memo = st.text_input("メモ", value=row.get("memo",""))
+                new_subj = st.text_input("科目", value=row.get("subject",""), key="study_subj")
+                new_min  = st.number_input("学習時間（分）", min_value=1, max_value=600, value=int(row.get("minutes",30)), step=5, key="study_min")
+                new_mood = st.text_input("雰囲気", value=row.get("mood",""), key="study_mood")
+                new_memo = st.text_input("メモ", value=row.get("memo",""), key="study_memo")
                 if st.button("💾 更新する", key="upd_study"):
                     Storage.update_doc(Storage.STUDY, row["_id"], {
                         "subject": new_subj.strip(), "minutes": int(new_min),
@@ -639,7 +642,7 @@ def view_review():
         if df.empty:
             st.caption("まだ記録がありません。")
         else:
-            df = date_filter_ui(df).sort_values("ts", ascending=False)
+            df = date_filter_ui(df, "breath").sort_values("ts", ascending=False)
             cols = [c for c in ["ts","mode","mood_before","mood_after","delta","_id"] if c in df.columns]
             st.dataframe(df[cols].rename(columns={
                 "ts":"日時","mode":"モード","mood_before":"前","mood_after":"後","delta":"Δ","_id":"ID"
@@ -755,7 +758,6 @@ def main_router():
             st.info("運営モードでは記録できません。利用者としてログインしてください。")
         else:
             view_study()
-    # ====== D. ルーターに分岐を追加 ======
     elif v=="REVIEW":
         if st.session_state.role == "admin":
             st.info("運営モードでは個別編集は行いません。利用者としてログインしてください。")
