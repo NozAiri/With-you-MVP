@@ -163,13 +163,14 @@ class Storage:
         row["user_id"] = user_id
         DB.collection(table).add(row)
 
+    # ====== A. Firestoreの読み込みでドキュメントIDを持たせる（置き換え） ======
     @staticmethod
     def load_user(table: str, user_id: str) -> pd.DataFrame:
         docs = DB.collection(table).where("user_id", "==", user_id).order_by("ts", direction=firestore.Query.DESCENDING).stream()
         rows = []
         for d in docs:
             data = d.to_dict()
-            # Firestore Timestampはpandasに入れやすいようにISO文字列へ
+            data["_id"] = d.id  # FirestoreのドキュメントID
             ts = data.get("ts")
             if ts: data["ts"] = ts.astimezone().isoformat(timespec="seconds")
             else:  data["ts"] = data.get("_ts_iso")
@@ -178,16 +179,25 @@ class Storage:
 
     @staticmethod
     def load_all(table: str) -> pd.DataFrame:
-        # 全件を時刻順で取得（件数が増えるなら期間絞りやBigQuery連携をご検討）
         docs = DB.collection(table).order_by("ts", direction=firestore.Query.DESCENDING).stream()
         rows = []
         for d in docs:
             data = d.to_dict()
+            data["_id"] = d.id  # FirestoreのドキュメントID
             ts = data.get("ts")
             if ts: data["ts"] = ts.astimezone().isoformat(timespec="seconds")
             else:  data["ts"] = data.get("_ts_iso")
             rows.append(data)
         return pd.DataFrame(rows)
+
+    # ====== B. ドキュメントの更新・削除用メソッドを追加 ======
+    @staticmethod
+    def update_doc(table: str, doc_id: str, fields: dict):
+        DB.collection(table).document(doc_id).update(fields)
+
+    @staticmethod
+    def delete_doc(table: str, doc_id: str):
+        DB.collection(table).document(doc_id).delete()
 
 # ================= Utils & Session =================
 def now_ts_iso(): return Storage.now_ts_iso()
@@ -270,6 +280,7 @@ def top_nav():
         ("SESSION","🌙 リラックス & レスキュー"),
         ("NOTE",   "📝 心を整える"),
         ("STUDY",  "📚 Study Tracker"),
+        ("REVIEW", "📒 ふりかえり"),   # ====== C. ナビに追加 ======
         ("EXPORT", "⬇️ 記録・エクスポート"),
     ]
     if st.session_state.role == "admin":
@@ -540,6 +551,100 @@ def view_study():
             st.caption("集計時にエラーが発生しました。")
     st.markdown('</div>', unsafe_allow_html=True)
 
+# ====== E. “ふりかえり”画面の本体 ======
+def view_review():
+    st.subheader("📒 ふりかえり（アプリ内で一覧・編集・削除）")
+    tabs = st.tabs(["心の記録（NOTE/SESSION）", "Study Tracker", "リラックス"])
+    uid = st.session_state.user_id
+
+    def date_filter_ui(df):
+        if df.empty: return df
+        df["ts"] = pd.to_datetime(df["ts"])
+        today = datetime.now().date()
+        c1, c2 = st.columns(2)
+        with c1:  since = st.date_input("開始日", value=today - timedelta(days=14))
+        with c2:  until = st.date_input("終了日", value=today)
+        return df[(df["ts"].dt.date >= since) & (df["ts"].dt.date <= until)].copy()
+
+    # --- mix_note ---
+    with tabs[0]:
+        df = Storage.load_user(Storage.MIX, uid)
+        if df.empty:
+            st.caption("まだ記録がありません。")
+        else:
+            df = date_filter_ui(df).sort_values("ts", ascending=False)
+            show_cols = [c for c in ["ts","mode","emos","oneword","step","switch","memo","_id"] if c in df.columns]
+            st.markdown("#### 一覧")
+            st.dataframe(df[show_cols].rename(columns={
+                "ts":"日時","mode":"モード","emos":"感情","oneword":"ことば","step":"今からすること","switch":"スイッチ","memo":"メモ","_id":"ID"
+            }), use_container_width=True, hide_index=True)
+
+            st.markdown("#### 編集 / 削除")
+            options = [f'{i+1}. {r["ts"]} | {r.get("mode","")}: {r.get("oneword","")}' for i, r in df.iterrows()]
+            if options:
+                choice = st.selectbox("編集する記録を選択", options, index=0)
+                i = int(choice.split(".")[0]) - 1
+                row = df.iloc[i]
+                new_one = st.text_input("ことば（oneword）", value=row.get("oneword",""))
+                new_step = st.text_input("今からすること（step）", value=row.get("step",""))
+                new_memo = st.text_area("メモ", value=row.get("memo",""), height=80)
+                if st.button("💾 更新する"):
+                    Storage.update_doc(Storage.MIX, row["_id"], {"oneword":new_one, "step":new_step, "memo":new_memo})
+                    st.success("更新しました。画面を再読み込みすると反映されます。")
+                if st.button("🗑️ この記録を削除"):
+                    Storage.delete_doc(Storage.MIX, row["_id"])
+                    st.success("削除しました。画面を再読み込みすると反映されます。")
+
+    # --- study_blocks ---
+    with tabs[1]:
+        df = Storage.load_user(Storage.STUDY, uid)
+        if df.empty:
+            st.caption("まだ記録がありません。")
+        else:
+            df = date_filter_ui(df).sort_values("ts", ascending=False)
+            st.markdown("#### 一覧")
+            show = df[["ts","subject","minutes","mood","memo","_id"]].rename(
+                columns={"ts":"日時","subject":"科目","minutes":"分","mood":"雰囲気","memo":"メモ","_id":"ID"}
+            )
+            st.dataframe(show, use_container_width=True, hide_index=True)
+
+            st.markdown("#### 合計（科目別）")
+            agg = df.groupby("subject", dropna=False)["minutes"].sum().reset_index().sort_values("minutes", ascending=False)
+            agg = agg.rename(columns={"subject":"科目","minutes":"合計（分）"})
+            st.dataframe(agg, use_container_width=True, hide_index=True)
+
+            st.markdown("#### 編集 / 削除")
+            options = [f'{i+1}. {r["ts"]} | {r.get("subject","")} {r.get("minutes",0)}分' for i, r in df.iterrows()]
+            if options:
+                choice = st.selectbox("編集する記録を選択", options, index=0, key="sel_study")
+                i = int(choice.split(".")[0]) - 1
+                row = df.iloc[i]
+                new_subj = st.text_input("科目", value=row.get("subject",""))
+                new_min  = st.number_input("学習時間（分）", min_value=1, max_value=600, value=int(row.get("minutes",30)), step=5)
+                new_mood = st.text_input("雰囲気", value=row.get("mood",""))
+                new_memo = st.text_input("メモ", value=row.get("memo",""))
+                if st.button("💾 更新する", key="upd_study"):
+                    Storage.update_doc(Storage.STUDY, row["_id"], {
+                        "subject": new_subj.strip(), "minutes": int(new_min),
+                        "mood": new_mood.strip(), "memo": new_memo.strip()
+                    })
+                    st.success("更新しました。画面を再読み込みすると反映されます。")
+                if st.button("🗑️ この記録を削除", key="del_study"):
+                    Storage.delete_doc(Storage.STUDY, row["_id"])
+                    st.success("削除しました。画面を再読み込みすると反映されます。")
+
+    # --- breath_sessions ---
+    with tabs[2]:
+        df = Storage.load_user(Storage.BREATH, uid)
+        if df.empty:
+            st.caption("まだ記録がありません。")
+        else:
+            df = date_filter_ui(df).sort_values("ts", ascending=False)
+            cols = [c for c in ["ts","mode","mood_before","mood_after","delta","_id"] if c in df.columns]
+            st.dataframe(df[cols].rename(columns={
+                "ts":"日時","mode":"モード","mood_before":"前","mood_after":"後","delta":"Δ","_id":"ID"
+            }), use_container_width=True, hide_index=True)
+
 def export_and_wipe_user():
     uid = st.session_state.user_id
     st.subheader("⬇️ 記録・エクスポート（CSV）")
@@ -650,6 +755,12 @@ def main_router():
             st.info("運営モードでは記録できません。利用者としてログインしてください。")
         else:
             view_study()
+    # ====== D. ルーターに分岐を追加 ======
+    elif v=="REVIEW":
+        if st.session_state.role == "admin":
+            st.info("運営モードでは個別編集は行いません。利用者としてログインしてください。")
+        else:
+            view_review()
     else:
         view_export_router()
 
