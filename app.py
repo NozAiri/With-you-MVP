@@ -475,25 +475,24 @@ def view_review():
             st.markdown('</div>', unsafe_allow_html=True)
 
     with tabs[1]:
-        df = Storage.load_user(Storage.BREATH, uid)
-        if df.empty: st.caption("まだ記録がありません。")
-        else:
-            df = daterange(df)
-            st.markdown('<div class="grid-3">', unsafe_allow_html=True)
-            for _,r in df.iterrows():
-                delta = r.get("delta")
-                delta = r.get("delta")
-dtxt = "" if delta is None else f"<span class='badge'>Δ {int(delta):+d}</span>"
-
-
-                st.markdown(f"""
+    df = Storage.load_user(Storage.BREATH, uid)
+    if df.empty:
+        st.caption("まだ記録がありません。")
+    else:
+        df = daterange(df)
+        st.markdown('<div class="grid-3">', unsafe_allow_html=True)
+        for _,r in df.iterrows():
+            delta = r.get("delta")
+            dtxt = "" if delta is None else f"<span class='badge'>Δ {int(delta):+d}</span>"
+            st.markdown(f"""
 <div class="item">
   <div class="meta">{r['ts']}</div>
   <div>モード：<b>{r.get('mode','')}</b> / 目標：{r.get('target_sec',90)}秒</div>
   <div>前後：{r.get('mood_before','-')} → {r.get('mood_after','-')} {dtxt}</div>
 </div>
 """, unsafe_allow_html=True)
-            st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+
 
     with tabs[2]:
         df = Storage.load_user(Storage.STUDY, uid)
