@@ -21,73 +21,85 @@ st.set_page_config(
 # ================= Theme / CSS =================
 def inject_css():
     st.markdown("""
+<link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;700&display=swap" rel="stylesheet">
 <style>
 :root{
-  --bg1:#f3f7ff; --bg2:#eefaff;
-  --panel:#ffffffee; --panel-brd:#e1e9ff;
-  --text:#21324b; --muted:#5a6b86; --outline:#76a8ff;
-  --nav-pill:#cfe0ff; --nav-pill2:#b7d1ff;
-  --chip-brd:#d6e7ff; --chip-on:#76a8ff;
-  --chip-bg:#ffffff; --chip-on-bg:#f3f9ff;
+  /* 若者向けパレット（やさしいネオン） */
+  --ink:#182033; --muted:#6f7b95;
+  --bg1:#f9fbff; --bg2:#f3f6ff;
+  --panel:#ffffffee; --panel-brd:#e6ecff;
+  --pill-from:#d7e4ff; --pill-to:#bcd2ff;         /* ナビの光 */
+  --cta-from:#c9f0ff; --cta-to:#d6e7ff;           /* CTAのやわらか光 */
+  --chip-brd:#d6e7ff; --chip-on:#7aa7ff; --chip-on-bg:#eef4ff;
+
+  /* アクセント（星/惑星） */
+  --glow:#87b3ff; --planet:#dff2ff; --planet-deep:#cbe6ff;
+
+  /* “SNS感”の小物 */
+  --badge:#ffd8e6; --badge-txt:#5a2342;
 }
-html, body, .stApp{
-  background:
-    radial-gradient(1200px 600px at 20% -10%, #ffffff 0%, var(--bg1) 40%, transparent 70%),
-    radial-gradient(1000px 520px at 100% 0%,  #ffffff 0%, var(--bg2) 50%, transparent 80%),
-    linear-gradient(180deg, var(--bg1), var(--bg2));
+
+html, body, .stApp{ font-family: "Zen Maru Gothic", ui-sans-serif, system-ui; }
+h1,h2,h3{ color:var(--ink); letter-spacing:.2px }
+.block-container{ max-width:980px; padding-top:.4rem; padding-bottom:2rem }
+
+/* ===== HERO（ホーム上部のキャッチ） ===== */
+.hero{
+  position:relative; border-radius:20px; padding:18px 18px 22px;
+  background: radial-gradient(140% 120% at 10% 0%, #ffffff 0%, var(--bg2) 55%, transparent 70%),
+             linear-gradient(180deg, var(--bg1), var(--bg2));
+  border:1px solid var(--panel-brd);
+  box-shadow:0 20px 40px rgba(40,80,160,.10), inset 0 0 80px rgba(135,179,255,.16);
+  overflow:hidden;
 }
-.block-container{max-width:980px; padding-top:.4rem; padding-bottom:2rem}
-h1,h2,h3{color:var(--text); letter-spacing:.2px}
-p,label,.stMarkdown,.stTextInput,.stTextArea{color:var(--text); font-size:1.02rem}
-small{color:#5a6b86}
+.hero::after{
+  content:""; position:absolute; inset:-20% -20% auto auto; width:180px; height:180px; border-radius:50%;
+  background: radial-gradient(circle at 40% 35%, #fff 0%, var(--planet) 60%, var(--planet-deep) 100%);
+  box-shadow:0 0 28px rgba(135,179,255,.35), 0 0 14px rgba(135,179,255,.25) inset;
+  filter: blur(.3px); opacity:.85; animation: floaty 6s ease-in-out infinite;
+}
+@keyframes floaty{ 0%{ transform:translateY(0)} 50%{ transform:translateY(-6px)} 100%{ transform:translateY(0)} }
+
+/* ===== ナビ（ui-nav）：ぷにっとしたピル ===== */
+.ui-nav .topbar{ position:sticky; top:0; z-index:10; background:#fffffff8; backdrop-filter:blur(8px);
+  border-bottom:1px solid var(--panel-brd); margin:0 -12px 8px; padding:8px 12px 12px }
+.ui-nav .topnav{ display:flex; gap:10px; flex-wrap:wrap; }
+.ui-nav .nav-btn>button{
+  background:linear-gradient(180deg,var(--pill-from),var(--pill-to)) !important;
+  color:#18365d !important; border:1px solid var(--panel-brd) !important;
+  padding:12px 16px !important; border-radius:999px !important; font-weight:800 !important;
+  box-shadow:0 8px 20px rgba(30,80,160,.12) !important;
+}
+.ui-nav .active>button{ outline:3px solid var(--chip-on) !important; outline-offset:0 }
+
+/* ===== 入力（ui-form）：カード＆チップ ===== */
 .card{
   background:var(--panel); border:1px solid var(--panel-brd);
-  border-radius:16px; padding:18px; margin-bottom:14px;
-  box-shadow:0 10px 30px rgba(40,80,160,.07)
+  border-radius:18px; padding:18px; margin-bottom:14px;
+  box-shadow:0 10px 26px rgba(40,80,160,.08)
 }
+.ui-form .hint{ color:var(--muted); font-size:.92rem; margin:.1rem 0 .6rem }
 
-/* ====== A. ナビ領域（ui-nav） ====== */
-.ui-nav .topbar{
-  position:sticky; top:0; z-index:10;
-  background:#fffffff2; backdrop-filter:blur(8px);
-  border-bottom:1px solid var(--panel-brd); margin:0 -12px 8px; padding:8px 12px 12px
-}
-.ui-nav .topnav{display:flex; gap:14px; flex-wrap:wrap; margin:2px 0}
-.ui-nav .nav-btn>button{
-  background:linear-gradient(180deg,var(--nav-pill),var(--nav-pill2)) !important;
-  color:#16355d !important; border:1px solid var(--panel-brd) !important;
-  height:auto !important; padding:14px 18px !important; border-radius:28px !important;
-  font-weight:800 !important; font-size:1.0rem !important;
-  box-shadow:0 8px 20px rgba(40,80,160,.12) !important;
-}
-.ui-nav .active>button{outline:3px solid var(--outline) !important; outline-offset:0px !important}
-
-/* ====== B. 入力領域（ui-form） ====== */
-.ui-form .hint{color:#6d7fa2; font-size:.9rem; margin:.2rem 0 .6rem}
-
-/* Emotion / choice chips */
-.ui-form .chip-grid{display:grid; grid-template-columns:repeat(6,1fr); gap:8px}
-@media (max-width: 680px){ .ui-form .chip-grid{grid-template-columns:repeat(4,1fr)} }
+.ui-form .chip-grid{ display:grid; grid-template-columns:repeat(6,1fr); gap:8px }
+@media (max-width: 680px){ .ui-form .chip-grid{ grid-template-columns:repeat(4,1fr) } }
 .ui-form .stButton>button{
-  background:var(--chip-bg) !important; color:#223552 !important;
+  background:#fff !important; color:#1f3352 !important;
   border:1.5px solid var(--chip-brd) !important; border-radius:14px !important;
-  box-shadow:none !important; font-weight:700 !important; padding:10px 12px !important;
+  font-weight:800 !important; padding:10px 12px !important;
 }
-.ui-form .on>button{border:2px solid var(--chip-on) !important; background:var(--chip-on-bg) !important}
+.ui-form .on>button{ border:2px solid var(--chip-on) !important; background:var(--chip-on-bg) !important }
 
-/* Inputs */
-textarea, input, .stTextInput>div>div>input, .stTextArea textarea, .stSelectbox div[data-baseweb="select"]{
-  border-radius:12px!important; background:#ffffff; color:#2a3a55; border:1px solid #e1e9ff
+/* ===== CTAボタン（保存など） ===== */
+.stButton>button,.stDownloadButton>button{
+  width:100%; padding:12px 16px; border-radius:16px; border:1px solid var(--chip-brd);
+  background:linear-gradient(180deg,var(--cta-from),var(--cta-to)); color:#163455; font-weight:900; font-size:1.02rem;
+  box-shadow:0 14px 30px rgba(90,150,240,.16)
 }
 
-/* KPI */
-.kpi-grid{display:grid; grid-template-columns:repeat(3,1fr); gap:12px}
-.kpi{ background:#fff; border:1px solid var(--panel-brd); border-radius:16px; padding:14px; text-align:center;
-  box-shadow:0 8px 20px rgba(40,80,160,.06) }
-.kpi .num{font-size:1.6rem; font-weight:900; color:#28456e}
-.kpi .lab{color:#5a6b86; font-size:.9rem}
-</style>
-""", unsafe_allow_html=True)
+/* ===== 惑星バッジ ===== */
+.planet{
+  display:inline-block; border-radius:999px;
+
 
 inject_css()
 
