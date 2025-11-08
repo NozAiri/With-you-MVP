@@ -1,5 +1,5 @@
-# app.py — Sora / With You.（2025-11 改稿）
-# ホーム=大ボタンのみ / 呼吸=円アニメ / 学校共有=匿名チェックイン / 相談=最小UI / 振り返り&Study=カード表示
+# app.py — Sora / With You.（2025-11 改稿・整備版）
+# ホーム=大ボタンのみ / 呼吸=円アニメ / 学校共有=匿名チェックイン（カード表示プレビュー） / 相談=最小UI / 振り返り&Study=カード表示
 from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Tuple
@@ -70,7 +70,7 @@ h1,h2,h3{ color:var(--text); letter-spacing:.2px }
 }
 .emopills .on>button{border:2px solid #76a8ff !important; background:#f3f9ff !important}
 
-/* カード風アイテム（振り返り/Study） */
+/* カード風アイテム（振り返り/Study/共有プレビュー） */
 .item{ background:var(--card); border:1px solid var(--panel-brd); border-radius:14px; padding:14px; box-shadow:var(--shadow) }
 .item .meta{ color:var(--muted); font-size:.9rem; margin-bottom:.2rem }
 .badge{ display:inline-block; padding:.15rem .5rem; border:1px solid #d6e7ff; border-radius:999px; margin-right:.4rem; color:#29466e; background:#f6faff }
@@ -132,28 +132,15 @@ class Storage:
         DB.collection(Storage.PREFS).document(uid).set({"subjects": list(dict.fromkeys(subs))}, merge=True)
 
 # ---------------- Utils/State ----------------
-def now_iso(): return Storage.now_iso()
+def now_iso() -> str:
+    return Storage.now_iso()
 
 st.session_state.setdefault("_auth_ok", False)
 st.session_state.setdefault("role", None)      # user/admin
 st.session_state.setdefault("user_id","")
 st.session_state.setdefault("view","HOME")
-# ================= Utils/State =================
-def now_iso(): return Storage.now_iso()
-
-st.session_state.setdefault("_auth_ok", False)
-st.session_state.setdefault("role", None)
-st.session_state.setdefault("user_id","")
-st.session_state.setdefault("view","HOME")
-
-# ▼▼▼ これを追加（戻る用の履歴スタック） ▼▼▼
 st.session_state.setdefault("_nav_stack", [])
-# ▲▲▲ 追加ここまで ▲▲▲
-
-st.session_state.setdefault("breath_mode","calm")
-st.session_state.setdefault("_breath_running", False)
-
-st.session_state.setdefault("breath_mode","calm")  # (5-2-6)
+st.session_state.setdefault("breath_mode","calm")   # calm=(5-2-6), gentle=(4-0-6)
 st.session_state.setdefault("_breath_running", False)
 
 def admin_pass()->str:
@@ -200,10 +187,13 @@ def auth_ui()->bool:
 def logout_btn():
     with st.sidebar:
         if st.button("🚪 ログアウト"):
-            for k in ["_auth_ok","role","user_id"]: st.session_state[k]= (None if k=="role" else "")
+            for k in ["_auth_ok","role","user_id","view","_nav_stack","_breath_running"]:
+                if k=="role": st.session_state[k]=None
+                elif k=="view": st.session_state[k]="HOME"
+                elif k=="_nav_stack": st.session_state[k]=[]
+                else: st.session_state[k]=""
             st.rerun()
 
-# ---------------- Nav ----------------
 # ---------------- Nav ----------------
 def navigate(to_key: str, push: bool = True):
     """ページ遷移。push=True のとき、現在ページを履歴に積んでから遷移します。"""
@@ -211,6 +201,7 @@ def navigate(to_key: str, push: bool = True):
     if push and cur != to_key:
         st.session_state._nav_stack.append(cur)
     st.session_state.view = to_key
+
 def go_back(default: str = "HOME"):
     """履歴スタックから1つ戻る。なければ HOME へ。"""
     if st.session_state._nav_stack:
@@ -219,11 +210,8 @@ def go_back(default: str = "HOME"):
         st.session_state.view = default
     st.rerun()
 
-
 def top_nav():
     st.markdown('<div class="card" style="padding:10px 14px">', unsafe_allow_html=True)
-
-    # ← 戻るボタン＋ログイン情報（左：戻る／右：状態表示）
     cols = st.columns([1, 3])
     with cols[0]:
         if st.session_state.view != "HOME":
@@ -235,9 +223,7 @@ def top_nav():
             "運営" if st.session_state.role == "admin"
             else f"利用者（{st.session_state.user_id}）"
         )
-
     st.markdown("</div>", unsafe_allow_html=True)
-
 
 # ---------------- Breathing ----------------
 def breath_patterns()->Dict[str,Tuple[int,int,int]]:
@@ -285,14 +271,12 @@ def view_session():
     top_nav()
     st.subheader("🌙 リラックス（呼吸）")
     st.caption("ご一緒に、ゆっくり呼吸をしてまいりましょう。")
-    # アニメーション（円）
     if st.button("🫁 はじめる（90秒）", type="primary"): st.session_state["_breath_running"]=True; st.rerun()
     if st.session_state.get("_breath_running", False):
         breathing_animation(90)
         st.session_state["_breath_running"]=False
         st.success("お疲れさまでした。ありがとうございます。")
 
-    # 終了後のみ、気分入力
     after = st.slider("いまの気分（-3 とてもつらい / +3 とても楽）", -3, 3, 0)
     if st.button("💾 記録を保存", type="primary"):
         mode = st.session_state.breath_mode
@@ -327,26 +311,21 @@ def _pills(prefix:str, options:List[str], selected:List[str])->List[str]:
 def view_note():
     top_nav()
     st.subheader("📝 心を整える")
-    # 1) 絵文字で気持ちを選ぶ
     st.caption("いまの気持ちをお選びください。（複数可）")
     emos = st.session_state.get("note_emos", [])
     emos = _pills("emo", ["😟 不安","😢 悲しい","😠 いらだち","😐 ぼんやり","🙂 安心","😊 うれしい"], emos)
     st.session_state["note_emos"] = emos
 
-    # 2) 背景を短く（出来事）
     event = st.text_area("その気持ちの背景は、どんな出来事でしたか？（任意）", value=st.session_state.get("note_event",""), height=80)
     st.session_state["note_event"]=event
 
-    # 3) いまの自分への言葉（CBTの意図を含むが専門語なし）
     words = st.text_area("いまの自分に、どんな言葉をかけたいですか？（例：それでも来られた/少し休もう）", value=st.session_state.get("note_words",""), height=70)
     st.session_state["note_words"]=words
 
-    # 4) 気分のスイッチ（文言調整）
     switch = st.selectbox("いま合いそうな“スイッチ”をお選びください。", [
         "休息","体を少し動かす","外の空気・光に触れる","音や音楽","誰かと話す","目の前のタスクを終わらせる"
     ], index=0)
 
-    # 5) 日記（UIを少し“ノート風”に）
     st.markdown('<div class="card" style="background:#fbfdff;border-style:dashed">', unsafe_allow_html=True)
     diary = st.text_area("今日の記録", value=st.session_state.get("note_diary",""),
                          height=140, placeholder="例）朝は重かったけど、昼休みに外へ出たら少し楽になった。")
@@ -373,21 +352,35 @@ def view_share():
 
     # 気分（絵文字）
     mood = st.radio("気分", ["🙂","😐","😟"], index=1, horizontal=True)
+
     # 体調（複数）
     body_opts = ["頭痛","腹痛","吐き気","食欲低下","だるさ","生理関連","その他なし"]
     body = st.multiselect("体調（当てはまるもの）", body_opts, default=["その他なし"])
     if "その他なし" in body and len(body)>1:
-        body=[b for b in body if b!="その他なし"]; st.session_state["__tmp_body"]=body
+        body=[b for b in body if b!="その他なし"]
+
     # 睡眠：時間と質
     c1,c2 = st.columns(2)
     with c1: sh = st.number_input("睡眠時間（h）", min_value=0.0, max_value=24.0, value=6.0, step=0.5)
     with c2: sq = st.radio("睡眠の質", ["ぐっすり","ふつう","浅い"], index=1, horizontal=True)
 
-    # プレビュー
-    preview = {"mood":mood, "body":body, "sleep_hours":sh, "sleep_quality":sq}
+    # ====== ここを「コード表示」→「カードの見やすいプレビュー」に変更 ======
     st.markdown("#### プレビュー")
-    st.code(json.dumps(preview, ensure_ascii=False, indent=2))
+    st.markdown(f"""
+<div class="item">
+  <div class="meta">{datetime.now().astimezone().isoformat(timespec="seconds")}</div>
+  <div style="font-weight:900; color:#24466e; margin-bottom:.3rem">本日の共有内容</div>
+  <div style="margin:.2rem 0;">気分：<span class="badge">{mood}</span></div>
+  <div style="margin:.2rem 0;">体調：
+    {"".join([f"<span class='badge'>{b}</span>" for b in (body or ['なし'])])}
+  </div>
+  <div style="margin:.2rem 0;">睡眠：<b>{sh:.1f} 時間</b> / 質：<span class="badge">{sq}</span></div>
+</div>
+""", unsafe_allow_html=True)
+    # ===============================================================
+
     if st.button("📨 匿名で送信", type="primary"):
+        preview = {"mood":mood, "body":body, "sleep_hours":float(sh), "sleep_quality":sq}
         Storage.append_user(Storage.SHARED, st.session_state.user_id, {
             "ts": now_iso(), "scope":"本日", "share_flags":{"emotion":True,"body":True,"sleep":True},
             "payload": preview
@@ -397,7 +390,6 @@ def view_share():
 def view_consult():
     top_nav()
     st.subheader("🕊 相談（匿名）")
-    # 最小UI：本文のみ（注意文や気分/睡眠の入力を省略）
     msg = st.text_area("いまのお気持ち・状況をお聞かせください。", height=160)
     if crisis(msg):
         st.warning("とても苦しいお気持ちが伝わってきます。必要に応じて、お住まいの地域の相談窓口や専門機関もご検討ください。")
@@ -423,6 +415,7 @@ def view_review():
         return df[(df["ts"].dt.date>=since)&(df["ts"].dt.date<=until)].copy().sort_values("ts", ascending=False)
 
     tabs = st.tabs(["ホーム/ノート","呼吸","Study"])
+
     # --- MIX as cards
     with tabs[0]:
         df = Storage.load_user(Storage.MIX, uid)
@@ -460,7 +453,8 @@ def view_review():
             df = daterange(df)
             st.markdown('<div class="grid-3">', unsafe_allow_html=True)
             for _,r in df.iterrows():
-                delta = r.get("delta"); dtxt = "" if delta is None else (f"<span class='ok'>Δ {delta:+d}</span>" if delta>=0 else f"<span class='ng'>Δ {delta:+d}</span>")
+                delta = r.get("delta")
+                dtxt = "" if delta is None else (f"<span class='ok'>Δ {int(delta):+d}</span>" if int(delta)>=0 else f"<span class='ng'>Δ {int(delta):+d}</span>")
                 st.markdown(f"""
 <div class="item">
   <div class="meta">{r['ts']}</div>
