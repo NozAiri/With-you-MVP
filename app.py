@@ -138,6 +138,21 @@ st.session_state.setdefault("_auth_ok", False)
 st.session_state.setdefault("role", None)      # user/admin
 st.session_state.setdefault("user_id","")
 st.session_state.setdefault("view","HOME")
+# ================= Utils/State =================
+def now_iso(): return Storage.now_iso()
+
+st.session_state.setdefault("_auth_ok", False)
+st.session_state.setdefault("role", None)
+st.session_state.setdefault("user_id","")
+st.session_state.setdefault("view","HOME")
+
+# ▼▼▼ これを追加（戻る用の履歴スタック） ▼▼▼
+st.session_state.setdefault("_nav_stack", [])
+# ▲▲▲ 追加ここまで ▲▲▲
+
+st.session_state.setdefault("breath_mode","calm")
+st.session_state.setdefault("_breath_running", False)
+
 st.session_state.setdefault("breath_mode","calm")  # (5-2-6)
 st.session_state.setdefault("_breath_running", False)
 
@@ -189,12 +204,40 @@ def logout_btn():
             st.rerun()
 
 # ---------------- Nav ----------------
-def navigate(k:str): st.session_state.view=k
+# ---------------- Nav ----------------
+def navigate(to_key: str, push: bool = True):
+    """ページ遷移。push=True のとき、現在ページを履歴に積んでから遷移します。"""
+    cur = st.session_state.view
+    if push and cur != to_key:
+        st.session_state._nav_stack.append(cur)
+    st.session_state.view = to_key
+def go_back(default: str = "HOME"):
+    """履歴スタックから1つ戻る。なければ HOME へ。"""
+    if st.session_state._nav_stack:
+        st.session_state.view = st.session_state._nav_stack.pop()
+    else:
+        st.session_state.view = default
+    st.rerun()
+
 
 def top_nav():
     st.markdown('<div class="card" style="padding:10px 14px">', unsafe_allow_html=True)
-    st.write("ログイン中：", "運営" if st.session_state.role=="admin" else f"利用者（{st.session_state.user_id}）")
+
+    # ← 戻るボタン＋ログイン情報（左：戻る／右：状態表示）
+    cols = st.columns([1, 3])
+    with cols[0]:
+        if st.session_state.view != "HOME":
+            if st.button("← 戻る", key="nav_back"):
+                go_back()
+    with cols[1]:
+        st.write(
+            "ログイン中：",
+            "運営" if st.session_state.role == "admin"
+            else f"利用者（{st.session_state.user_id}）"
+        )
+
     st.markdown("</div>", unsafe_allow_html=True)
+
 
 # ---------------- Breathing ----------------
 def breath_patterns()->Dict[str,Tuple[int,int,int]]:
