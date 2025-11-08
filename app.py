@@ -1,4 +1,4 @@
-# app.py — With You.（水色パステル｜Firestoreストレージ版）
+# app.py — With You.（水色パステル｜Firestoreストレージ版・強化UI＋匿名相談）
 from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Tuple, List
@@ -29,7 +29,6 @@ def inject_css():
   --grad-from:#cfe4ff; --grad-to:#b9d8ff; --chip-brd:rgba(148,188,255,.45);
   --tile-a:#d9ebff; --tile-b:#edf5ff; --tile-c:#d0f1ff; --tile-d:#ebfbff;
 
-  /* 新：ナビUI（白×ネイビー）／入力UI（パステルブルー）を分離 */
   --nav-bg:#ffffff; --nav-fg:#1f3352; --nav-brd:#d9e5ff;
   --form-bg:#f8fbff; --form-brd:#e1e9ff;
 }
@@ -138,7 +137,7 @@ HOUR = datetime.now().hour
 if (HOUR>=20 or HOUR<5):
     st.markdown("<style>:root{ --muted:#4a5a73; }</style>", unsafe_allow_html=True)
 
-# ================= Firestore Storage abstraction =================
+# ================= Firestore Storage =================
 def firestore_client():
     creds = service_account.Credentials.from_service_account_info(st.secrets["FIREBASE_SERVICE_ACCOUNT"])
     return firestore.Client(project=st.secrets["FIREBASE_SERVICE_ACCOUNT"]["project_id"], credentials=creds)
@@ -146,18 +145,16 @@ def firestore_client():
 DB = firestore_client()
 
 class Storage:
-    # Firestore collections
     CBT   = "cbt_entries"
     BREATH= "breath_sessions"
     MIX   = "mix_note"
     STUDY = "study_blocks"
-    SCHOOL= "school_inbox"       # 新：匿名相談の投入口
+    SCHOOL= "school_inbox"   # 匿名相談
 
     @staticmethod
     def now_ts_iso():
         return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
 
-    # 既存：ユーザーID付き保存
     @staticmethod
     def append_user(table: str, user_id: str, row: dict):
         row = dict(row)
@@ -170,7 +167,6 @@ class Storage:
         row["user_id"] = user_id
         DB.collection(table).add(row)
 
-    # 新：匿名保存（user_id を付与しない）
     @staticmethod
     def append_public(table: str, row: dict):
         row = dict(row)
@@ -215,17 +211,30 @@ class Storage:
 # ================= Utils & Session =================
 def now_ts_iso(): return Storage.now_ts_iso()
 
+def _ensure_note_defaults():
+    """過去セッションの古い構造にも対応して不足キーを埋める"""
+    base = {"emos": [], "reason": "", "oneword": "", "switch":"", "action":"", "diary":""}
+    note = st.session_state.get("note", {})
+    if not isinstance(note, dict):
+        st.session_state["note"] = base.copy()
+        return
+    # 旧キー step や memo を新構造に寄せる
+    if "action" not in note and "step" in note: note["action"] = note.get("step","")
+    if "diary" not in note and "memo" in note: note["diary"] = note.get("memo","")
+    for k,v in base.items():
+        note.setdefault(k, v)
+    st.session_state["note"] = note
+
 st.session_state.setdefault("view", "HOME")
-st.session_state.setdefault("breath_mode", "gentle")  # 4-0-6 / 5-2-6
+st.session_state.setdefault("breath_mode", "gentle")
 st.session_state.setdefault("breath_running", False)
-st.session_state.setdefault("note", {"emos": [], "reason": "", "oneword": "", "switch":"", "action":"", "diary":""})
 st.session_state.setdefault("_session_stage", "before")
 st.session_state.setdefault("_before_score", None)
 st.session_state.setdefault("role", None)     # "user" or "admin"
 st.session_state.setdefault("user_id", "")
 st.session_state.setdefault("_auth_ok", False)
+_ensure_note_defaults()
 
-# Study subjects（ローカル管理＋追加可）
 DEFAULT_SUBJECTS = ["国語","数学","英語","理科","社会","情報","小論文","面接対策","その他"]
 if "subjects" not in st.session_state:
     st.session_state["subjects"] = DEFAULT_SUBJECTS.copy()
@@ -240,7 +249,6 @@ def admin_pass() -> str:
 def auth_ui() -> bool:
     if st.session_state._auth_ok:
         return True
-
     with st.container():
         st.markdown('<div class="card">', unsafe_allow_html=True)
         st.markdown("### 🔐 ログイン")
@@ -272,7 +280,6 @@ def auth_ui() -> bool:
                     return True
                 else:
                     st.error("パスコードが違います。")
-
         st.markdown("</div>", unsafe_allow_html=True)
     return False
 
@@ -299,7 +306,7 @@ def top_nav():
         ("NOTE",   "📝 心を整える"),
         ("STUDY",  "📚 Study Tracker"),
         ("REVIEW", "📒 ふりかえり"),
-        ("ANON",   "🕊️ 相談（匿名）"),     # 新規
+        ("ANON",   "🕊️ 相談（匿名）"),
         ("EXPORT", "⬇️ 日記・エクスポート"),
     ]
     if st.session_state.role == "admin":
@@ -449,10 +456,9 @@ def view_session():
             return
 
     if stage=="write":
+        _ensure_note_defaults()
         st.markdown("#### いまの心に、やさしく問いかけます。")
         EMOJI_CHOICES = ["😟不安","😢悲しい","😠いらだち","😳恥ずかしい","😐ぼんやり","🙂安心","😊うれしい"]
-
-        # 抽象度の高い“気分スイッチ”（行動活性化のカテゴリ）
         SWITCHES = [
             "外の空気・光に触れる（環境）",
             "からだを少し動かす（身体活性）",
@@ -461,46 +467,45 @@ def view_session():
             "心地よい刺激を足す（ご褒美）",
             "考え方をやわらげる（認知の切替）"
         ]
-
+        n = st.session_state.get("note", {})
         st.caption("いまの気持ち（複数OK）")
         st.markdown('<div class="emopills">', unsafe_allow_html=True)
-        if "note" not in st.session_state: st.session_state.note = {"emos": [], "reason": "", "oneword": "", "switch":"", "action":"", "diary":""}
-        n = st.session_state.note
         cols = st.columns(6)
         for i, label in enumerate(EMOJI_CHOICES):
             with cols[i%6]:
-                sel = label in n["emos"]; cls = "on" if sel else ""
+                sel = label in (n.get("emos", [])); cls = "on" if sel else ""
                 st.markdown(f'<div class="{cls}">', unsafe_allow_html=True)
                 if st.button(("✓ " if sel else "") + label, key=f"emo_s_{i}"):
-                    n["emos"].remove(label) if sel else n["emos"].append(label)
+                    if sel: n["emos"].remove(label)
+                    else:   n.setdefault("emos", []).append(label)
                 st.markdown('</div>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
         with st.container():
             st.markdown('<div class="form-wrap">', unsafe_allow_html=True)
-            n["reason"]  = st.text_area("どのような出来事や状況がありましたか？（任意）", value=n["reason"])
-            n["oneword"] = st.text_area("いまの心を、どんな言葉で表せそうですか？（短くて大丈夫です）", value=n["oneword"])
-            n["switch"]  = st.selectbox("いまの自分に合いそうな“気分スイッチ”はどれでしょう？", SWITCHES, index=SWITCHES.index(n["switch"]) if n["switch"] in SWITCHES else 0)
-            n["action"]  = st.text_area("それを少し具体化すると、どんな“小さな一歩”になりそうですか？（任意）", value=n["action"], height=80,
+            n["reason"]  = st.text_area("どのような出来事や状況がありましたか？（任意）", value=n.get("reason",""))
+            n["oneword"] = st.text_area("いまの心を、どんな言葉で表せそうですか？（短くて大丈夫です）", value=n.get("oneword",""))
+            idx = SWITCHES.index(n.get("switch","")) if n.get("switch","") in SWITCHES else 0
+            n["switch"]  = st.selectbox("いまの自分に合いそうな“気分スイッチ”はどれでしょう？", SWITCHES, index=idx)
+            n["action"]  = st.text_area("それを少し具体化すると、どんな“小さな一歩”になりそうですか？（任意）", value=n.get("action",""), height=80,
                                         help="思いつかなければ空欄でOKです。できると感じる範囲で、やさしく。")
             st.caption("※ やらなきゃいけないことではありません。できそうなときに、できる分だけ。")
-            n["diary"]   = st.text_area("日記（頭の整理スペース・自由記入）", value=n["diary"], height=100)
+            n["diary"]   = st.text_area("日記（頭の整理スペース・自由記入）", value=n.get("diary",""), height=100)
             st.markdown('</div>', unsafe_allow_html=True)
+        st.session_state["note"] = n
 
         if st.button("💾 保存して完了", type="primary"):
             uid = st.session_state.user_id
-            # 互換：CBTには action=value のまま残す（フィールド名維持）
             Storage.append_user(Storage.CBT, uid, {
                 "ts": now_ts_iso(),
-                "emotions": json.dumps({"multi": n["emos"]}, ensure_ascii=False),
-                "triggers": n["reason"], "reappraise": n["oneword"],
-                "action": n["action"], "value": n["switch"]
+                "emotions": json.dumps({"multi": n.get("emos", [])}, ensure_ascii=False),
+                "triggers": n.get("reason",""), "reappraise": n.get("oneword",""),
+                "action": n.get("action",""), "value": n.get("switch","")
             })
-            # 統合表示用
             Storage.append_user(Storage.MIX, uid, {
                 "ts": now_ts_iso(), "mode":"session",
-                "emos":" ".join(n["emos"]), "reason": n["reason"], "oneword": n["oneword"],
-                "switch": n["switch"], "action": n["action"], "diary": n["diary"]
+                "emos":" ".join(n.get("emos", [])), "reason": n.get("reason",""), "oneword": n.get("oneword",""),
+                "switch": n.get("switch",""), "action": n.get("action",""), "diary": n.get("diary","")
             })
             st.success("できました。今日はここまでで大丈夫です。")
             st.session_state._session_stage = "before"
@@ -509,8 +514,8 @@ def view_session():
 
 def view_note():
     st.subheader("📝 心を整える")
-    if "note" not in st.session_state: st.session_state.note = {"emos": [], "reason": "", "oneword": "", "switch":"", "action":"", "diary":""}
-    n = st.session_state.note
+    _ensure_note_defaults()
+    n = st.session_state.get("note", {})
     EMOJI_CHOICES = ["😟不安","😢悲しい","😠いらだち","😳恥ずかしい","😐ぼんやり","🙂安心","😊うれしい"]
     SWITCHES = [
         "外の空気・光に触れる（環境）",
@@ -526,35 +531,38 @@ def view_note():
     cols = st.columns(6)
     for i, label in enumerate(EMOJI_CHOICES):
         with cols[i%6]:
-            sel = label in n["emos"]; cls = "on" if sel else ""
+            sel = label in (n.get("emos", [])); cls = "on" if sel else ""
             st.markdown(f'<div class="{cls}">', unsafe_allow_html=True)
             if st.button(("✓ " if sel else "") + label, key=f"emo_n_{i}"):
-                n["emos"].remove(label) if sel else n["emos"].append(label)
+                if sel: n["emos"].remove(label)
+                else:   n.setdefault("emos", []).append(label)
             st.markdown('</div>', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
     with st.container():
         st.markdown('<div class="form-wrap">', unsafe_allow_html=True)
-        n["reason"]  = st.text_area("どのような出来事や状況がありましたか？（任意）", value=n["reason"])
-        n["oneword"] = st.text_area("いまの心を、どんな言葉で表せそうですか？", value=n["oneword"])
-        n["switch"]  = st.selectbox("いまの自分に合いそうな“気分スイッチ”はどれでしょう？", SWITCHES, index=SWITCHES.index(n["switch"]) if n["switch"] in SWITCHES else 0)
-        n["action"]  = st.text_area("それを少し具体化すると、どんな“小さな一歩”になりそうですか？（任意）", value=n["action"], height=80)
+        n["reason"]  = st.text_area("どのような出来事や状況がありましたか？（任意）", value=n.get("reason",""))
+        n["oneword"] = st.text_area("いまの心を、どんな言葉で表せそうですか？", value=n.get("oneword",""))
+        idx = SWITCHES.index(n.get("switch","")) if n.get("switch","") in SWITCHES else 0
+        n["switch"]  = st.selectbox("いまの自分に合いそうな“気分スイッチ”はどれでしょう？", SWITCHES, index=idx)
+        n["action"]  = st.text_area("それを少し具体化すると、どんな“小さな一歩”になりそうですか？（任意）", value=n.get("action",""), height=80)
         st.caption("※ やらされるものではありません。自分のペースで十分です。")
-        n["diary"]   = st.text_area("日記（頭の整理スペース・自由記入）", value=n["diary"], height=100)
+        n["diary"]   = st.text_area("日記（頭の整理スペース・自由記入）", value=n.get("diary",""), height=100)
         st.markdown('</div>', unsafe_allow_html=True)
+    st.session_state["note"] = n
 
     if st.button("💾 保存して完了", type="primary"):
         uid = st.session_state.user_id
         Storage.append_user(Storage.CBT, uid, {
             "ts": now_ts_iso(),
-            "emotions": json.dumps({"multi": n["emos"]}, ensure_ascii=False),
-            "triggers": n["reason"], "reappraise": n["oneword"],
-            "action": n["action"], "value": n["switch"]
+            "emotions": json.dumps({"multi": n.get("emos", [])}, ensure_ascii=False),
+            "triggers": n.get("reason",""), "reappraise": n.get("oneword",""),
+            "action": n.get("action",""), "value": n.get("switch","")
         })
         Storage.append_user(Storage.MIX, uid, {
             "ts": now_ts_iso(), "mode":"note",
-            "emos":" ".join(n["emos"]), "reason": n["reason"], "oneword": n["oneword"],
-            "switch": n["switch"], "action": n["action"], "diary": n["diary"]
+            "emos":" ".join(n.get("emos", [])), "reason": n.get("reason",""), "oneword": n.get("oneword",""),
+            "switch": n.get("switch",""), "action": n.get("action",""), "diary": n.get("diary","")
         })
         st.session_state.note = {"emos": [], "reason":"", "oneword":"", "switch":"", "action":"", "diary":""}
         st.success("保存しました。ここまでで十分です。")
@@ -608,7 +616,7 @@ def view_study():
 
             st.markdown("#### 科目別の割合（分ベース）")
             agg = df.groupby("subject", dropna=False)["minutes"].sum().reset_index().sort_values("minutes", ascending=False)
-            total = int(agg["minutes"].sum())
+            total = int(agg["minutes"].sum()) if len(agg)>0 else 1
             agg["割合(%)"] = (agg["minutes"] / total * 100).round(1)
             agg = agg.rename(columns={"subject":"科目","minutes":"合計（分）"})
             st.dataframe(agg, use_container_width=True, hide_index=True)
@@ -639,7 +647,6 @@ def view_review():
             st.caption("まだ記録がありません。")
         else:
             df = date_filter_ui(df, "mix").sort_values("ts", ascending=False)
-            # 互換：行動列は action or step
             df["action_disp"] = df["action"] if "action" in df.columns else df.get("step","")
             show_cols = [c for c in ["ts","mode","emos","oneword","action_disp","switch","diary","_id"] if c in df.columns or c=="action_disp"]
             st.markdown("#### 一覧")
@@ -659,7 +666,6 @@ def view_review():
                 new_diary = st.text_area("日記", value=row.get("diary",""), height=80, key="mix_diary")
                 if st.button("💾 更新する", key="upd_mix"):
                     update_map = {"oneword":new_one, "diary":new_diary}
-                    # 両対応：action or step のどちらが存在するかを見て更新
                     if "action" in row.index: update_map["action"] = new_act
                     elif "step" in row.index: update_map["step"] = new_act
                     Storage.update_doc(Storage.MIX, row["_id"], update_map)
@@ -682,7 +688,7 @@ def view_review():
 
             st.markdown("#### 合計（科目別）")
             agg = df.groupby("subject", dropna=False)["minutes"].sum().reset_index().sort_values("minutes", ascending=False)
-            total = int(agg["minutes"].sum())
+            total = int(agg["minutes"].sum()) if len(agg)>0 else 1
             agg["割合(%)"] = (agg["minutes"]/total*100).round(1)
             agg = agg.rename(columns={"subject":"科目","minutes":"合計（分）"})
             st.dataframe(agg, use_container_width=True, hide_index=True)
@@ -722,8 +728,6 @@ def view_review():
 def view_school_anonymous():
     st.subheader("🕊️ 相談（匿名）")
     st.caption("※ 個人が特定される情報は入力しないでください。内容は学校側への相談窓口に匿名で届きます。")
-
-    # 学校コード推定（ユーザーID先頭の英数記号ブロックを抽出）
     default_org = ""
     if st.session_state.user_id:
         m = re.match(r"^([A-Za-z0-9_\\-]+)", st.session_state.user_id)
@@ -755,7 +759,6 @@ def view_school_anonymous():
             "note": to_staff.strip(),
             "consent": bool(consent)
         }
-        # 匿名保存（user_idを付けない）
         Storage.append_public(Storage.SCHOOL, row)
         st.success("送信しました。必要に応じて学校側から全体・学年向けの支援が行われます。")
 
@@ -779,7 +782,6 @@ def export_and_wipe_user():
 # ================= Views (Admin) =================
 def view_admin_dash():
     st.subheader("📊 運営ダッシュボード（全体）")
-
     k = last7_kpis_all()
     st.markdown('<div class="kpi-grid">', unsafe_allow_html=True)
     c1,c2,c3 = st.columns(3)
@@ -796,7 +798,6 @@ def view_admin_dash():
         try:
             df["ts"] = pd.to_datetime(df["ts"])
             df = df.sort_values("ts", ascending=False).head(50)
-            # 行動表示（action/step の互換）
             df["action_disp"] = df["action"] if "action" in df.columns else df.get("step","")
             cols = ["ts","user_id","mode","mood_before","mood_after","delta","emos","action_disp","switch","diary"]
             cols = [c for c in cols if c in df.columns]
