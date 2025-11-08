@@ -1,10 +1,15 @@
-# app.py — Sora / With You.（2025-11 完全リファイン v3：上部タブ / 大きなクリックカード / 呼吸は停止可・モード1本化 / 相談整理）
+# app.py — Sora / With You.（2025-11 完全リファイン v4：
+#  上部タブ＋ホーム説明 / 呼吸=停止可＋10段階気分 / ノート=敬語問いかけ /
+#  Study=円グラフ＋簡易トレンド / 相談=前回仕様維持）
 from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Tuple
 import pandas as pd
 import streamlit as st
 import json, time, re
+
+# 可視化
+import matplotlib.pyplot as plt
 
 # ==== Firestore ====
 from google.cloud import firestore
@@ -43,7 +48,7 @@ html, body, .stApp{
 }
 .block-container{ max-width:980px; padding-top:1.0rem; padding-bottom:2.2rem }
 
-/* ---------- Top Tabs (buttons like tabs) ---------- */
+/* ---------- Top Tabs (sticky) ---------- */
 .top-tabs{
   position: sticky; top: 0; z-index: 50;
   background: rgba(250,253,255,.85); backdrop-filter: saturate(160%) blur(8px);
@@ -64,7 +69,7 @@ html, body, .stApp{
 .item .meta{ color:var(--muted); font-size:.9rem; margin-bottom:.2rem }
 .badge{ display:inline-block; padding:.2rem .6rem; border:1px solid #d6e7ff; border-radius:999px; margin-right:.4rem; color:#29466e; background:#f6faff; font-weight:900 }
 
-/* ---------- Big click cards (button-look) ---------- */
+/* ---------- Big click cards ---------- */
 .bigbtn .stButton>button{
   width:100%; text-align:left; border-radius:26px; border:1px solid #dfe6ff;
   box-shadow:var(--shadow); background: var(--grad1);
@@ -73,8 +78,6 @@ html, body, .stApp{
 .bigbtn .stButton>button p{ margin: 0; }
 .bigbtn .title{ font-size:1.28rem; font-weight:900; color:#12294a; }
 .bigbtn .desc{ color:#4b6287; font-size:.98rem; margin-top:4px; }
-
-/* 強調（最上段の問いかけ） */
 .bigbtn.emph .stButton>button{ background: linear-gradient(135deg,#e9f3ff 0%,#ffffff 90%) }
 
 /* ---------- Grids ---------- */
@@ -100,7 +103,7 @@ html, body, .stApp{
 @keyframes sora-shrink{ from{ transform:scale(1.6); border-width:14px;} to{ transform:scale(1.0); border-width:8px;} }
 .phase-pill{display:inline-block; padding:.28rem .9rem; border-radius:999px; background:#edf5ff; color:#2c4b77; border:1px solid #d6e7ff; font-weight:900; font-size:0.98rem}
 
-/* ---------- Emotion pills (彩色) ---------- */
+/* ---------- Emotion pills ---------- */
 .emopills{display:grid; grid-template-columns:repeat(3,1fr); gap:10px}
 @media (min-width:820px){ .emopills{ grid-template-columns:repeat(6,1fr) } }
 .emopills .chip .stButton>button{
@@ -108,18 +111,14 @@ html, body, .stApp{
   border:2px solid #d6e7ff !important; border-radius:16px !important;
   box-shadow:0 6px 16px rgba(100,140,200,.08) !important; font-weight:900 !important; padding:12px 12px !important;
 }
-.emopills .chip.on .stButton>button{
-  border:2px solid var(--accent) !important; background:#f0f7ff !important;
-}
+.emopills .chip.on .stButton>button{ border:2px solid var(--accent) !important; background:#f0f7ff !important; }
 
 /* ---------- Progress ---------- */
 .prog{height:12px; background:#eef4ff; border-radius:999px; overflow:hidden}
 .prog > div{height:12px; background:var(--accent-2)}
 
-/* ---------- Primary buttons ---------- */
-.stButton>button{
-  border-radius:14px; font-weight:900;
-}
+/* ---------- Buttons ---------- */
+.stButton>button{ border-radius:14px; font-weight:900; }
 </style>
         """,
         unsafe_allow_html=True,
@@ -269,6 +268,7 @@ def logout_btn():
 
 # ================= Nav =================
 SECTIONS = [
+    ("HOME",   "🏠 ホーム"),
     ("SHARE",  "🏫 学校共有"),
     ("SESSION","🌙 リラックス"),
     ("NOTE",   "📝 ノート"),
@@ -325,25 +325,21 @@ def breathing_animation(total_sec: int = 90):
             f'<div class="breath-wrap"><div class="breath-circle" style="animation:{anim_css} {seconds}s linear forwards;"></div></div>',
             unsafe_allow_html=True,
         )
-        # 秒刻みで停止チェック
         for _ in range(seconds):
             if st.session_state.get("_breath_stop") or st.session_state.view != "SESSION":
                 return False
             time.sleep(1)
         return True
 
-    # 停止ボタン
     with ctrl.container():
         if st.button("⏹ 停止する", key="breath_stop"):
             st.session_state["_breath_stop"] = True
 
     for _ in range(cycles):
         if not phase("吸ってください", inhale, "sora-grow"): break
-        if hold > 0:
-            if not phase("止めてください", hold, "sora-steady"): break
+        if hold > 0 and not phase("止めてください", hold, "sora-steady"): break
         if not phase("吐いてください", exhale, "sora-shrink"): break
 
-    # 終了時にリセット
     st.session_state["_breath_running"] = False
     st.session_state["_breath_stop"] = False
     ph.empty(); spot.empty(); ctrl.empty()
@@ -369,55 +365,47 @@ def emo_pills(prefix: str, options: List[str], selected: List[str]) -> List[str]
 def big_card_button(emoji: str, title: str, desc: str, target_view: str, key: str, emphasis: bool=False):
     cls = "bigbtn emph" if emphasis else "bigbtn"
     st.markdown(f'<div class="{cls}">', unsafe_allow_html=True)
-    # ボタン自体がカード
     label = f"{emoji}  {title}\n{desc}"
     if st.button(label, key=key):
         navigate(target_view, push=True)
         st.rerun()
-    st.markdown(
-        """
-<script>
-const btn = window.parent.document.querySelector('button[kind="secondary"]');
-</script>
-        """, unsafe_allow_html=True
-    )
     st.markdown("</div>", unsafe_allow_html=True)
 
 # ================= Views =================
 def view_home():
-    # 上部タブ & ステータス
-    top_tabs()
-    top_status()
+    top_tabs(); top_status()
 
+    st.markdown("## これはどんなアプリですか？")
+    st.markdown(
+        """
+- **Sora / With You.** は、中高生の方が**自分の心の調子を整える**ための小さな道具箱です。  
+- 朝は**学校に伝える**で体調を共有。必要なときは**リラックス（呼吸）**で落ち着き、  
+  気持ちは**ノート**にやさしく整理。**Study**は学びの可視化、**ふりかえり**で前進を確認、  
+  困ったときは**相談**から。  
+- すべて**最小の手間**・**やさしい言葉**・**夜間通知OFF**で、安心して使える設計です。
+        """
+    )
+
+    st.markdown("---")
     st.markdown("<h1>はじめに、やってみよう</h1>", unsafe_allow_html=True)
     st.caption("大きなカードをタップすると開きます。")
 
     # 最上段：問いかけ → 学校共有へ
-    big_card_button("🏫", "今日はどうですか？", "いまの気分・体調・睡眠を学校に伝えて、今日を整えよう（所要1分）", "SHARE", "OPEN_ASK", emphasis=True)
+    big_card_button("🏫", "今日はどうですか？", "いまの気分・体調・睡眠を学校に伝えて、今日を整えましょう（所要1分）", "SHARE", "OPEN_ASK", emphasis=True)
 
     c1, c2 = st.columns(2)
     with c1:
-        big_card_button("🌙", "リラックス（呼吸）", "円の動きに合わせて呼吸。90秒で落ち着きを取り戻す。", "SESSION", "OPEN_SESSION")
+        big_card_button("🌙", "リラックス（呼吸）", "円の動きに合わせて呼吸。90秒で落ち着きを取り戻します。", "SESSION", "OPEN_SESSION")
     with c2:
-        big_card_button("📝", "心を整える（ノート）", "気持ち・出来事・自分へのひとことをやさしく整理。", "NOTE", "OPEN_NOTE")
+        big_card_button("📝", "心を整える（ノート）", "気持ち・出来事・ご自身へのひとことを、やさしく整理します。", "NOTE", "OPEN_NOTE")
 
     c3, c4 = st.columns(2)
     with c3:
-        big_card_button("📚", "Study", "科目と時間を記録。あとで合計を可視化できます。", "STUDY", "OPEN_STUDY")
+        big_card_button("📚", "Study", "科目と時間を記録。可視化で“続けやすさ”を支えます。", "STUDY", "OPEN_STUDY")
     with c4:
-        big_card_button("📒", "ふりかえり", "直近の記録をカードで確認。小さな前進を見つけよう。", "REVIEW", "OPEN_REVIEW")
+        big_card_button("📒", "ふりかえり", "最近の記録をカードで確認。小さな前進を見つけましょう。", "REVIEW", "OPEN_REVIEW")
 
-    big_card_button("🕊", "相談", "困っていることを気軽に。匿名も選べます。", "CONSULT", "OPEN_CONSULT")
-
-    st.markdown(
-        """
-<div style="text-align:center; color:#5a6b86; margin-top:6px;">
-  <small>※ とてもつらい場合は、お住まいの地域の相談窓口や専門機関のご利用もご検討ください。<br>
-  通知は夜間に鳴らないよう配慮しています。</small>
-</div>
-        """,
-        unsafe_allow_html=True,
-    )
+    big_card_button("🕊", "相談", "ご気軽に。秘密はお守りします。匿名も選べます。", "CONSULT", "OPEN_CONSULT")
 
 def view_session():
     top_tabs(); top_status()
@@ -432,7 +420,7 @@ def view_session():
                 st.session_state["_breath_stop"] = False
                 st.rerun()
         else:
-            st.info("実行中です。上のタブで他ページへ移動できます。")
+            st.info("実行中です。上のタブから他ページへ移動できます。")
     with c2:
         if st.session_state.get("_breath_running", False):
             if st.button("⏹ 停止", key="stop_btn", type="secondary"):
@@ -443,7 +431,8 @@ def view_session():
         st.success("お疲れさまでした。ありがとうございます。")
 
     st.divider()
-    after = st.slider("いまの気分（-3 とてもつらい / +3 とても楽）", -3, 3, 0)
+    # 10段階（1-10）
+    after = st.slider("いまのご気分（1 とてもつらい / 10 とても楽）", 1, 10, 5)
     if st.button("💾 記録を保存", type="primary"):
         inh, hold, exh = BREATH_PATTERN
         Storage.append_user(
@@ -461,7 +450,7 @@ def view_session():
 def view_note():
     top_tabs(); top_status()
     st.markdown('<div class="section-lead">📝 心を整える（ノート）</div>', unsafe_allow_html=True)
-    st.caption("いまの気持ちをお選びください。（複数可）")
+    st.caption("当てはまるお気持ちをお選びください。（複数可）")
     emos = st.session_state.get("note_emos", [])
     emos = emo_pills("emo",
         ["😟 不安", "😢 悲しい", "😠 いらだち", "😐 ぼんやり", "🙂 安心", "😊 うれしい"],
@@ -469,11 +458,18 @@ def view_note():
     st.session_state["note_emos"] = emos
 
     st.markdown('<div class="card" style="margin-top:8px">', unsafe_allow_html=True)
-    event = st.text_area("その気持ちの背景（出来事など）", value=st.session_state.get("note_event", ""), height=80)
-    words = st.text_area("いまの自分への一言（やさしい言葉）", value=st.session_state.get("note_words", ""), height=70)
-    switch = st.selectbox("いま合いそうな“スイッチ”", ["休息","体を少し動かす","外の空気・光に触れる","音や音楽","誰かと話す","目の前のタスクを終わらせる"], index=0)
-    diary = st.text_area("今日の記録（ノート）", value=st.session_state.get("note_diary",""),
-                         height=140, placeholder="例）朝は重かったけど、昼休みに外へ出たら少し楽になった。")
+    # 敬語・丁寧語での問いかけ
+    event = st.text_area("■ よろしければ、最近の出来事や背景について教えていただけますか？",
+                         value=st.session_state.get("note_event", ""), height=80,
+                         placeholder="例）朝は重かったのですが、昼休みに外へ出たら少し楽になりました。")
+    words = st.text_area("■ “いまのご自身”に、どんな一言をかけてあげたいですか？",
+                         value=st.session_state.get("note_words", ""), height=70,
+                         placeholder="例）ここまでよくがんばっているよ。深呼吸して、できるところからで大丈夫。")
+    switch = st.selectbox("■ いまの状況に合いそうな“スイッチ”をお選びください。",
+                          ["休息","体を少し動かす","外の空気・光に触れる","音や音楽","誰かと話す","目の前のタスクを終わらせる"], index=0)
+    diary = st.text_area("■ 本日のメモ（自由記述）",
+                         value=st.session_state.get("note_diary",""),
+                         height=140)
     st.markdown("</div>", unsafe_allow_html=True)
 
     st.session_state["note_event"] = event
@@ -536,7 +532,7 @@ def view_consult():
     st.markdown('<div class="section-lead">🕊 相談</div>', unsafe_allow_html=True)
     st.caption("ご気軽に。秘密はお守りします。")  # ご要望の文言
 
-    # 1) 相談の扱い（AIにだけ相談を削除）
+    # 1) 相談の扱い（AIのみは削除）
     intent = st.selectbox(
         "どのように扱いたいですか？",
         ["学校に共有したい", "運営（カウンセラー/先生）に相談したい", "まだ決められない"],
@@ -552,7 +548,7 @@ def view_consult():
         key="c_cats"
     )
 
-    # 3) 匿名/非匿名（メッセージは気安め）
+    # 3) 匿名/非匿名
     anonymous = st.checkbox("匿名で送る", value=True, key="c_anon")
     contact_pref = ""
     if not anonymous:
@@ -574,7 +570,7 @@ def view_consult():
         payload = {
             "ts": now_iso(),
             "message": msg.strip(),
-            "intent": intent,               # 「どのように扱いたいか」のみ保存
+            "intent": intent,               # 「どのように扱いたいか」のみ
             "categories": category,
             "anonymous": bool(anonymous),
             "contact_pref": contact_pref.strip() if contact_pref else "",
@@ -707,31 +703,52 @@ def view_study():
         })
         st.success("保存しました。")
 
+    # ========= 分析：円グラフ（科目別）＋ 直近トレンド =========
     df = Storage.load_user(Storage.STUDY, uid)
     if not df.empty:
-        agg = (
+        st.markdown("### 可視化（学習の全体像）")
+
+        # 円グラフ：科目別の合計
+        pie_agg = (
             df.groupby("subject")["minutes"]
             .sum()
             .reset_index()
             .sort_values("minutes", ascending=False)
         )
-        total = max(1, int(agg["minutes"].sum()))
-        st.markdown("#### 科目別の合計")
-        st.markdown('<div class="grid-2">', unsafe_allow_html=True)
-        for _, r in agg.iterrows():
-            p = round(r["minutes"] / total * 100, 1)
-            st.markdown(
-                f"""
-<div class="item">
-  <div style="font-weight:900">{r['subject']}</div>
-  <div class="meta">合計：{int(r['minutes'])} 分</div>
-  <div class="prog"><div style="width:{p}%"></div></div>
-  <div class="meta">{p}%</div>
-</div>
-                """,
-                unsafe_allow_html=True,
+        if not pie_agg.empty:
+            fig1, ax1 = plt.subplots(figsize=(4.8, 4.8))
+            ax1.pie(
+                pie_agg["minutes"],
+                labels=pie_agg["subject"],
+                autopct=lambda p: f"{p:.1f}%" if p >= 3 else "",
+                startangle=90
             )
-        st.markdown("</div>", unsafe_allow_html=True)
+            ax1.axis('equal')
+            st.pyplot(fig1)
+
+        # 折れ線：最近14日の日別合計
+        df["ts"] = pd.to_datetime(df["ts"])
+        df["date"] = df["ts"].dt.date
+        recent = (
+            df.groupby("date")["minutes"]
+            .sum()
+            .reset_index()
+            .sort_values("date")
+        )
+        recent = recent[recent["date"] >= (datetime.now().date() - timedelta(days=14))]
+        if not recent.empty:
+            st.markdown("### 直近14日トレンド")
+            fig2, ax2 = plt.subplots(figsize=(6.2, 3.2))
+            ax2.plot(recent["date"], recent["minutes"], marker="o")
+            ax2.set_ylabel("合計分")
+            ax2.set_xlabel("日付")
+            ax2.grid(True, alpha=0.3)
+            fig2.autofmt_xdate()
+            st.pyplot(fig2)
+
+        # 合計時間ハイライト
+        total_min = int(df["minutes"].sum())
+        st.info(f"⏱️ これまでの合計学習時間：**{total_min} 分**")
 
 # ================= Router =================
 def main_router():
