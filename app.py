@@ -1,15 +1,11 @@
-# app.py — Sora / With You.（2025-11 完全リファイン v4：
-#  上部タブ＋ホーム説明 / 呼吸=停止可＋10段階気分 / ノート=敬語問いかけ /
-#  Study=円グラフ＋簡易トレンド / 相談=前回仕様維持）
+# app.py — Sora / With You.（2025-11 完全リファイン v5：Altair可視化版）
 from __future__ import annotations
 from datetime import datetime, timedelta, timezone
-from typing import List, Dict, Tuple
+from typing import List
 import pandas as pd
 import streamlit as st
 import json, time, re
-
-# 可視化
-import matplotlib.pyplot as plt
+import altair as alt  # ← matplotlib依存をなくしAltairで可視化
 
 # ==== Firestore ====
 from google.cloud import firestore
@@ -306,8 +302,7 @@ def top_status():
     st.markdown("</div>", unsafe_allow_html=True)
 
 # ================= Breathing =================
-# モードは1種（5-2-6）
-BREATH_PATTERN = (5, 2, 6)
+BREATH_PATTERN = (5, 2, 6)  # 1種（5-2-6）
 
 def breathing_animation(total_sec: int = 90):
     """1秒ごとに停止フラグと画面遷移をチェック → いつでも中断可能"""
@@ -390,7 +385,6 @@ def view_home():
     st.markdown("<h1>はじめに、やってみよう</h1>", unsafe_allow_html=True)
     st.caption("大きなカードをタップすると開きます。")
 
-    # 最上段：問いかけ → 学校共有へ
     big_card_button("🏫", "今日はどうですか？", "いまの気分・体調・睡眠を学校に伝えて、今日を整えましょう（所要1分）", "SHARE", "OPEN_ASK", emphasis=True)
 
     c1, c2 = st.columns(2)
@@ -530,9 +524,8 @@ def view_share():
 def view_consult():
     top_tabs(); top_status()
     st.markdown('<div class="section-lead">🕊 相談</div>', unsafe_allow_html=True)
-    st.caption("ご気軽に。秘密はお守りします。")  # ご要望の文言
+    st.caption("ご気軽に。秘密はお守りします。")
 
-    # 1) 相談の扱い（AIのみは削除）
     intent = st.selectbox(
         "どのように扱いたいですか？",
         ["学校に共有したい", "運営（カウンセラー/先生）に相談したい", "まだ決められない"],
@@ -540,7 +533,6 @@ def view_consult():
         key="c_intent"
     )
 
-    # 2) カテゴリ
     category = st.multiselect(
         "どんな内容に近いですか？（複数可）",
         ["学校", "家庭", "友人・人間関係", "健康（心身）", "SNS/ネット", "進路・勉強", "その他"],
@@ -548,13 +540,11 @@ def view_consult():
         key="c_cats"
     )
 
-    # 3) 匿名/非匿名
     anonymous = st.checkbox("匿名で送る", value=True, key="c_anon")
     contact_pref = ""
     if not anonymous:
         contact_pref = st.text_input("差し支えなければ、連絡先（任意）", placeholder="例）メール / 学校の連絡帳 / Teamsなど", key="c_contact")
 
-    # 4) 本文
     msg = st.text_area(
         "いまのお気持ち・状況をお聞かせください。",
         height=200,
@@ -570,7 +560,7 @@ def view_consult():
         payload = {
             "ts": now_iso(),
             "message": msg.strip(),
-            "intent": intent,               # 「どのように扱いたいか」のみ
+            "intent": intent,
             "categories": category,
             "anonymous": bool(anonymous),
             "contact_pref": contact_pref.strip() if contact_pref else "",
@@ -703,12 +693,12 @@ def view_study():
         })
         st.success("保存しました。")
 
-    # ========= 分析：円グラフ（科目別）＋ 直近トレンド =========
+    # ========= 分析：Altair（円＋折れ線） =========
     df = Storage.load_user(Storage.STUDY, uid)
     if not df.empty:
         st.markdown("### 可視化（学習の全体像）")
 
-        # 円グラフ：科目別の合計
+        # 円グラフ：科目別の合計（ドーナツ）
         pie_agg = (
             df.groupby("subject")["minutes"]
             .sum()
@@ -716,15 +706,17 @@ def view_study():
             .sort_values("minutes", ascending=False)
         )
         if not pie_agg.empty:
-            fig1, ax1 = plt.subplots(figsize=(4.8, 4.8))
-            ax1.pie(
-                pie_agg["minutes"],
-                labels=pie_agg["subject"],
-                autopct=lambda p: f"{p:.1f}%" if p >= 3 else "",
-                startangle=90
+            pie = (
+                alt.Chart(pie_agg)
+                .mark_arc(innerRadius=60)
+                .encode(
+                    theta=alt.Theta(field="minutes", type="quantitative"),
+                    color=alt.Color(field="subject", type="nominal", legend=alt.Legend(title="科目")),
+                    tooltip=[alt.Tooltip("subject:N", title="科目"), alt.Tooltip("minutes:Q", title="合計分")]
+                )
+                .properties(width=320, height=320)
             )
-            ax1.axis('equal')
-            st.pyplot(fig1)
+            st.altair_chart(pie, use_container_width=False)
 
         # 折れ線：最近14日の日別合計
         df["ts"] = pd.to_datetime(df["ts"])
@@ -737,16 +729,19 @@ def view_study():
         )
         recent = recent[recent["date"] >= (datetime.now().date() - timedelta(days=14))]
         if not recent.empty:
+            line = (
+                alt.Chart(recent)
+                .mark_line(point=True)
+                .encode(
+                    x=alt.X("date:T", title="日付"),
+                    y=alt.Y("minutes:Q", title="合計分"),
+                    tooltip=[alt.Tooltip("date:T", title="日付"), alt.Tooltip("minutes:Q", title="合計分")]
+                )
+                .properties(width="container", height=260)
+            )
             st.markdown("### 直近14日トレンド")
-            fig2, ax2 = plt.subplots(figsize=(6.2, 3.2))
-            ax2.plot(recent["date"], recent["minutes"], marker="o")
-            ax2.set_ylabel("合計分")
-            ax2.set_xlabel("日付")
-            ax2.grid(True, alpha=0.3)
-            fig2.autofmt_xdate()
-            st.pyplot(fig2)
+            st.altair_chart(line, use_container_width=True)
 
-        # 合計時間ハイライト
         total_min = int(df["minutes"].sum())
         st.info(f"⏱️ これまでの合計学習時間：**{total_min} 分**")
 
