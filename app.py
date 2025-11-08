@@ -482,7 +482,8 @@ def view_review():
             st.markdown('<div class="grid-3">', unsafe_allow_html=True)
             for _,r in df.iterrows():
                 delta = r.get("delta")
-                dtxt = "" if delta is None else (f"<span class='badge">Δ {int(delta):+d}</span>")
+delta = r.get("delta")
+dtxt = "" if delta is None else f"<span class='badge'>Δ {int(delta):+d}</span>"
                 st.markdown(f"""
 <div class="item">
   <div class="meta">{r['ts']}</div>
