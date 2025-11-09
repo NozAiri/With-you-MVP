@@ -52,7 +52,7 @@ html, body, .stApp{
 
 /* ------- cards / helpers ------- */
 .card{ background:var(--panel); border:1px solid var(--panel-brd); border-radius:22px; padding:18px; box-shadow:var(--shadow) }
-.item{ background:#fff; border:1px solid var(--panel-brd); border-radius:18px; padding:16px; box-shadow:var(--shadow) }
+.item{ background:#fff; border:1px solid #e3e8ff; border-radius:18px; padding:16px; box-shadow:var(--shadow) }
 .item .meta{ color:var(--muted); font-size:.9rem; margin-bottom:.2rem }
 .badge{ display:inline-block; padding:.18rem .6rem; border:1px solid #d6e7ff; border-radius:999px; margin-right:.35rem; color:#29466e; background:#f6faff; font-weight:800 }
 .tip{ color:#6a7d9e; font-size:.92rem; }
@@ -121,12 +121,13 @@ st.session_state.setdefault("_nav_stack", [])
 st.session_state.setdefault("_breath_running", False)
 st.session_state.setdefault("_breath_stop", False)
 
-# ※ここで管理パスワードを固定：uneiairi0931（secretsにADMIN_PASSがあればそちらを優先）
+# ★変更点：ここで管理パスワードを固定。「uneiairi0929」に更新
+#   （secretsにADMIN_PASSがあればそちらを優先）
 def admin_pass() -> str:
     try:
-        return st.secrets.get("ADMIN_PASS", "uneiairi0931")
+        return st.secrets.get("ADMIN_PASS", "uneiairi0929")  # ← デフォルトを 0929 に
     except Exception:
-        return "uneiairi0931"
+        return "uneiairi0929"
 
 CRISIS_PATTERNS = [r"死にたい", r"消えたい", r"自殺", r"希死", r"傷つけ(たい|てしまう)", r"リスカ", r"\bOD\b", r"助けて"]
 def crisis(text: str) -> bool:
@@ -209,7 +210,7 @@ def view_home():
     home_big_button("今日を伝える", "今日の気分や体調を先生や学校と共有します。", "SHARE", "OPEN_SHARE", "🏫")
     c1, c2 = st.columns(2)
     with c1: home_big_button("リラックス", "呼吸ワークで心を整えます。", "SESSION", "OPEN_SESSION", "🌙")
-    with c2: home_big_button("心を整えるノート", "感じたことを言葉にして、今の自分を整理します。", "NOTE", "OPEN_NOTE", "📝")
+    with c2: home_big_button("心を整えるノート", "感じたことを言葉にして、今の自分を整理します。", "NOTE", "📝", "📝")
     c3, c4 = st.columns(2)
     with c3: home_big_button("Study Tracker", "学習時間をふりかえり、進捗を見える形にします。", "STUDY", "OPEN_STUDY", "📚")
     with c4: home_big_button("ふりかえり", "このセッションでの記録を見返せます。", "REVIEW", "OPEN_REVIEW", "📒")
@@ -343,10 +344,10 @@ def text_card(title: str, subtext: str, key: str, height=120, placeholder="こ�
 
 # ===== 行動活性化：絵文字カテゴリ × シンプル行動 =====
 ACTION_CATEGORIES_EMOJI = {
-    "身体": "🫧",     # Body reset
-    "環境": "🌤",     # Environment reset
-    "リズム": "⏯️",   # Daily rhythm
-    "つながり": "💬", # Social reconnect
+    "身体": "🫧",
+    "環境": "🌤",
+    "リズム": "⏯️",
+    "つながり": "💬",
 }
 ACTION_CATEGORIES = {
     "身体": ["顔や手を洗う","深呼吸をする","肩を回す","シャワーを浴びる"],
@@ -663,7 +664,6 @@ def _fetch_firestore_df(coll: str, start_dt: Optional[datetime], end_dt: Optiona
 
     df = pd.DataFrame(rows)
     if not df.empty and "ts" in df.columns:
-        # tsの並びを保証（新しい→古い）
         df = df.sort_values("ts", ascending=False).reset_index(drop=True)
     return df
 
@@ -701,7 +701,6 @@ def _render_share_card(row: pd.Series):
 """, unsafe_allow_html=True)
 
 def _render_consult_card(row: pd.Series):
-    # 危険語の軽いハイライト（任意）
     msg = str(row.get("message",""))
     for kw in ["死にたい","自殺","消えたい","助けて"]:
         if kw in msg:
@@ -853,6 +852,7 @@ def auth_ui() -> bool:
                     st.session_state.user_id = uid.strip(); st.session_state.role = "user"
                     st.session_state._auth_ok = True; st.success("ようこそ。"); return True
         with t2:
+            # ★運営は「uneiairi0929」をパスコードとして入力
             pw = st.text_input("運営パスコード", type="password", key="auth_pw")
             if st.button("➡️ 入る（運営）", key="auth_admin"):
                 if pw == admin_pass():
