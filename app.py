@@ -373,88 +373,84 @@ MOOD_KEY_ALIAS = {"anx":"anxious", "anger":"angry"}
 MOOD_KEY_ALIAS = {"anx":"anxious", "anger":"angry"}  # 表記ゆれ補正（既にあれば重複定義は不要）
 
 # ===== 行動活性化：生活再起動の4カテゴリ（重複なし・固定順） =====
+# ===== 行動活性化：絵文字カテゴリ × シンプル行動 =====
+ACTION_CATEGORIES_EMOJI = {
+    "身体": "🫧",     # Body reset
+    "環境": "🌤",     # Environment reset
+    "リズム": "⏯️",   # Daily rhythm
+    "つながり": "💬", # Social reconnect
+}
+
 ACTION_CATEGORIES = {
-    "身体リセット": [
+    "身体": [
         "顔や手を洗う",
-        "深呼吸を3回する",
-        "肩回しを10回する",
-        "（できれば）シャワーを浴びる",
+        "深呼吸をする",
+        "肩を回す",
+        "シャワーを浴びる",
     ],
-    "環境リセット": [
+    "環境": [
         "窓を開けて外の空気を感じる",
         "カーテンを開けて部屋を明るくする",
-        "空を30秒ながめる",
+        "空をながめる",
     ],
-    "リズム回復": [
-        "水を一杯飲む",
+    "リズム": [
+        "水を飲む",
         "温かい飲み物を飲む",
-        "立ち上がって部屋の中を10歩歩く",
+        "立ち上がって少し歩く",
         "外を少し歩く",
     ],
-    "つながり再開": [
-        "スタンプを1つ送る",
-        "『ありがとう』を一言書く",
+    "つながり": [
+        "スタンプを送る",
+        "「ありがとう」を書く",
         "家族や友達に一言だけ話す",
     ],
 }
 
-# 平坦化（カテゴリはUI表示用のプレフィックス、返り値は“行動テキストのみ”）
-def _flat_action_options():
-    seen, options_display, options_value = set(), [], []
-    order = ["身体リセット", "環境リセット", "リズム回復", "つながり再開"]
+def _flat_action_options_emoji():
+    """表示は『絵文字 + 行動』、値は『行動テキストのみ』"""
+    order = ["身体", "環境", "リズム", "つながり"]
+    seen, disp, vals = set(), [], []
     for cat in order:
+        emoji = ACTION_CATEGORIES_EMOJI.get(cat, "•")
         for a in ACTION_CATEGORIES.get(cat, []):
             if a in seen: 
                 continue
             seen.add(a)
-            options_display.append(f"・{cat}｜{a}")
-            options_value.append(a)
-    return options_display, options_value  # 並びは固定
+            disp.append(f"{emoji} {a}")
+            vals.append(a)
+    return disp, vals  # 固定順
 
 def action_picker(mood_key: str):
-    # カード開始
     st.markdown('<div class="cbt-card">', unsafe_allow_html=True)
     st.markdown(
         '<div class="cbt-heading">🌸 Step 6：今、気持ちが少し落ち着くためにできそうなことは？</div>',
         unsafe_allow_html=True,
     )
     st.markdown(
-        '<div class="cbt-sub">1つだけ選んでも、選ばなくてもOK。あとで自分の言葉で書いても大丈夫だよ。</div>',
+        '<div class="cbt-sub">ぴったりを1つだけ。選ばなくてもOKだよ。</div>',
         unsafe_allow_html=True,
     )
 
-    # オプション整形（重複なし・固定順）＋「— 選ばない —」を末尾に
-    disp, vals = _flat_action_options()
-    disp_with_none = disp + ["— 選ばない —"]
-    vals_with_none = vals + ["__NONE__"]
-
-    # 一意キー（ムードに依存させて衝突回避）
+    # オプション：絵文字付き表示 / 値は行動テキスト
+    disp, vals = _flat_action_options_emoji()
+    options_disp = disp + ["— 選ばない —"]
     pick_key = f"act_pick_single_{(mood_key or 'default').strip().lower()}"
 
-    # デフォルトは一番下「— 選ばない —」
-    selected_disp = st.selectbox(
-        "小さな行動を1つ選ぶ（任意・スクロール可）",
-        options=disp_with_none,
-        index=len(disp_with_none) - 1,
+    sel_disp = st.selectbox(
+        "小さな行動（任意・スクロールや入力で探せます）",
+        options=options_disp,
+        index=len(options_disp) - 1,  # 末尾＝選ばない
         key=pick_key,
-        help="上から順に「身体→環境→リズム→つながり」。検索ボックスに文字を打って絞り込めます。",
     )
 
-    # 表示→値へ変換
-    if selected_disp == "— 選ばない —":
-        chosen = ""
-    else:
-        # 表示テキストから対応する“行動テキストのみ”を取り出す
-        chosen_idx = disp.index(selected_disp)
-        chosen = vals[chosen_idx]
+    chosen = "" if sel_disp == "— 選ばない —" else vals[disp.index(sel_disp)]
 
-    # 自由入力：書かれていれば最優先
     custom_key = f"act_custom_single_{(mood_key or 'default').strip().lower()}"
     custom = st.text_input("＋ 自分の言葉で書く（任意）", key=custom_key, placeholder="例：窓を開けて深呼吸する").strip()
 
     st.markdown("</div>", unsafe_allow_html=True)
 
-    # 優先順位：自由入力 ＞ セレクト ＞ 未選択
+    # 自由入力を最優先で返す
     if custom:
         return "", custom
     return (chosen or ""), ""
