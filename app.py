@@ -1,9 +1,8 @@
 # app.py — With You.（端末Cookie × 入室コードで一意化 / ADMIN固定コード）
-# 変更点：
-#  - room_codes の一意ロックを廃止し、user_id = sha256(device_id + ":" + code) でユーザーを一意化
-#  - 同一端末＋同一コードなら同一user_idで再入室OK
-#  - 別端末が同じコードを使っても “別のuser_id” になる（他人の内容は見れない）
-#  - ADMINは固定コード（uneiairi0931）のまま、端末制約なし
+# 2025-11-09 fix:
+#  - Cookie無効でも入室OK（セッション内一時IDで代替）
+#  - 端末×コード＝user_id（cookie / session-fallback 両対応）
+#  - スライダー重複回避（表示件数=1のときはsliderを出さない）
 
 from __future__ import annotations
 from datetime import datetime, timedelta, timezone
@@ -47,7 +46,6 @@ def safe_db_add(collection: str, payload: dict) -> bool:
 # ================== Cookie（端末ID） ==================
 COOKIES_OK = False
 COOKIE_PASSWORD = st.secrets.get("COOKIE_PASSWORD", os.environ.get("COOKIES_PW", "withyou-cookie-v1"))
-
 try:
     from streamlit_cookies_manager import EncryptedCookieManager
     cookies = EncryptedCookieManager(prefix="withyou_", password=COOKIE_PASSWORD)
@@ -57,7 +55,7 @@ except Exception:
     cookies = None
 
 def get_device_id() -> Optional[str]:
-    """Cookieがあれば安定ID。なければ None（= 再入室の安定性なし）"""
+    """Cookieがあれば安定ID。なければ None"""
     if COOKIES_OK:
         did = cookies.get("device_id")
         if not did:
@@ -82,12 +80,10 @@ def inject_css():
 }
 html, body, .stApp{ background:var(--grad); color:var(--text); }
 .block-container{ max-width:980px; padding-top:1rem; padding-bottom:2rem }
-
 .card{ background:var(--panel); border:1px solid var(--panel-brd); border-radius:22px; padding:18px; box-shadow:var(--shadow); }
 .item{ background:#fff; border:1px solid #e3e8ff; border-radius:18px; padding:16px; box-shadow:var(--shadow) }
 .badge{ display:inline-block; padding:.18rem .6rem; border:1px solid #d6e7ff; border-radius:999px; margin-right:.35rem; color:#29466e; background:#f6faff; font-weight:800 }
 .tip{ color:#6a7d9e; font-size:.92rem; }
-
 .top-tabs{
   position: sticky; top: 0; z-index: 50;
   background: rgba(250,253,255,.85); backdrop-filter:saturate(160%) blur(8px);
@@ -99,7 +95,6 @@ html, body, .stApp{ background:var(--grad); color:var(--text); }
   background:#f6f9ff; border:1px solid #e1eaff; color:#2b4772;
 }
 .top-tabs .active .stButton>button{ background:#eaf3ff; border-bottom:3px solid #5EA3FF }
-
 .bigbtn{ margin-bottom:12px; }
 .bigbtn .stButton>button{
   width:100%; text-align:left; border-radius:22px; border:1px solid #dfe6ff; box-shadow:var(--shadow);
@@ -107,13 +102,10 @@ html, body, .stApp{ background:var(--grad); color:var(--text); }
   background:linear-gradient(135deg,#ffffff 0%,#eef5ff 100%); color:#132748; font-weight:600;
 }
 .bigbtn .stButton>button::first-line{ font-weight:900; font-size:1.06rem; color:#0f2545; }
-
 .cbt-card{ background:#fff; border:1px solid #e3e8ff; border-radius:18px; padding:18px 18px 14px; box-shadow:0 6px 20px rgba(31,59,179,0.06); margin-bottom:14px; }
 .cbt-heading{ font-weight:900; font-size:1.05rem; color:#1b2440; margin:0 0 6px 0;}
 .cbt-sub{ color:#63728a; font-size:0.92rem; margin:-2px 0 10px 0;}
 .ok-chip{ display:inline-block; padding:2px 8px; border-radius:999px; background:#e8fff3; color:#156f3a; font-size:12px; border:1px solid #b9f3cf; }
-
-/* 呼吸アニメ */
 @keyframes sora-grow   { from{transform:scale(0.85)} to{transform:scale(1.0)} }
 @keyframes sora-steady { from{transform:scale(1.0)}  to{transform:scale(1.0)} }
 @keyframes sora-shrink { from{transform:scale(1.0)}  to{transform:scale(0.85)} }
@@ -139,22 +131,18 @@ def crisis(text: str) -> bool:
 # ================== 状態初期化 ==================
 st.session_state.setdefault("_auth_ok", False)
 st.session_state.setdefault("role", None)       # "admin" / "user"
-st.session_state.setdefault("user_id", "")      # ハッシュ由来のID（表示用は nickname）
+st.session_state.setdefault("user_id", "")      # 表示用
 st.session_state.setdefault("nickname", "")     # 表示名（任意）
 st.session_state.setdefault("code", "")         # 入室コード
 st.session_state.setdefault("view", "HOME")
 st.session_state.setdefault("_local_logs", {"note":[], "breath":[], "study":[]})
+st.session_state.setdefault("_did_src", "")     # "cookie" / "session"
 
 # ================== 入室処理（device_id × code で一意化） ==================
 def try_enter_with_code(code: str, nickname: str) -> Tuple[bool, str, str]:
     """
     成功: (True, role, display_name)
     失敗: (False, "", error_message)
-    仕様:
-      - ADMIN_MASTER_CODE は常に運営（端末制約なし）
-      - それ以外は device_id 取得必須。user_id = sha256(device_id + ":" + code)
-        ⇒ 同一端末＋同一コードで安定再入室、別端末同コードは別ユーザー
-      - Firestoreへのユーザー登録は必須ではない（匿名運用のため）
     """
     code = (code or "").strip()
     if not code:
@@ -163,31 +151,33 @@ def try_enter_with_code(code: str, nickname: str) -> Tuple[bool, str, str]:
     if code == ADMIN_MASTER_CODE:
         return True, "admin", nickname or "admin"
 
-    # 利便性のため Cookie 必須（再入室のため）
+    # ① Cookie優先で端末ID取得
     cur_did = get_device_id()
+    did_src = "cookie"
+    # ② Cookieが無効ならセッション内の一時IDで代替（再読込で変わるが入室は可）
     if cur_did is None:
-        return False, "", "この端末でCookieが無効です。Cookieを有効にして再読み込みしてください。"
+        cur_did = st.session_state.setdefault("_session_did", uuid.uuid4().hex)
+        did_src = "session"
 
-    # 一意ユーザーIDを生成
+    # 一意ユーザーID
     user_hash = sha256_hex(f"{cur_did}:{code}")
-    # 表示上は短縮
     display_user_id = user_hash[:10]
 
-    # 任意でメタ保存（匿名のまま可）
+    # メタ（任意）
     if FIRESTORE_ENABLED and DB is not None:
         try:
             DB.collection("users_meta").document(user_hash).set({
                 "created_at": datetime.now(timezone.utc),
                 "nickname": nickname or "",
-                "device_hint": cur_did[:6],
-                "ver": "device+code@v2"
+                "device_hint": (cur_did or "")[:6],
+                "ver": "device+code@v2" if did_src=="cookie" else "session-fallback@v2"
             }, merge=True)
         except Exception:
-            # メタ保存失敗は致命的ではないので無視
             pass
 
     st.session_state["user_id"] = display_user_id
     st.session_state["nickname"] = nickname or ""
+    st.session_state["_did_src"] = did_src
     return True, "user", nickname or display_user_id
 
 # ================== ナビ/ステータス ==================
@@ -229,9 +219,14 @@ def top_tabs():
 def top_status():
     role_txt = '運営' if st.session_state.role=='admin' else (f'利用者（{st.session_state.nickname or st.session_state.user_id}）' if st.session_state.user_id else '未ログイン')
     fs_txt = "接続済み" if FIRESTORE_ENABLED else "未接続（オフライン）"
-    cookie_txt = "ON" if COOKIES_OK else "OFF"
+    if st.session_state.get("_did_src") == "session":
+        cookie_txt = "OFF（セッションID）"
+    else:
+        cookie_txt = "ON" if COOKIES_OK else "OFF"
     st.markdown('<div class="card" style="padding:8px 12px; margin-bottom:10px">', unsafe_allow_html=True)
     st.markdown(f"<div class='tip'>ログイン中：{role_txt} / データ共有：{fs_txt} / 端末識別（Cookie）：{cookie_txt}</div>", unsafe_allow_html=True)
+    if st.session_state.get("_did_src") == "session":
+        st.markdown("<div class='tip'>※ Cookieが無効のため、再読み込みや別タブでは同一ユーザーとして扱われません。</div>", unsafe_allow_html=True)
     st.markdown("</div>", unsafe_allow_html=True)
 
 # ================== HOME/機能UI ==================
@@ -472,7 +467,7 @@ def view_share():
     if st.button(label, type="primary", key="share_submit", disabled=disabled):
         ok = safe_db_add("school_share", {
             "ts": datetime.now(timezone.utc),
-            "user_id": st.session_state.user_id,  # ← 端末×コード由来の安定ID
+            "user_id": st.session_state.user_id,  # 端末×コード or セッション×コード
             "payload": {"mood":mood, "body":body, "sleep_hours":float(sh), "sleep_quality":sq},
             "anonymous": True
         })
@@ -498,7 +493,7 @@ def view_consult():
     if st.button(label, type="primary", disabled=disabled, key="c_submit"):
         payload = {
             "ts": datetime.now(timezone.utc),
-            "user_id": st.session_state.user_id,  # ← 端末×コード由来の安定ID
+            "user_id": st.session_state.user_id,
             "message": msg.strip(),
             "topics": topics,
             "intent": "counselor" if to_whom.startswith("カウンセラー") else "teacher",
@@ -767,7 +762,10 @@ def view_admin():
         groups = df.sort_values("ts", ascending=False).groupby("_date", sort=False)
         max_n = max(1, min(50, len(df)))
         default_n = min(10, max_n)
-        n_show = 1 if int(max_n) <= 1 else st.slider("表示件数（最新から）", 1, int(max_n), int(default_n), key="adm_nshow")
+        if int(max_n) <= 1:
+            n_show = 1
+        else:
+            n_show = st.slider("表示件数（最新から）", 1, int(max_n), int(default_n), key="adm_nshow")
         count = 0
         for gdate, gdf in groups:
             if count >= n_show: break
@@ -791,7 +789,7 @@ def main_router():
     elif v == "ADMIN" and st.session_state.role == "admin": view_admin()
     else: view_home()
 
-# ================== ログインUI（ぱっと見・即入力） ==================
+# ================== ログインUI ==================
 def login_ui() -> bool:
     if st.session_state._auth_ok: return True
     with st.container():
@@ -802,7 +800,7 @@ def login_ui() -> bool:
         nick = st.text_input("🪞 ニックネーム（任意）", key="login_nick", placeholder="例）あいり")
 
         if not COOKIES_OK:
-            st.caption("※ 自動再入室（同一端末判定）がOFFの可能性があります。Cookieを有効にして再読み込みしてください。")
+            st.caption("※ CookieがOFFのため、同一ユーザー判定はこのセッション内のみです。可能ならCookieを有効にしてください。")
 
         if st.button("➡️ はじめる", type="primary", use_container_width=True, key="login_go"):
             ok, role, msg = try_enter_with_code(code, nick)
@@ -822,7 +820,6 @@ def login_ui() -> bool:
 def logout_btn():
     with st.sidebar:
         if st.button("🚪 ログアウト", key="logout_btn"):
-            # device_id Cookieは残す（再入室のため）
             keep_cookie = cookies.get("device_id") if COOKIES_OK else None
             st.session_state.clear()
             if COOKIES_OK and keep_cookie:
