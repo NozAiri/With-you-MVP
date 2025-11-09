@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any, Optional
 import pandas as pd
 import streamlit as st
-import json, time, re, os
+import json, time, re
 import altair as alt
 
 # ========= Page config =========
@@ -72,6 +72,11 @@ html, body, .stApp{
 .cbt-heading{ font-weight:900; font-size:1.05rem; color:#1b2440; margin:0 0 6px 0;}
 .cbt-sub{ color:#63728a; font-size:0.92rem; margin:-2px 0 10px 0;}
 .ok-chip{ display:inline-block; padding:2px 8px; border-radius:999px; background:#e8fff3; color:#156f3a; font-size:12px; border:1px solid #b9f3cf; }
+
+/* ------- 呼吸アニメ keyframes（足りていないと無音になりがちなので定義） ------- */
+@keyframes sora-grow   { from{transform:scale(0.85)} to{transform:scale(1.0)} }
+@keyframes sora-steady { from{transform:scale(1.0)}  to{transform:scale(1.0)} }
+@keyframes sora-shrink { from{transform:scale(1.0)}  to{transform:scale(0.85)} }
 </style>
 """, unsafe_allow_html=True)
 
@@ -121,13 +126,9 @@ st.session_state.setdefault("_nav_stack", [])
 st.session_state.setdefault("_breath_running", False)
 st.session_state.setdefault("_breath_stop", False)
 
-# ★変更点：ここで管理パスワードを固定。「uneiairi0929」に更新
-#   （secretsにADMIN_PASSがあればそちらを優先）
+# ★ 固定管理パスワード：必ず「uneiairi0929」で入れる（Secretsを無視）
 def admin_pass() -> str:
-    try:
-        return st.secrets.get("ADMIN_PASS", "uneiairi0929")  # ← デフォルトを 0929 に
-    except Exception:
-        return "uneiairi0929"
+    return "uneiairi0929"
 
 CRISIS_PATTERNS = [r"死にたい", r"消えたい", r"自殺", r"希死", r"傷つけ(たい|てしまう)", r"リスカ", r"\bOD\b", r"助けて"]
 def crisis(text: str) -> bool:
@@ -210,7 +211,7 @@ def view_home():
     home_big_button("今日を伝える", "今日の気分や体調を先生や学校と共有します。", "SHARE", "OPEN_SHARE", "🏫")
     c1, c2 = st.columns(2)
     with c1: home_big_button("リラックス", "呼吸ワークで心を整えます。", "SESSION", "OPEN_SESSION", "🌙")
-    with c2: home_big_button("心を整えるノート", "感じたことを言葉にして、今の自分を整理します。", "NOTE", "📝", "📝")
+    with c2: home_big_button("心を整えるノート", "感じたことを言葉にして、今の自分を整理します。", "NOTE", "OPEN_NOTE", "📝")
     c3, c4 = st.columns(2)
     with c3: home_big_button("Study Tracker", "学習時間をふりかえり、進捗を見える形にします。", "STUDY", "OPEN_STUDY", "📚")
     with c4: home_big_button("ふりかえり", "このセッションでの記録を見返せます。", "REVIEW", "OPEN_REVIEW", "📒")
@@ -701,6 +702,7 @@ def _render_share_card(row: pd.Series):
 """, unsafe_allow_html=True)
 
 def _render_consult_card(row: pd.Series):
+    # 危険語の軽いハイライト（任意）
     msg = str(row.get("message",""))
     for kw in ["死にたい","自殺","消えたい","助けて"]:
         if kw in msg:
@@ -852,10 +854,9 @@ def auth_ui() -> bool:
                     st.session_state.user_id = uid.strip(); st.session_state.role = "user"
                     st.session_state._auth_ok = True; st.success("ようこそ。"); return True
         with t2:
-            # ★運営は「uneiairi0929」をパスコードとして入力
             pw = st.text_input("運営パスコード", type="password", key="auth_pw")
             if st.button("➡️ 入る（運営）", key="auth_admin"):
-                if pw == admin_pass():
+                if pw.strip() == admin_pass():
                     st.session_state.user_id = "_admin_"; st.session_state.role = "admin"
                     st.session_state._auth_ok = True; st.success("運営ログインが完了しました。")
                     st.session_state.view = "ADMIN"
