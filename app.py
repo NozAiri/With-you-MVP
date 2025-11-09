@@ -1,4 +1,4 @@
-# app.py — Sora / With You.（運営ダッシュボード付き・パスワード固定版）
+# app.py — Sora / With You.（運営ダッシュボード付き・一発コード認証）
 # 保存方針：
 #  - Firestore保存＝「今日を伝える」「相談」だけ（運営が把握）
 #  - それ以外（ノート／リラックス／Study／レビュー）は端末のみ（DL＋このセッション内の履歴）
@@ -124,16 +124,16 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
 
 st.session_state.setdefault("_auth_ok", False)
-st.session_state.setdefault("role", None)
+st.session_state.setdefault("role", None)          # "admin" / "user" / None
 st.session_state.setdefault("user_id", "")
 st.session_state.setdefault("view", "HOME")
 st.session_state.setdefault("_nav_stack", [])
 st.session_state.setdefault("_breath_running", False)
 st.session_state.setdefault("_breath_stop", False)
 
-# ★ 固定管理パスワード：必ず「uneiairi0929」で入れる（Secretsを無視）
+# ★ 固定管理パスワード（運営コード）
 def admin_pass() -> str:
-    return "uneiairi0929"
+    return "uneiairi0931"
 
 CRISIS_PATTERNS = [r"死にたい", r"消えたい", r"自殺", r"希死", r"傷つけ(たい|てしまう)", r"リスカ", r"\bOD\b", r"助けて"]
 def crisis(text: str) -> bool:
@@ -184,7 +184,7 @@ def top_tabs():
     st.markdown("</div>", unsafe_allow_html=True)
 
 def top_status():
-    role_txt = '運営' if st.session_state.role=='admin' else (f'利用者（{st.session_state.user_id}）' if st.session_state.user_id else '未ログイン')
+    role_txt = '運営' if st.session_state.role=='admin' else (f'利用者（{st.session_state.user_id}）' if st.session_state.user_id else '利用者')
     fs_txt = "接続済み" if FIRESTORE_ENABLED else "未接続（オフライン送信）"
     st.markdown('<div class="card" style="padding:8px 12px; margin-bottom:10px">', unsafe_allow_html=True)
     st.markdown(f"<div class='tip'>ログイン中：{role_txt} / データ共有：{fs_txt}</div>", unsafe_allow_html=True)
@@ -482,7 +482,10 @@ def view_share():
             "payload": {"mood":mood, "body":body, "sleep_hours":float(sh), "sleep_quality":sq},
             "anonymous": True
         })
-        st.success("送信しました。ありがとうございます。") if ok else st.error("送信できませんでした（接続が無効です）。")
+        if ok:
+            st.success("送信しました。ありがとうございます。")
+        else:
+            st.error("送信できませんでした（接続が無効です）。")
 
 # ========= 相談（Firestoreに保存） =========
 CONSULT_TOPICS = ["体調","勉強","人間関係","家庭","進路","いじめ","メンタルの不調","その他"]
@@ -494,14 +497,21 @@ def view_consult():
     to_whom = st.radio("相談先を選んでください", ["カウンセラーに相談したい", "先生に伝えたい"], horizontal=True, key="c_to")
     topics  = st.multiselect("内容（当てはまるもの）", CONSULT_TOPICS, default=[], key="c_topics")
     anonymous = st.checkbox("匿名で送る", value=True, key="c_anon")
-    name = "" if anonymous else st.text_input("お名前（任意）", value="", key="c_name")
-    msg = st.text_area("ご相談したい／伝えたい内容について教えてください。", height=220, value=st.session_state.get("c_msg",""), key="c_msg")
+
+    # 「匿名で送る」がONのときは name 入力を完全に隠す（評価もさせない）
+    name = ""
+    if not anonymous:
+        name = st.text_input("お名前（任意）", value="", key="c_name")
+
+    # text_area は key を使っているので value 指定はしない
+    msg = st.text_area("ご相談したい／伝えたい内容について教えてください。", height=220, key="c_msg")
 
     if crisis(msg):
         st.warning("とても苦しいお気持ちが伝わってきます。必要に応じて、お住まいの地域の相談窓口や専門機関もご検討ください。")
 
-    disabled = not FIRESTORE_ENABLED or (msg.strip()=="")
+    disabled = (not FIRESTORE_ENABLED) or (msg.strip()=="")
     label = "🕊 送信する" if FIRESTORE_ENABLED else "🕊 送信（無効：データ共有未接続）"
+
     if st.button(label, type="primary", disabled=disabled, key="c_submit"):
         payload = {
             "ts": datetime.now(timezone.utc),
@@ -510,10 +520,18 @@ def view_consult():
             "topics": topics,
             "intent": "counselor" if to_whom.startswith("カウンセラー") else "teacher",
             "anonymous": bool(anonymous),
-            "name": name.strip() if name else "",
+            "name": name.strip() if (not anonymous and name) else "",
         }
         ok = safe_db_add("consult_msgs", payload)
-        st.success("送信しました。ありがとうございます。") if ok else st.error("送信できませんでした（接続が無効です）。")
+        if ok:
+            st.success("送信しました。ありがとうございます。")
+            # 送信後は入力をクリア
+            st.session_state["c_topics"] = []
+            st.session_state["c_anon"] = True
+            st.session_state["c_name"] = ""
+            st.session_state["c_msg"] = ""
+        else:
+            st.error("送信できませんでした（接続が無効です）。")
 
 # ========= Study（端末のみ保存） =========
 def view_study():
@@ -607,9 +625,6 @@ def view_review():
 
 # ========= 運営：Firestore 取得ヘルパ =========
 def _fetch_firestore_df(coll: str, start_dt: Optional[datetime], end_dt: Optional[datetime], limit: int) -> pd.DataFrame:
-    """
-    Firestoreから coll（'school_share' or 'consult_msgs'）を取得し、表示用にフラット化してDataFrameで返す。
-    """
     if not FIRESTORE_ENABLED or DB is None:
         return pd.DataFrame()
 
@@ -646,10 +661,7 @@ def _fetch_firestore_df(coll: str, start_dt: Optional[datetime], end_dt: Optiona
         if coll == "school_share":
             payload = data.get("payload", {})
             body = payload.get("body", [])
-            if isinstance(body, list):
-                body_disp = " / ".join(body)
-            else:
-                body_disp = str(body)
+            body_disp = " / ".join(body) if isinstance(body, list) else str(body)
             row = {
                 **base,
                 "mood": payload.get("mood", ""),
@@ -659,10 +671,7 @@ def _fetch_firestore_df(coll: str, start_dt: Optional[datetime], end_dt: Optiona
             }
         else:  # consult_msgs
             topics = data.get("topics", [])
-            if isinstance(topics, list):
-                topics_disp = " / ".join(topics)
-            else:
-                topics_disp = str(topics)
+            topics_disp = " / ".join(topics) if isinstance(topics, list) else str(topics)
             row = {
                 **base,
                 "name": data.get("name", ""),
@@ -736,7 +745,6 @@ def view_admin():
     if not FIRESTORE_ENABLED:
         st.warning("Firestore 未接続のため、一覧は表示できません。Streamlit Secrets に `FIREBASE_SERVICE_ACCOUNT` を設定してください。")
 
-    # 期間・種類・最大件数
     c1, c2, c3 = st.columns([1,1,1])
     with c1:
         days = st.selectbox("対象期間", ["直近7日","直近14日","直近30日","すべて"], index=1, key="adm_range")
@@ -745,20 +753,13 @@ def view_admin():
     with c3:
         limit = st.number_input("最大取得件数", min_value=100, max_value=5000, value=1000, step=100, key="adm_limit")
 
-    # 期間計算
     now_utc = datetime.now(timezone.utc)
-    if days == "すべて":
-        start_dt = None
-    else:
-        n = int(days.replace("直近","").replace("日",""))
-        start_dt = now_utc - timedelta(days=n)
+    start_dt = None if days == "すべて" else now_utc - timedelta(days=int(days.replace("直近","").replace("日","")))
     end_dt = None
 
-    # データ取得
     coll = "school_share" if dataset.startswith("今日を伝える") else "consult_msgs"
     df = _fetch_firestore_df(coll, start_dt, end_dt, limit)
 
-    # 追加フィルタ
     with st.expander("🔎 追加フィルタ", expanded=False):
         if coll == "school_share":
             f_mood = st.multiselect("気分（複数選択可）", sorted(df["mood"].dropna().unique().tolist()) if not df.empty else [], key="f_mood")
@@ -777,7 +778,6 @@ def view_admin():
             if f_kw and not df.empty: df = df[df["message"].fillna("").str.contains(f_kw)]
             if f_uid and not df.empty: df = df[df["user_id"].fillna("").str.contains(f_uid)]
 
-    # 概要
     if df.empty:
         st.info("該当データがありません。条件を変更してください。")
         return
@@ -788,7 +788,6 @@ def view_admin():
     with c2: st.metric("ユニーク利用者", int(df["user_id"].replace("", pd.NA).dropna().nunique()))
     with c3: st.metric("最古の記録（表示中）", df["ts"].iloc[-1] if len(df) > 0 else "-")
 
-    # 日別件数チャート
     st.markdown("#### 🗓 日別件数")
     df["_date"] = pd.to_datetime(df["ts"]).dt.tz_localize(None).dt.date
     agg = df.groupby("_date").size().reset_index(name="count")
@@ -799,13 +798,9 @@ def view_admin():
     ).properties(height=180)
     st.altair_chart(chart, use_container_width=True)
 
-    # 表示モード
     view_mode = st.radio("表示モード", ["カード表示","テーブル表示"], index=0, horizontal=True, key="adm_viewmode")
-
-    # ダウンロード
     _download_buttons(df, basename=f"{coll}_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
 
-    # 一覧
     st.markdown("#### 📋 一覧")
     if view_mode == "テーブル表示":
         show_cols = [c for c in df.columns if c not in ["_doc", "_date"]]
@@ -821,33 +816,23 @@ def view_admin():
         max_n = max(1, min(50, len(df)))
         default_n = min(10, max_n)
 
-        # ★ スライダーは min==max を許容しないため、1件しかない時は固定表示にする
         if int(max_n) <= 1:
             n_show = 1
             st.caption("表示件数（最新から）：1")
         else:
-            n_show = st.slider(
-                "表示件数（最新から）",
-                min_value=1,
-                max_value=int(max_n),
-                value=int(default_n),
-                key="adm_nshow"
-            )
+            n_show = st.slider("表示件数（最新から）", 1, int(max_n), int(default_n), key="adm_nshow")
 
         count = 0
         for gdate, gdf in groups:
-            if count >= n_show:
-                break
+            if count >= n_show: break
             st.markdown(f"##### 📅 {gdate}")
             for _, row in gdf.sort_values("ts", ascending=False).iterrows():
-                if count >= n_show:
-                    break
+                if count >= n_show: break
                 if coll == "school_share":
                     _render_share_card(row)
                 else:
                     _render_consult_card(row)
                 count += 1
-
 
 # ========= Router =========
 def main_router():
@@ -862,31 +847,31 @@ def main_router():
     elif v == "ADMIN" and st.session_state.role == "admin": view_admin()
     else: view_home()
 
-# ========= Auth =========
+# ========= Auth（1画面コード入力。admin=uneiairi0931のみ） =========
 def auth_ui() -> bool:
     if st.session_state._auth_ok: return True
     with st.container():
         st.markdown('<div class="card">', unsafe_allow_html=True)
-        st.markdown("### 🔐 ログイン")
-        t1, t2 = st.tabs(["利用者として入る", "運営として入る"])
-        with t1:
-            uid = st.text_input("ユーザーID", placeholder="お好きなパスワードをご入力ください", key="auth_uid")
-            if st.button("➡️ 入る（利用者）", type="primary", key="auth_user"):
-                if uid.strip() == "":
-                    st.warning("ユーザーIDをご入力ください。")
-                else:
-                    st.session_state.user_id = uid.strip(); st.session_state.role = "user"
-                    st.session_state._auth_ok = True; st.success("ようこそ。"); return True
-        with t2:
-            pw = st.text_input("運営パスコード", type="password", key="auth_pw")
-            if st.button("➡️ 入る（運営）", key="auth_admin"):
-                if pw.strip() == admin_pass():
-                    st.session_state.user_id = "_admin_"; st.session_state.role = "admin"
-                    st.session_state._auth_ok = True; st.success("運営ログインが完了しました。")
-                    st.session_state.view = "ADMIN"
-                    return True
-                else:
-                    st.error("パスコードが違います。")
+        st.markdown("### 🔐 入室コードを入力")
+        code = st.text_input("アクセスコード（※運営は専用コード）", type="password", key="auth_code")
+        nick = st.text_input("ニックネーム（利用者のみ・任意）", value="", key="auth_nick")
+        if st.button("➡️ 入る", type="primary", key="auth_enter"):
+            if code.strip() == "":
+                st.warning("アクセスコードをご入力ください。")
+            elif code.strip() == admin_pass():
+                st.session_state.user_id = "_admin_"
+                st.session_state.role = "admin"
+                st.session_state._auth_ok = True
+                st.success("運営ログインが完了しました。")
+                st.session_state.view = "ADMIN"
+                return True
+            else:
+                st.session_state.user_id = (nick.strip() or "user")
+                st.session_state.role = "user"
+                st.session_state._auth_ok = True
+                st.success("ようこそ。")
+                st.session_state.view = "HOME"
+                return True
         st.markdown("</div>", unsafe_allow_html=True)
     return False
 
