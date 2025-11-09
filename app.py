@@ -320,8 +320,10 @@ def cbt_intro_block():
 <div class="cbt-card">
   <div class="cbt-heading">このワークについて</div>
   <div class="cbt-sub" style="white-space:pre-wrap">
-このワークは、考えと気持ちをやさしく整理するためのメモです。
-うまく書けなくて大丈夫。思いついたことをそのまま書いてみてください。
+このワークは、認知行動療法（CBT）という考え方をもとにしています。
+「気持ち」と「考え方」の関係を整理することで、
+今感じている不安やしんどさが少し軽くなることを目指しています。
+自分のペースで、思いつくことを自由に書いてみてください。
   </div>
 </div>
 """, unsafe_allow_html=True)
