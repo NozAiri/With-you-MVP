@@ -1,11 +1,11 @@
-# app.py — Sora / With You.（ノート改訂版：ホーム削除／選択式「次の一歩」／日記モード）
+# app.py — Sora / With You.（重複キー修正／ホーム削除／ノート改訂／選択式 次の一歩）
 from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import List
 import pandas as pd
 import streamlit as st
 import json, time, re
-import altair as alt  # Altairのみ（Streamlit同梱）
+import altair as alt  # AltairはStreamlitに同梱
 
 # ==== Firestore ====
 from google.cloud import firestore
@@ -83,7 +83,12 @@ html, body, .stApp{
 /* ---------- Generic Buttons ---------- */
 .stButton>button{ border-radius:14px; font-weight:900; }
 
-/* ---------- Tiny helper for muted tips ---------- */
+/* ---------- Breathing keyframes ---------- */
+@keyframes sora-grow{ from{ transform:scale(1.0);} to{ transform:scale(1.6);} }
+@keyframes sora-steady{ from{ transform:scale(1.6);} to{ transform:scale(1.6);} }
+@keyframes sora-shrink{ from{ transform:scale(1.6);} to{ transform:scale(1.0);} }
+
+/* ---------- Tiny helper ---------- */
 .tip{ color:#6a7d9e; font-size:.92rem; }
 </style>
         """,
@@ -163,7 +168,7 @@ class Storage:
 def now_iso() -> str:
     return Storage.now_iso()
 
-# 既定ビューはホームではなく「NOTE」
+# 既定ビューは NOTE（ホームは廃止）
 st.session_state.setdefault("_auth_ok", False)
 st.session_state.setdefault("role", None)
 st.session_state.setdefault("user_id", "")
@@ -282,8 +287,18 @@ def emo_pills(prefix: str, options: List[str], selected: List[str]) -> List[str]
     return selected
 
 # ================= Views =================
+NEXT_STEP_CHOICES = [
+    "5分だけ深呼吸する",
+    "コップ1杯の水を飲む",
+    "外に出て空気を吸う／散歩1～3分",
+    "信頼できる人に短く共有する",
+    "先生・カウンセラーに伝える",
+    "5分だけやる（宿題・片づけ）",
+    "短く休む（目を閉じる・背伸び）",
+    "感情をノートに書く",
+]
+
 def view_session():
-    top_tabs(); top_status()
     st.markdown("### 🌙 リラックス（呼吸）")
     st.caption("円が大きくなったら吸って、小さくなったら吐きます。途中で停止・ページ移動できます。")
 
@@ -321,20 +336,7 @@ def view_session():
         )
         st.success("保存しました。")
 
-# ---- NOTE（主要改訂）----
-NEXT_STEP_CHOICES = [
-    "5分だけ深呼吸する",
-    "コップ1杯の水を飲む",
-    "外に出て空気を吸う／散歩1～3分",
-    "信頼できる人に短く共有する",
-    "先生・カウンセラーに伝える",
-    "5分だけやる（宿題・片づけ）",
-    "短く休む（目を閉じる・背伸び）",
-    "感情をノートに書く",
-]
-
 def view_note():
-    top_tabs(); top_status()
     st.markdown("### 📝 心を整えるノート")
     st.caption("いまの気持ちを選んでから、下の3つ＋日記に進みます。")
 
@@ -346,7 +348,7 @@ def view_note():
 
     st.markdown('<div class="card" style="margin-top:8px">', unsafe_allow_html=True)
 
-    # ①②の文面を要望どおりに短く
+    # ①②の文面（短く）
     q1 = st.text_area("① その気持ちはどうして？",
                       value=st.session_state.get("note_q1",""), height=110)
 
@@ -360,10 +362,9 @@ def view_note():
                             default=st.session_state.get("note_q3_sel", []),
                             key="note_q3_sel")
     q3_free = st.text_input("自由入力（任意）", value=st.session_state.get("note_q3_free",""))
-    # 保存用文字列
     next_step_str = " / ".join(chosen + ([q3_free] if q3_free.strip() else []))
 
-    # ④ 日記っぽく（広め）
+    # ④ 日記
     q4 = st.text_area("④ 今日の振り返り（日記）",
                       value=st.session_state.get("note_q4",""),
                       height=180,
@@ -385,7 +386,7 @@ def view_note():
             "why": q1,
             "want": q2,
             "next_step": next_step_str,
-            "next_step_options": chosen,  # 分析用に配列も保存
+            "next_step_options": chosen,
             "reflection": q4
         }
         Storage.append_user(Storage.CBT, uid, payload)
@@ -396,7 +397,6 @@ def view_note():
         st.success("保存しました。")
 
 def view_share():
-    top_tabs(); top_status()
     st.markdown("### 🏫 今日を伝える（匿名可）")
 
     mood = st.radio("気分", ["🙂", "😐", "😟"], index=1, horizontal=True, key="share_mood")
@@ -433,7 +433,6 @@ def view_share():
         st.success("送信しました。ありがとうございます。")
 
 def view_consult():
-    top_tabs(); top_status()
     st.markdown("### 🕊 相談")
     st.caption("お気軽に。秘密は守ります。お名前は任意です。")
 
@@ -457,7 +456,6 @@ def view_consult():
         st.success("送信しました。ありがとうございます。")
 
 def view_review():
-    top_tabs(); top_status()
     st.markdown("### 📒 ふりかえり")
     uid = st.session_state.user_id
 
@@ -582,7 +580,6 @@ def view_review():
             st.info(f"⏱️ これまでの合計学習時間：**{total_min} 分**")
 
 def view_study():
-    top_tabs(); top_status()
     st.markdown("### 📚 Study Tracker")
     uid = st.session_state.user_id
     subjects = Storage.get_subjects(uid)
@@ -608,6 +605,7 @@ def view_study():
         })
         st.success("保存しました。")
 
+    # 直近の可視化
     df = Storage.load_user(Storage.STUDY, uid)
     if not df.empty:
         st.markdown("### 教科別の時間配分")
@@ -724,9 +722,8 @@ def logout_btn():
 # ================= App =================
 if auth_ui():
     logout_btn()
-    # 画面上部タブ（ホームなし）
+    # --- ここで一度だけタブとステータスを描画（重複禁止）---
     top_tabs()
-    # ログイン状態表示
     top_status()
-    # ルーター
+    # コンテンツ描画
     main_router()
