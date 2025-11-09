@@ -866,7 +866,7 @@ def auth_ui() -> bool:
         st.markdown("### 🔐 ログイン")
         t1, t2 = st.tabs(["利用者として入る", "運営として入る"])
         with t1:
-            uid = st.text_input("ユーザーID", placeholder="例: omu-2025-xxxx", key="auth_uid")
+            uid = st.text_input("ユーザーID", placeholder="お好きなパスワードをご入力ください", key="auth_uid")
             if st.button("➡️ 入る（利用者）", type="primary", key="auth_user"):
                 if uid.strip() == "":
                     st.warning("ユーザーIDをご入力ください。")
