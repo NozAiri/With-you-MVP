@@ -200,8 +200,13 @@ def home_intro_block():
 <div class="card" style="margin-bottom:12px">
   <div style="font-weight:900; font-size:1.05rem; margin-bottom:.3rem">🌙 With You について</div>
   <div style="color:#3a4a6a; line-height:1.65; white-space:pre-wrap">
-毎日の気持ちを整えて、必要なときに先生や周りとつながれる、やさしいツールボックスです。
-いまの自分に合いそうなカードを選んで、短い時間からはじめてみてください。
+気持ちを整理したい日も、誰かに話したい日も。
+With You は、あなたの心のそばにある、小さなツールボックスです。
+
+今の自分に合うカードを選んで、少しずつ整える時間をつくってみてください。
+
+🔒 「今日を伝える」と「相談する」だけが運営に届きます。
+それ以外の記録は、すべてあなたの端末だけに残ります。
   </div>
 </div>
 """, unsafe_allow_html=True)
