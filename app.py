@@ -1,11 +1,7 @@
 # app.py — Sora / With You.（HOME=説明＋下段ボタンのみ／やさしいフォント／グラデ）
-# 要望対応：
-# ・HOME 上段タブは非表示、下段ボタンのみ。タイトルは太字。柔らかフォント＋おしゃれグラデ。
-# ・ノート：専門用語を出さない文面に変更。最後は“日記”。保存は端末のみ（DL＋このセッション内の履歴）。
-# ・リラックス：NameError対策で関数定義を維持。記録は端末のみ。
-# ・相談：相談内容カテゴリを選択可。匿名送信をユーザーが選択。これはFirestoreに送信（運営が把握）。
-# ・運営が把握＝Firestore保存は「今日を伝える」「相談」のみ。他は端末内（DL＋セッション履歴）。
-# ・レビュー：端末内の履歴（このセッションで記録した分）を表示。
+# 保存方針：
+#  - Firestore保存＝「今日を伝える」「相談」だけ（運営が把握）
+#  - それ以外（ノート／リラックス／Study／レビュー）は端末のみ（DL＋このセッション内の履歴）
 
 from __future__ import annotations
 from datetime import datetime, timedelta, timezone
@@ -15,14 +11,10 @@ import streamlit as st
 import json, time, re, os
 import altair as alt
 
-# ==== Firestore（運営が把握する2機能のみ利用） ====
-from google.cloud import firestore
-import google.oauth2.service_account as service_account
-
-# ===== Page config =====
+# ========= Page config =========
 st.set_page_config(page_title="With You.", page_icon="🌙", layout="centered", initial_sidebar_state="collapsed")
 
-# ===== Fonts / Styles =====
+# ========= Fonts / Styles =========
 def inject_css():
     st.markdown("""
 <style>
@@ -85,10 +77,6 @@ html, body, .stApp{
 }
 .emopills .chip.on .stButton>button{ border:2px solid #5EA3FF !important; background:#eefdff !important }
 
-/* ------- progress ------- */
-.prog{height:12px; background:#eef4ff; border-radius:999px; overflow:hidden}
-.prog > div{height:12px; background:#96BDFF}
-
 /* ------- CBT cards（用語ラベルは使わない） ------- */
 .cbt-card{ background:#fff; border:1px solid #e3e8ff; border-radius:18px; padding:18px 18px 14px; box-shadow:0 6px 20px rgba(31,59,179,0.06); margin-bottom:14px; }
 .cbt-heading{ font-weight:900; font-size:1.05rem; color:#1b2440; margin:0 0 6px 0;}
@@ -99,19 +87,39 @@ html, body, .stApp{
 
 inject_css()
 
-# ===== Firestore client（今日を伝える/相談のみ） =====
-def firestore_client():
-    creds = service_account.Credentials.from_service_account_info(st.secrets["FIREBASE_SERVICE_ACCOUNT"])
-    return firestore.Client(project=st.secrets["FIREBASE_SERVICE_ACCOUNT"]["project_id"], credentials=creds)
+# ========= Firestore（今日を伝える／相談のみ） =========
+FIRESTORE_ENABLED = True
+try:
+    from google.cloud import firestore
+    import google.oauth2.service_account as service_account
 
-DB = firestore_client()
+    @st.cache_resource(show_spinner=False)
+    def firestore_client():
+        creds = service_account.Credentials.from_service_account_info(st.secrets["FIREBASE_SERVICE_ACCOUNT"])
+        return firestore.Client(
+            project=st.secrets["FIREBASE_SERVICE_ACCOUNT"]["project_id"],
+            credentials=creds
+        )
+    DB = firestore_client()
+except Exception:
+    FIRESTORE_ENABLED = False
+    DB = None
 
-# ===== Local（端末＝このセッションに保存する辞書） =====
+def safe_db_add(collection: str, payload: dict) -> bool:
+    if not FIRESTORE_ENABLED or DB is None:
+        return False
+    try:
+        DB.collection(collection).add(payload)
+        return True
+    except Exception:
+        return False
+
+# ========= Local（端末＝このセッションに保存する辞書） =========
 def init_local_logs():
     st.session_state.setdefault("_local_logs", {"note":[], "breath":[], "study":[]})
 init_local_logs()
 
-# ===== Utils / State =====
+# ========= Utils / State =========
 def now_iso() -> str:
     return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
 
@@ -129,14 +137,15 @@ def admin_pass() -> str:
     except Exception:
         return "admin123"
 
-CRISIS = [r"死にたい", r"消えたい", r"自殺", r"希死", r"傷つけ(たい|てしまう)", r"リスカ", r"OD", r"助けて"]
+CRISIS_PATTERNS = [r"死にたい", r"消えたい", r"自殺", r"希死", r"傷つけ(たい|てしまう)", r"リスカ", r"\bOD\b", r"助けて"]
 def crisis(text: str) -> bool:
     if not text: return False
-    for p in CRISIS:
-        if re.search(p, text): return True
+    for p in CRISIS_PATTERNS:
+        if re.search(p, text):
+            return True
     return False
 
-# ===== Nav (Top Tabs) =====
+# ========= Nav (Top Tabs) =========
 SECTIONS = [
     ("HOME",   "🏠 ホーム"),
     ("SHARE",  "🏫 今日を伝える"),
@@ -170,35 +179,22 @@ def top_tabs():
     st.markdown("</div>", unsafe_allow_html=True)
 
 def top_status():
+    role_txt = '運営' if st.session_state.role=='admin' else (f'利用者（{st.session_state.user_id}）' if st.session_state.user_id else '未ログイン')
+    fs_txt = "接続済み" if FIRESTORE_ENABLED else "未接続（オフライン送信）"
     st.markdown('<div class="card" style="padding:8px 12px; margin-bottom:10px">', unsafe_allow_html=True)
-    st.markdown(f"<div class='tip'>ログイン中：{'運営' if st.session_state.role=='admin' else f'利用者（{st.session_state.user_id}）'}</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='tip'>ログイン中：{role_txt} / データ共有：{fs_txt}</div>", unsafe_allow_html=True)
     st.markdown("</div>", unsafe_allow_html=True)
 
-# ===== Small helpers =====
+# ========= Small helpers =========
 def home_big_button(title: str, sub: str, target_view: str, key: str, emoji: str):
-    label = f"{emoji} {title}\n{sub}"   # 1行目=タイトル（CSSで太字）
+    label = f"{emoji} {title}\n{sub}"
     with st.container():
         st.markdown('<div class="bigbtn">', unsafe_allow_html=True)
-        if st.button(label, key=key):
+        if st.button(label, key=f"homebtn_{key}"):
             navigate(target_view, push=True); st.rerun()
         st.markdown('</div>', unsafe_allow_html=True)
 
-def emo_pills(prefix: str, options: List[str], selected: List[str]) -> List[str]:
-    st.markdown('<div class="emopills">', unsafe_allow_html=True)
-    cols = st.columns(6)
-    for i, label in enumerate(options):
-        with cols[i % 6]:
-            on = label in selected
-            cls = "chip on" if on else "chip"
-            st.markdown(f'<div class="{cls}">', unsafe_allow_html=True)
-            if st.button(("✓ " if on else "") + label, key=f"{prefix}_{i}"):
-                if on: selected.remove(label)
-                else:  selected.append(label)
-            st.markdown("</div>", unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
-    return selected
-
-# ===== HOME =====
+# ========= HOME =========
 def home_intro_block():
     st.markdown("""
 <div class="card" style="margin-bottom:12px">
@@ -221,7 +217,7 @@ def view_home():
     with c4: home_big_button("ふりかえり", "このセッションでの記録を見返せます。", "REVIEW", "OPEN_REVIEW", "📒")
     home_big_button("相談する", "不安や悩みを安心して伝え、必要なサポートにつながります。", "CONSULT", "OPEN_CONSULT", "🕊")
 
-# ===== リラックス（呼吸） =====
+# ========= リラックス（呼吸） =========
 BREATH_PATTERN = (5, 2, 6)  # 5-2-6
 
 def breathing_animation(total_sec: int = 90):
@@ -245,7 +241,7 @@ def breathing_animation(total_sec: int = 90):
         return True
 
     with ctrl.container():
-        if st.button("⏹ 停止する", key="breath_stop"):
+        if st.button("⏹ 停止する", key="breath_stop_btn"):
             st.session_state["_breath_stop"] = True
 
     for _ in range(cycles):
@@ -264,7 +260,7 @@ def view_session():
     c1, c2 = st.columns([1,1])
     with c1:
         if not st.session_state.get("_breath_running", False):
-            if st.button("🫁 はじめる（90秒）", type="primary"):
+            if st.button("🫁 はじめる（90秒）", type="primary", key="breath_start"):
                 st.session_state["_breath_running"] = True
                 st.session_state["_breath_stop"] = False
                 st.rerun()
@@ -272,7 +268,7 @@ def view_session():
             st.info("実行中です。上のタブから他ページへ移動できます。")
     with c2:
         if st.session_state.get("_breath_running", False):
-            if st.button("⏹ 停止", key="stop_btn", type="secondary"):
+            if st.button("⏹ 停止", key="breath_stop_top", type="secondary"):
                 st.session_state["_breath_stop"] = True
 
     if st.session_state.get("_breath_running", False):
@@ -280,12 +276,11 @@ def view_session():
         st.success("お疲れさまでした。ありがとうございます。")
 
     st.divider()
-    after = st.slider("いまの気分（1 とてもつらい / 10 とても楽）", 1, 10, 5)
-    if st.button("💾 端末に保存（このセッション内）", type="primary"):
+    after = st.slider("いまの気分（1 とてもつらい / 10 とても楽）", 1, 10, 5, key="breath_mood_after")
+    if st.button("💾 端末に保存（このセッション内）", type="primary", key="breath_save"):
         st.session_state["_local_logs"]["breath"].append({
             "ts": now_iso(), "pattern": "5-2-6", "mood_after": int(after), "sec": 90
         })
-        # 端末保存（ダウンロード）
         doc = st.session_state["_local_logs"]["breath"][-1]
         st.download_button("⬇️ この記録をダウンロード（JSON）",
                            data=json.dumps(doc, ensure_ascii=False, indent=2).encode("utf-8"),
@@ -293,7 +288,7 @@ def view_session():
                            mime="application/json", key=f"breath_dl_{len(st.session_state['_local_logs']['breath'])}")
         st.success("保存しました。（運営には共有されません）")
 
-# ===== ノート（CBT風・専門用語なし） =====
+# ========= ノート（専門用語なしのやさしい説明） =========
 MOODS = [
     {"emoji":"😢","label":"悲しい","key":"sad"},
     {"emoji":"😠","label":"イライラ","key":"anger"},
@@ -304,26 +299,14 @@ MOODS = [
     {"emoji":"😄","label":"うれしい","key":"joy"},
     {"emoji":"😕","label":"モヤモヤ","key":"confuse"},
 ]
-ACTION_LIB = {
-    "sad":       ["好きな音楽を1曲聴く","温かい飲み物をゆっくり飲む","“できたこと”を3つ書く"],
-    "anger":     ["深呼吸×3回","その場を少し離れる","手をぎゅっと握ってから開く×5回"],
-    "anx":       ["4-4-6で深呼吸×3","不安を1行だけ書いて“今できる1つ”を丸で囲む","安心できる人にスタンプだけ送る"],
-    "lonely":    ["5分だけ散歩","好きな人に“元気？”と一言送る","毛布にくるまって目を閉じる1分"],
-    "tired":     ["肩回し×10回","水を一杯飲む","5分だけ横になる（タイマー）"],
-    "relief":    ["今日の“よかったこと”を1つメモ","深呼吸しながら背伸び","好きな香りをかぐ"],
-    "joy":       ["嬉しかった理由を一言メモ","誰かに良いことをシェア","写真を1枚撮る"],
-    "confuse":   ["頭に浮かぶことを30秒だけ書く","軽くストレッチ","“今やること”を1つだけ決める"],
-}
 
 def cbt_intro_block():
     st.markdown("""
 <div class="cbt-card">
   <div class="cbt-heading">このワークについて</div>
   <div class="cbt-sub" style="white-space:pre-wrap">
-このワークは、認知行動療法（CBT）という考え方をもとにしています。
-「気持ち」と「考え方」の関係を整理することで、
-今感じている不安やしんどさが少し軽くなることを目指しています。
-自分のペースで、思いつくことを自由に書いてみてください。
+このノートは、いまの気持ちや考えを整理して、すこし軽くするための時間です。
+むずかしい決まりはありません。思いつくことを、短い言葉でも大丈夫。自分のペースでどうぞ。
   </div>
 </div>
 """, unsafe_allow_html=True)
@@ -358,8 +341,7 @@ def text_card(title: str, subtext: str, key: str, height=120, placeholder="こ�
     st.markdown("</div>", unsafe_allow_html=True)
     return val
 
-# ===== 行動活性化：中高生向けの小さな行動ライブラリ =====
-# 研究で推奨される「落ち着かせる/少し楽しい/つながる/書く」の4タイプをミニマムに統合
+# ===== 行動活性化（小さな行動ライブラリ） =====
 ACTION_LIB_BASE = [
     "深呼吸をしてみる",                # 落ち着かせる
     "顔や手を洗う",                    # 感覚リセット
@@ -373,21 +355,16 @@ ACTION_LIB_BASE = [
     "今日できたことを1つ思い出す",    # 達成感の想起
 ]
 
-# 気分別の“相性が良い”候補（行動活性化の適合原則）
 ACTION_BY_MOOD = {
-    # 落ち込み：活動量↑と小さな達成感
     "sad": ["外を少し歩く・空を見上げる", "今日できたことを1つ思い出す", "軽く体を伸ばす"],
-    # 不安：呼吸・感覚の安定＋安全行動の縮小
     "anxious": ["深呼吸をしてみる", "温かい飲み物を飲む", "今の気持ちを一言メモする"],
-    # イライラ：身体の放電＋注意の切替
     "angry": ["軽く体を伸ばす", "顔や手を洗う", "好きな音楽を1曲だけ聴く"],
-    # だるい・疲れ：低コスト行動→次の一歩
     "tired": ["温かい飲み物を飲む", "外を少し歩く・空を見上げる", "今日できたことを1つ思い出す"],
-    # さみしい：社会的接触の再起動
     "lonely": ["家族や友達に一言だけ話す", "スタンプや一言メッセージを送る", "好きな音楽を1曲だけ聴く"],
-    # 迷った時のデフォルト
     "default": ["深呼吸をしてみる", "今の気持ちを一言メモする", "温かい飲み物を飲む"],
 }
+
+MOOD_KEY_ALIAS = {"anx":"anxious","anger":"angry"}  # 表記ゆれ補正
 
 def action_picker(mood_key: str):
     import random
@@ -403,10 +380,11 @@ def action_picker(mood_key: str):
 
     # 気分に合う候補＋ベースを統合し、重複除去
     mood_key = (mood_key or "").strip().lower()
+    mood_key = MOOD_KEY_ALIAS.get(mood_key, mood_key)
     mood_list = ACTION_BY_MOOD.get(mood_key, ACTION_BY_MOOD["default"])
     pool = list(dict.fromkeys(mood_list + ACTION_LIB_BASE))  # 順序保持でユニーク化
 
-    # 3件だけおすすめ表示（選びやすさ優先）／poolが少なければその分だけ
+    # 3件だけおすすめ表示
     k = min(3, len(pool))
     recommended = random.sample(pool, k) if k > 0 else []
 
@@ -419,7 +397,7 @@ def action_picker(mood_key: str):
         key=select_key,
     )
 
-    # 自由入力（例示は“現実的で小さい行動”）
+    # 自由入力
     custom_key = f"act_custom_{mood_key or 'default'}"
     custom = st.text_input(
         "自由入力",
@@ -429,11 +407,9 @@ def action_picker(mood_key: str):
 
     st.markdown("</div>", unsafe_allow_html=True)
 
-    # 返り値：選択＞自由入力（空白は除去）
     chosen = "" if selected == "— 選ばない —" else selected
     custom = (custom or "").strip()
     return chosen, custom
-
 
 def recap_card(doc: dict):
     st.markdown('<div class="cbt-card">', unsafe_allow_html=True)
@@ -467,27 +443,25 @@ def view_note():
         doc = {
             "ts": now_iso(),
             "mood": mood,
-            "trigger_text": trigger_text.strip(),
-            "auto_thought": auto_thought.strip(),
-            "reason_for": reason_for.strip(),
-            "reason_against": reason_against.strip(),
-            "alt_perspective": alt_perspective.strip(),
-            "action_suggested": act_suggested.strip(),
-            "action_custom": act_custom.strip(),
-            "reflection": reflection.strip(),
-            "meta": {"version":"cbt-note-v1","source":"with-you/streamlit"}
+            "trigger_text": (trigger_text or "").strip(),
+            "auto_thought": (auto_thought or "").strip(),
+            "reason_for": (reason_for or "").strip(),
+            "reason_against": (reason_against or "").strip(),
+            "alt_perspective": (alt_perspective or "").strip(),
+            "action_suggested": (act_suggested or "").strip(),
+            "action_custom": (act_custom or "").strip(),
+            "reflection": (reflection or "").strip(),
+            "meta": {"version":"cbt-note-v2","source":"with-you/streamlit"}
         }
-        # 端末（このセッション）に保存
         st.session_state["_local_logs"]["note"].append(doc)
         recap_card(doc)
-        # ダウンロード
         st.download_button("⬇️ この記録をダウンロード（JSON）",
                            data=json.dumps(doc, ensure_ascii=False, indent=2).encode("utf-8"),
                            file_name=f"cbt_journal_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
                            mime="application/json", key=f"cbt_dl_{len(st.session_state['_local_logs']['note'])}")
         st.success("保存しました。（運営には共有されません）")
 
-# ===== 今日を伝える（Firestoreに保存：運営が把握） =====
+# ========= 今日を伝える（Firestoreに保存） =========
 def view_share():
     st.markdown("### 🏫 今日を伝える（匿名可）")
 
@@ -514,16 +488,18 @@ def view_share():
 </div>
 """, unsafe_allow_html=True)
 
-    if st.button("📨 送信（匿名）", type="primary", key="share_submit"):
-        DB.collection("school_share").add({
+    disabled = not FIRESTORE_ENABLED
+    label = "📨 送信（匿名）" if FIRESTORE_ENABLED else "📨 送信（無効：データ共有未接続）"
+    if st.button(label, type="primary", key="share_submit", disabled=disabled):
+        ok = safe_db_add("school_share", {
             "ts": datetime.now(timezone.utc),
             "user_id": st.session_state.user_id,
             "payload": {"mood":mood, "body":body, "sleep_hours":float(sh), "sleep_quality":sq},
             "anonymous": True
         })
-        st.success("送信しました。ありがとうございます。")
+        st.success("送信しました。ありがとうございます。") if ok else st.error("送信できませんでした（接続が無効です）。")
 
-# ===== 相談（Firestoreに保存：運営が把握） =====
+# ========= 相談（Firestoreに保存） =========
 CONSULT_TOPICS = ["体調","勉強","人間関係","家庭","進路","いじめ","メンタルの不調","その他"]
 
 def view_consult():
@@ -539,7 +515,9 @@ def view_consult():
     if crisis(msg):
         st.warning("とても苦しいお気持ちが伝わってきます。必要に応じて、お住まいの地域の相談窓口や専門機関もご検討ください。")
 
-    if st.button("🕊 送信する", type="primary", disabled=(msg.strip()==""), key="c_submit"):
+    disabled = not FIRESTORE_ENABLED or (msg.strip()=="")
+    label = "🕊 送信する" if FIRESTORE_ENABLED else "🕊 送信（無効：データ共有未接続）"
+    if st.button(label, type="primary", disabled=disabled, key="c_submit"):
         payload = {
             "ts": datetime.now(timezone.utc),
             "user_id": st.session_state.user_id,
@@ -549,14 +527,12 @@ def view_consult():
             "anonymous": bool(anonymous),
             "name": name.strip() if name else "",
         }
-        DB.collection("consult_msgs").add(payload)
-        st.success("送信しました。ありがとうございます。")
+        ok = safe_db_add("consult_msgs", payload)
+        st.success("送信しました。ありがとうございます。") if ok else st.error("送信できませんでした（接続が無効です）。")
 
-# ===== Study（端末のみ保存） =====
+# ========= Study（端末のみ保存） =========
 def view_study():
     st.markdown("### 📚 Study Tracker")
-    uid = st.session_state.user_id
-    # 簡易：科目は入力・選択（端末保存のみ）
     subjects_default = ["国語","数学","英語","理科","社会","音楽","美術","情報","その他"]
     subj = st.selectbox("科目", subjects_default, index=0, key="study_subj")
     add  = st.text_input("＋ 自分の科目を追加（Enter）", key="study_add")
@@ -574,10 +550,17 @@ def view_study():
                            mime="application/json", key=f"study_dl_{len(st.session_state['_local_logs']['study'])}")
         st.success("保存しました。（運営には共有されません）")
 
-# ===== ふりかえり（端末＝このセッションの履歴を表示） =====
+# ========= ふりかえり（端末＝このセッションの履歴を表示） =========
 def view_review():
     st.markdown("### 📒 ふりかえり（このセッションの履歴）")
     logs = st.session_state["_local_logs"]
+
+    # まとめてDL
+    if any(len(v)>0 for v in logs.values()):
+        all_json = json.dumps(logs, ensure_ascii=False, indent=2).encode("utf-8")
+        st.download_button("⬇️ このセッションの全記録をダウンロード（JSON）", data=all_json,
+                           file_name=f"withyou_session_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                           mime="application/json", key="review_dl_all")
 
     tabs = st.tabs(["ノート", "呼吸", "Study"])
 
@@ -616,7 +599,6 @@ def view_review():
         if not studies:
             st.caption("まだ記録がありません。")
         else:
-            # 円グラフ
             df = pd.DataFrame(studies)
             pie_agg = df.groupby("subject")["minutes"].sum().reset_index().sort_values("minutes", ascending=False)
             if not pie_agg.empty:
@@ -639,7 +621,7 @@ def view_review():
 </div>
 """, unsafe_allow_html=True)
 
-# ===== Router =====
+# ========= Router =========
 def main_router():
     v = st.session_state.view
     if v == "HOME":   view_home()
@@ -651,7 +633,7 @@ def main_router():
     elif v == "STUDY": view_study()
     else: view_home()
 
-# ===== Auth =====
+# ========= Auth =========
 def auth_ui() -> bool:
     if st.session_state._auth_ok: return True
     with st.container():
@@ -659,29 +641,31 @@ def auth_ui() -> bool:
         st.markdown("### 🔐 ログイン")
         t1, t2 = st.tabs(["利用者として入る", "運営として入る"])
         with t1:
-            uid = st.text_input("ユーザーID", placeholder="例: omu-2025-xxxx")
-            if st.button("➡️ 入る（利用者）", type="primary"):
-                if uid.strip() == "": st.warning("ユーザーIDをご入力ください。")
+            uid = st.text_input("ユーザーID", placeholder="例: omu-2025-xxxx", key="auth_uid")
+            if st.button("➡️ 入る（利用者）", type="primary", key="auth_user"):
+                if uid.strip() == "":
+                    st.warning("ユーザーIDをご入力ください。")
                 else:
                     st.session_state.user_id = uid.strip(); st.session_state.role = "user"
                     st.session_state._auth_ok = True; st.success("ようこそ。"); return True
         with t2:
-            pw = st.text_input("運営パスコード", type="password")
-            if st.button("➡️ 入る（運営）"):
+            pw = st.text_input("運営パスコード", type="password", key="auth_pw")
+            if st.button("➡️ 入る（運営）", key="auth_admin"):
                 if pw == admin_pass():
                     st.session_state.user_id = "_admin_"; st.session_state.role = "admin"
                     st.session_state._auth_ok = True; st.success("運営ログインが完了しました。"); return True
-                else: st.error("パスコードが違います。")
+                else:
+                    st.error("パスコードが違います。")
         st.markdown("</div>", unsafe_allow_html=True)
     return False
 
 def logout_btn():
     with st.sidebar:
-        if st.button("🚪 ログアウト"):
+        if st.button("🚪 ログアウト", key="logout_btn"):
             st.session_state.clear()
             st.rerun()
 
-# ===== App =====
+# ========= App =========
 if auth_ui():
     logout_btn()
     top_tabs()
