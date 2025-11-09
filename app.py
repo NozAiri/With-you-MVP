@@ -365,53 +365,54 @@ ACTION_BY_MOOD = {
 }
 
 # 表記ゆれ補正（既存と同じ）
-MOOD_KEY_ALIAS = {"anx":"anxious","anger":"angry"}
+# （追加推奨：表記ゆれ補正。既にあれば重複定義は不要）
+MOOD_KEY_ALIAS = {"anx":"anxious", "anger":"angry"}
 
 def action_picker(mood_key: str):
-    import random
     st.markdown('<div class="cbt-card">', unsafe_allow_html=True)
     st.markdown(
         '<div class="cbt-heading">🌸 Step 6：今、気持ちが少し落ち着くためにできそうなことは？</div>',
         unsafe_allow_html=True,
     )
     st.markdown(
-        '<div class="cbt-sub">自分に合いそうな「小さな行動」をひとつ選んでみよう。（任意）</div>',
+        '<div class="cbt-sub">気分に合う「おすすめ」を先頭に出し、その下に“すべての候補”をスクロールで選べます。（任意）</div>',
         unsafe_allow_html=True,
     )
 
-    # 1) ムード正規化
+    # 1) ムード正規化（表記ゆれ補正）
     mood_key = (mood_key or "").strip().lower()
     mood_key = MOOD_KEY_ALIAS.get(mood_key, mood_key)
 
-    # 2) 候補プール作成（重複除去）
+    # 2) 候補プール作成（重複を順序保持で除去）
     mood_list = ACTION_BY_MOOD.get(mood_key, ACTION_BY_MOOD["default"])
-    pool = list(dict.fromkeys(mood_list + ACTION_LIB_BASE))
+    pool = list(dict.fromkeys(mood_list + ACTION_LIB_BASE))  # ← ムード適合を先頭にしつつユニーク化
 
-    # 3) 「ムードごとに固定の4択」をセッションに保存（リランしても変わらない）
-    reco_key = f"_act_reco_{mood_key or 'default'}"
-    if (reco_key not in st.session_state) or any(x not in pool for x in st.session_state.get(reco_key, [])):
-        # ムードに依存したシードで決定的にサンプル
-        rnd = random.Random(abs(hash(mood_key or 'default')) & 0xffffffff)
-        k = min(4, len(pool))
-        st.session_state[reco_key] = rnd.sample(pool, k) if k > 0 else []
+    # 3) おすすめは「ムード適合の先頭3件」（固定・非ランダム）
+    recommended = mood_list[:3] if mood_list else []
 
-    recommended = st.session_state[reco_key]
+    # 4) セレクトボックス用の全体リスト（おすすめ→区切り→全候補）
+    SEP_RECO = "—— おすすめ ——"
+    SEP_ALL  = "—— すべて ——"
+    all_rest = [x for x in pool if x not in recommended]
+    options  = ["— 選ばない —"] + ([SEP_RECO] if recommended else []) + recommended + [SEP_ALL] + all_rest
 
-    # 4) ドロップダウン→radioに変更（選びやすく、選択肢ズレ問題を回避）
-    options = ["— 選ばない —"] + recommended
-    pick_key = f"act_pick_{mood_key or 'default'}"
-    selected = st.radio("おすすめから選ぶ", options, index=0, key=pick_key, horizontal=False)
+    # 5) スクロール選択（typeahead検索も可）
+    select_key = f"act_pick_{mood_key or 'default'}"
+    selected = st.selectbox("小さな行動を選ぶ", options, index=0, key=select_key)
 
-    # 5) 自由入力
+    # 6) 区切り行が選ばれた場合は未選択として扱う
+    if selected in (SEP_RECO, SEP_ALL):
+        chosen = ""
+    else:
+        chosen = "" if selected == "— 選ばない —" else selected
+
+    # 7) 自由入力（行動を自分の言葉で）
     custom_key = f"act_custom_{mood_key or 'default'}"
-    custom = st.text_input("自由入力", key=custom_key, placeholder="例：外を少し歩く・空を見上げる")
+    custom = st.text_input("自由入力", key=custom_key, placeholder="例：外を少し歩く・空を見上げる").strip()
 
     st.markdown("</div>", unsafe_allow_html=True)
-
-    # 返り値：選択＞自由入力（空文字は空で返す）
-    chosen = "" if selected == "— 選ばない —" else selected
-    custom = (custom or "").strip()
     return chosen, custom
+
 
 
 def recap_card(doc: dict):
