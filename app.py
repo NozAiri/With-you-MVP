@@ -407,14 +407,15 @@ def recap_card(doc: dict):
 def view_note():
     st.markdown("### 📝 心を整えるノート")
     cbt_intro_block()
+
     mood = mood_radio()
-    trigger_text   = text_card("🫧 Step 2：きっかけは？", "自由に。", "cbt_trigger")
-    auto_thought   = text_card("💭 Step 3：よぎった言葉は？", "心の中の言葉やイメージをそのまま。", "cbt_auto")
-    reason_for     = text_card("🔍 Step 4-1：そう思った理由", "「たしかにそうかも」を書いてみよう。", "cbt_for", height=100)
-    reason_against = text_card("🔍 Step 4-2：そうでもないかも", "別の見え方も書いてみよう。", "cbt_against", height=100)
-    alt_perspective= text_card("🌱 Step 5：友だちになんて言う？", "自分ごとじゃなく“友だち”に声をかけるつもりで。", "cbt_alt")
+    trigger_text   = text_card("🫧 Step 2：その気持ちは、どんなことがきっかけだった？", "「○○があったからかも」「なんとなく○○って思ったから」など自由に。", "cbt_trigger")
+    auto_thought   = text_card("💭 Step 3：そのとき、頭の中でどんな言葉がよぎった？", "心の中でつぶやいた言葉やイメージをそのまま書いてOK。", "cbt_auto")
+    reason_for     = text_card("🔍 Step 4-1：そう思った理由はある？", "「たしかにそうかも」と思うことを書いてみよう。", "cbt_for", height=100)
+    reason_against = text_card("🔍 Step 4-2：そうでもないかもと思う理由はある？", "「でも、こういう面もあるかも」も書いてみよう。", "cbt_against", height=100)
+    alt_perspective= text_card("🌱 Step 5：もし友だちが同じことを感じていたら、なんて声をかける？", "自分のことじゃなく“友だち”のこととして考えてみよう。", "cbt_alt")
     act_suggested, act_custom = action_picker(mood.get("key"))
-    reflection     = text_card("🌙 Step 7：今日の日記", "気づいたこと・これからのことなど自由に。", "cbt_reflect", height=120)
+    reflection     = text_card("🌙 Step 7：今日の日記", "気づいたこと・気持ちの変化・これからのことなど自由に。", "cbt_reflect", height=120)
     if st.button("📝 記録する（端末）", key="cbt_submit"):
         doc = {
             "ts": now_iso(),
