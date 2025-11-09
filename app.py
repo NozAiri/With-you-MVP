@@ -305,8 +305,10 @@ def cbt_intro_block():
 <div class="cbt-card">
   <div class="cbt-heading">このワークについて</div>
   <div class="cbt-sub" style="white-space:pre-wrap">
-このノートは、いまの気持ちや考えを整理して、すこし軽くするための時間です。
-むずかしい決まりはありません。思いつくことを、短い言葉でも大丈夫。自分のペースでどうぞ。
+このノートは、認知行動療法（CBT）という考え方をもとにしています。
+ 「気持ち」と「考え方」の関係を整理することで、
+ 今感じている不安やしんどさが少し軽くなることを目指しています。
+ 自分のペースで、思いつくことを自由に書いてみてください。
   </div>
 </div>
 """, unsafe_allow_html=True)
@@ -368,45 +370,43 @@ ACTION_BY_MOOD = {
 # （追加推奨：表記ゆれ補正。既にあれば重複定義は不要）
 MOOD_KEY_ALIAS = {"anx":"anxious", "anger":"angry"}
 
+MOOD_KEY_ALIAS = {"anx":"anxious", "anger":"angry"}  # 表記ゆれ補正（既にあれば重複定義は不要）
+
 def action_picker(mood_key: str):
     st.markdown('<div class="cbt-card">', unsafe_allow_html=True)
-    st.markdown(
-        '<div class="cbt-heading">🌸 Step 6：今、気持ちが少し落ち着くためにできそうなことは？</div>',
-        unsafe_allow_html=True,
-    )
-    st.markdown(
-        '<div class="cbt-sub">気分に合う「おすすめ」を先頭に出し、その下に“すべての候補”をスクロールで選べます。（任意）</div>',
-        unsafe_allow_html=True,
-    )
+    st.markdown('<div class="cbt-heading">🌸 Step 6：今、気持ちが少し落ち着くためにできそうなことは？</div>', unsafe_allow_html=True)
+    st.markdown('<div class="cbt-sub">上は「おすすめ」、下は「すべて」からスクロールで選べます。（任意）</div>', unsafe_allow_html=True)
 
-    # 1) ムード正規化（表記ゆれ補正）
+    # 1) ムード正規化
     mood_key = (mood_key or "").strip().lower()
     mood_key = MOOD_KEY_ALIAS.get(mood_key, mood_key)
 
-    # 2) 候補プール作成（重複を順序保持で除去）
+    # 2) 候補プール（ムード適合を先頭に・重複除去）
     mood_list = ACTION_BY_MOOD.get(mood_key, ACTION_BY_MOOD["default"])
-    pool = list(dict.fromkeys(mood_list + ACTION_LIB_BASE))  # ← ムード適合を先頭にしつつユニーク化
+    pool = list(dict.fromkeys(mood_list + ACTION_LIB_BASE))
 
-    # 3) おすすめは「ムード適合の先頭3件」（固定・非ランダム）
+    # 3) おすすめ（固定3件・足りなければその分だけ）
     recommended = mood_list[:3] if mood_list else []
 
-    # 4) セレクトボックス用の全体リスト（おすすめ→区切り→全候補）
-    SEP_RECO = "—— おすすめ ——"
-    SEP_ALL  = "—— すべて ——"
-    all_rest = [x for x in pool if x not in recommended]
-    options  = ["— 選ばない —"] + ([SEP_RECO] if recommended else []) + recommended + [SEP_ALL] + all_rest
+    # 4) 上：おすすめ（ラジオ）
+    reco_key = f"act_reco_{mood_key or 'default'}"
+    reco_opts = ["— 選ばない —"] + recommended
+    pick_reco = st.radio("おすすめから選ぶ", reco_opts, index=0, key=reco_key, horizontal=False)
 
-    # 5) スクロール選択（typeahead検索も可）
-    select_key = f"act_pick_{mood_key or 'default'}"
-    selected = st.selectbox("小さな行動を選ぶ", options, index=0, key=select_key)
+    # 5) 下：すべて（スクロール選択）
+    all_key = f"act_all_{mood_key or 'default'}"
+    all_opts = ["— 選ばない —"] + pool
+    pick_all = st.selectbox("すべてから選ぶ", all_opts, index=0, key=all_key)
 
-    # 6) 区切り行が選ばれた場合は未選択として扱う
-    if selected in (SEP_RECO, SEP_ALL):
-        chosen = ""
+    # 6) 優先順位：おすすめ > すべて
+    if pick_reco != "— 選ばない —":
+        chosen = pick_reco
+    elif pick_all != "— 選ばない —":
+        chosen = pick_all
     else:
-        chosen = "" if selected == "— 選ばない —" else selected
+        chosen = ""
 
-    # 7) 自由入力（行動を自分の言葉で）
+    # 7) 自由入力
     custom_key = f"act_custom_{mood_key or 'default'}"
     custom = st.text_input("自由入力", key=custom_key, placeholder="例：外を少し歩く・空を見上げる").strip()
 
