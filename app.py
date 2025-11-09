@@ -796,7 +796,7 @@ def view_admin():
     # ダウンロード
     _download_buttons(df, basename=f"{coll}_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
 
-    # 一覧
+        # 一覧
     st.markdown("#### 📋 一覧")
     if view_mode == "テーブル表示":
         show_cols = [c for c in df.columns if c not in ["_doc", "_date"]]
@@ -811,19 +811,34 @@ def view_admin():
         groups = df.sort_values("ts", ascending=False).groupby("_date", sort=False)
         max_n = max(1, min(50, len(df)))
         default_n = min(10, max_n)
-        n_show = st.slider("表示件数（最新から）", min_value=1, max_value=int(max_n), value=int(default_n), key="adm_nshow")
+
+        # ★ スライダーは min==max を許容しないため、1件しかない時は固定表示にする
+        if int(max_n) <= 1:
+            n_show = 1
+            st.caption("表示件数（最新から）：1")
+        else:
+            n_show = st.slider(
+                "表示件数（最新から）",
+                min_value=1,
+                max_value=int(max_n),
+                value=int(default_n),
+                key="adm_nshow"
+            )
 
         count = 0
         for gdate, gdf in groups:
-            if count >= n_show: break
+            if count >= n_show:
+                break
             st.markdown(f"##### 📅 {gdate}")
             for _, row in gdf.sort_values("ts", ascending=False).iterrows():
-                if count >= n_show: break
+                if count >= n_show:
+                    break
                 if coll == "school_share":
                     _render_share_card(row)
                 else:
                     _render_consult_card(row)
                 count += 1
+
 
 # ========= Router =========
 def main_router():
