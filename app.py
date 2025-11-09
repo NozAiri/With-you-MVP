@@ -494,25 +494,31 @@ def view_consult():
     st.markdown("### 🕊 相談")
     st.caption("お気軽に。秘密は守ります。お名前は任意です。")
 
-    to_whom = st.radio("相談先を選んでください", ["カウンセラーに相談したい", "先生に伝えたい"], horizontal=True, key="c_to")
-    topics  = st.multiselect("内容（当てはまるもの）", CONSULT_TOPICS, default=[], key="c_topics")
-    anonymous = st.checkbox("匿名で送る", value=True, key="c_anon")
+    # 入力フォーム（送信後に自動で入力欄をクリア）
+    with st.form("consult_form", clear_on_submit=True):
+        to_whom = st.radio(
+            "相談先を選んでください",
+            ["カウンセラーに相談したい", "先生に伝えたい"],
+            horizontal=True, key="c_to"
+        )
+        topics  = st.multiselect("内容（当てはまるもの）", CONSULT_TOPICS, default=[], key="c_topics")
 
-    # 「匿名で送る」がONのときは name 入力を完全に隠す（評価もさせない）
-    name = ""
-    if not anonymous:
-        name = st.text_input("お名前（任意）", value="", key="c_name")
+        # 匿名 ON/OFF（名前欄は消さずに disabled 切替にする＝キー衝突を防ぐ）
+        anonymous = st.checkbox("匿名で送る", value=True, key="c_anon")
+        name = st.text_input("お名前（任意）", key="c_name", disabled=anonymous)
 
-    # text_area は key を使っているので value 指定はしない
-    msg = st.text_area("ご相談したい／伝えたい内容について教えてください。", height=220, key="c_msg")
+        msg = st.text_area("ご相談したい／伝えたい内容について教えてください。", height=220, key="c_msg")
 
-    if crisis(msg):
-        st.warning("とても苦しいお気持ちが伝わってきます。必要に応じて、お住まいの地域の相談窓口や専門機関もご検討ください。")
+        # 危機ワード検知の注意（リアルタイムで見せたいのでフォーム内で表示）
+        if crisis(msg):
+            st.warning("とても苦しいお気持ちが伝わってきます。必要に応じて、お住まいの地域の相談窓口や専門機関もご検討ください。")
 
-    disabled = (not FIRESTORE_ENABLED) or (msg.strip()=="")
-    label = "🕊 送信する" if FIRESTORE_ENABLED else "🕊 送信（無効：データ共有未接続）"
+        # Firestore未接続や本文空白のときは送信ボタンを無効化
+        disabled = (not FIRESTORE_ENABLED) or (msg.strip() == "")
+        submit = st.form_submit_button("🕊 送信する", disabled=disabled)
 
-    if st.button(label, type="primary", disabled=disabled, key="c_submit"):
+    # フォーム外で処理（フォームは送信後クリアされるので session_state を触らなくて良い）
+    if submit:
         payload = {
             "ts": datetime.now(timezone.utc),
             "user_id": st.session_state.user_id,
@@ -520,18 +526,15 @@ def view_consult():
             "topics": topics,
             "intent": "counselor" if to_whom.startswith("カウンセラー") else "teacher",
             "anonymous": bool(anonymous),
-            "name": name.strip() if (not anonymous and name) else "",
+            "name": "" if anonymous else (name.strip() if name else ""),
         }
         ok = safe_db_add("consult_msgs", payload)
         if ok:
             st.success("送信しました。ありがとうございます。")
-            # 送信後は入力をクリア
-            st.session_state["c_topics"] = []
-            st.session_state["c_anon"] = True
-            st.session_state["c_name"] = ""
-            st.session_state["c_msg"] = ""
+            # 明示的な session_state の上書きや del/pop は不要（clear_on_submit=True でクリア済み）
         else:
             st.error("送信できませんでした（接続が無効です）。")
+
 
 # ========= Study（端末のみ保存） =========
 def view_study():
