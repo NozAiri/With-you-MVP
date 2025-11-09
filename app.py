@@ -372,46 +372,93 @@ MOOD_KEY_ALIAS = {"anx":"anxious", "anger":"angry"}
 
 MOOD_KEY_ALIAS = {"anx":"anxious", "anger":"angry"}  # 表記ゆれ補正（既にあれば重複定義は不要）
 
+# ===== 行動活性化：生活再起動の4カテゴリ（重複なし・固定順） =====
+ACTION_CATEGORIES = {
+    "身体リセット": [
+        "顔や手を洗う",
+        "深呼吸を3回する",
+        "肩回しを10回する",
+        "（できれば）シャワーを浴びる",
+    ],
+    "環境リセット": [
+        "窓を開けて外の空気を感じる",
+        "カーテンを開けて部屋を明るくする",
+        "空を30秒ながめる",
+    ],
+    "リズム回復": [
+        "水を一杯飲む",
+        "温かい飲み物を飲む",
+        "立ち上がって部屋の中を10歩歩く",
+        "外を少し歩く",
+    ],
+    "つながり再開": [
+        "スタンプを1つ送る",
+        "『ありがとう』を一言書く",
+        "家族や友達に一言だけ話す",
+    ],
+}
+
+# 平坦化（カテゴリはUI表示用のプレフィックス、返り値は“行動テキストのみ”）
+def _flat_action_options():
+    seen, options_display, options_value = set(), [], []
+    order = ["身体リセット", "環境リセット", "リズム回復", "つながり再開"]
+    for cat in order:
+        for a in ACTION_CATEGORIES.get(cat, []):
+            if a in seen: 
+                continue
+            seen.add(a)
+            options_display.append(f"・{cat}｜{a}")
+            options_value.append(a)
+    return options_display, options_value  # 並びは固定
+
 def action_picker(mood_key: str):
+    # カード開始
     st.markdown('<div class="cbt-card">', unsafe_allow_html=True)
-    st.markdown('<div class="cbt-heading">🌸 Step 6：今、気持ちが少し落ち着くためにできそうなことは？</div>', unsafe_allow_html=True)
-    st.markdown('<div class="cbt-sub">上は「おすすめ」、下は「すべて」からスクロールで選べます。（任意）</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="cbt-heading">🌸 Step 6：今、気持ちが少し落ち着くためにできそうなことは？</div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        '<div class="cbt-sub">1つだけ選んでも、選ばなくてもOK。あとで自分の言葉で書いても大丈夫だよ。</div>',
+        unsafe_allow_html=True,
+    )
 
-    # 1) ムード正規化
-    mood_key = (mood_key or "").strip().lower()
-    mood_key = MOOD_KEY_ALIAS.get(mood_key, mood_key)
+    # オプション整形（重複なし・固定順）＋「— 選ばない —」を末尾に
+    disp, vals = _flat_action_options()
+    disp_with_none = disp + ["— 選ばない —"]
+    vals_with_none = vals + ["__NONE__"]
 
-    # 2) 候補プール（ムード適合を先頭に・重複除去）
-    mood_list = ACTION_BY_MOOD.get(mood_key, ACTION_BY_MOOD["default"])
-    pool = list(dict.fromkeys(mood_list + ACTION_LIB_BASE))
+    # 一意キー（ムードに依存させて衝突回避）
+    pick_key = f"act_pick_single_{(mood_key or 'default').strip().lower()}"
 
-    # 3) おすすめ（固定3件・足りなければその分だけ）
-    recommended = mood_list[:3] if mood_list else []
+    # デフォルトは一番下「— 選ばない —」
+    selected_disp = st.selectbox(
+        "小さな行動を1つ選ぶ（任意・スクロール可）",
+        options=disp_with_none,
+        index=len(disp_with_none) - 1,
+        key=pick_key,
+        help="上から順に「身体→環境→リズム→つながり」。検索ボックスに文字を打って絞り込めます。",
+    )
 
-    # 4) 上：おすすめ（ラジオ）
-    reco_key = f"act_reco_{mood_key or 'default'}"
-    reco_opts = ["— 選ばない —"] + recommended
-    pick_reco = st.radio("おすすめから選ぶ", reco_opts, index=0, key=reco_key, horizontal=False)
-
-    # 5) 下：すべて（スクロール選択）
-    all_key = f"act_all_{mood_key or 'default'}"
-    all_opts = ["— 選ばない —"] + pool
-    pick_all = st.selectbox("すべてから選ぶ", all_opts, index=0, key=all_key)
-
-    # 6) 優先順位：おすすめ > すべて
-    if pick_reco != "— 選ばない —":
-        chosen = pick_reco
-    elif pick_all != "— 選ばない —":
-        chosen = pick_all
-    else:
+    # 表示→値へ変換
+    if selected_disp == "— 選ばない —":
         chosen = ""
+    else:
+        # 表示テキストから対応する“行動テキストのみ”を取り出す
+        chosen_idx = disp.index(selected_disp)
+        chosen = vals[chosen_idx]
 
-    # 7) 自由入力
-    custom_key = f"act_custom_{mood_key or 'default'}"
-    custom = st.text_input("自由入力", key=custom_key, placeholder="例：外を少し歩く・空を見上げる").strip()
+    # 自由入力：書かれていれば最優先
+    custom_key = f"act_custom_single_{(mood_key or 'default').strip().lower()}"
+    custom = st.text_input("＋ 自分の言葉で書く（任意）", key=custom_key, placeholder="例：窓を開けて深呼吸する").strip()
 
     st.markdown("</div>", unsafe_allow_html=True)
-    return chosen, custom
+
+    # 優先順位：自由入力 ＞ セレクト ＞ 未選択
+    if custom:
+        return "", custom
+    return (chosen or ""), ""
+
 
 
 
