@@ -364,7 +364,8 @@ ACTION_BY_MOOD = {
     "default": ["深呼吸をしてみる", "今の気持ちを一言メモする", "温かい飲み物を飲む"],
 }
 
-MOOD_KEY_ALIAS = {"anx":"anxious","anger":"angry"}  # 表記ゆれ補正
+# 表記ゆれ補正（既存と同じ）
+MOOD_KEY_ALIAS = {"anx":"anxious","anger":"angry"}
 
 def action_picker(mood_key: str):
     import random
@@ -378,38 +379,40 @@ def action_picker(mood_key: str):
         unsafe_allow_html=True,
     )
 
-    # 気分に合う候補＋ベースを統合し、重複除去
+    # 1) ムード正規化
     mood_key = (mood_key or "").strip().lower()
     mood_key = MOOD_KEY_ALIAS.get(mood_key, mood_key)
+
+    # 2) 候補プール作成（重複除去）
     mood_list = ACTION_BY_MOOD.get(mood_key, ACTION_BY_MOOD["default"])
-    pool = list(dict.fromkeys(mood_list + ACTION_LIB_BASE))  # 順序保持でユニーク化
+    pool = list(dict.fromkeys(mood_list + ACTION_LIB_BASE))
 
-    # 3件だけおすすめ表示
-    k = min(3, len(pool))
-    recommended = random.sample(pool, k) if k > 0 else []
+    # 3) 「ムードごとに固定の4択」をセッションに保存（リランしても変わらない）
+    reco_key = f"_act_reco_{mood_key or 'default'}"
+    if (reco_key not in st.session_state) or any(x not in pool for x in st.session_state.get(reco_key, [])):
+        # ムードに依存したシードで決定的にサンプル
+        rnd = random.Random(abs(hash(mood_key or 'default')) & 0xffffffff)
+        k = min(4, len(pool))
+        st.session_state[reco_key] = rnd.sample(pool, k) if k > 0 else []
 
-    # セレクトボックス（キーはmood別で一意に）
-    select_key = f"act_pick_{mood_key or 'default'}"
-    selected = st.selectbox(
-        "おすすめから選ぶ",
-        ["— 選ばない —"] + recommended,
-        index=0,
-        key=select_key,
-    )
+    recommended = st.session_state[reco_key]
 
-    # 自由入力
+    # 4) ドロップダウン→radioに変更（選びやすく、選択肢ズレ問題を回避）
+    options = ["— 選ばない —"] + recommended
+    pick_key = f"act_pick_{mood_key or 'default'}"
+    selected = st.radio("おすすめから選ぶ", options, index=0, key=pick_key, horizontal=False)
+
+    # 5) 自由入力
     custom_key = f"act_custom_{mood_key or 'default'}"
-    custom = st.text_input(
-        "自由入力",
-        key=custom_key,
-        placeholder="例：外を少し歩く・空を見上げる",
-    )
+    custom = st.text_input("自由入力", key=custom_key, placeholder="例：外を少し歩く・空を見上げる")
 
     st.markdown("</div>", unsafe_allow_html=True)
 
+    # 返り値：選択＞自由入力（空文字は空で返す）
     chosen = "" if selected == "— 選ばない —" else selected
     custom = (custom or "").strip()
     return chosen, custom
+
 
 def recap_card(doc: dict):
     st.markdown('<div class="cbt-card">', unsafe_allow_html=True)
