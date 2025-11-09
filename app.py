@@ -1,43 +1,37 @@
-# app.py — Sora / With You.
-# HOME=説明文リニューアル／上段タブ非表示／Nunito+Varela Round／グラデ刷新
-# NOTE=CBTジャーナルUI（ご提供コード統合）＋「このワークについて」表示
+# app.py — Sora / With You.（HOME=説明＋下段ボタンのみ／やさしいフォント／グラデ）
+# 要望対応：
+# ・HOME 上段タブは非表示、下段ボタンのみ。タイトルは太字。柔らかフォント＋おしゃれグラデ。
+# ・ノート：専門用語を出さない文面に変更。最後は“日記”。保存は端末のみ（DL＋このセッション内の履歴）。
+# ・リラックス：NameError対策で関数定義を維持。記録は端末のみ。
+# ・相談：相談内容カテゴリを選択可。匿名送信をユーザーが選択。これはFirestoreに送信（運営が把握）。
+# ・運営が把握＝Firestore保存は「今日を伝える」「相談」のみ。他は端末内（DL＋セッション履歴）。
+# ・レビュー：端末内の履歴（このセッションで記録した分）を表示。
 
 from __future__ import annotations
 from datetime import datetime, timedelta, timezone
-from typing import List
+from typing import List, Dict, Any
 import pandas as pd
 import streamlit as st
 import json, time, re, os
 import altair as alt
 
-# ==== Firestore ====
+# ==== Firestore（運営が把握する2機能のみ利用） ====
 from google.cloud import firestore
 import google.oauth2.service_account as service_account
 
-# ================= Page config =================
-st.set_page_config(
-    page_title="With You.",
-    page_icon="🌙",
-    layout="centered",
-    initial_sidebar_state="collapsed",
-)
+# ===== Page config =====
+st.set_page_config(page_title="With You.", page_icon="🌙", layout="centered", initial_sidebar_state="collapsed")
 
-# ================= Theme / CSS =================
+# ===== Fonts / Styles =====
 def inject_css():
-    st.markdown(
-        """
+    st.markdown("""
 <style>
-/* Google Fonts：柔らかい丸み */
-@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Varela+Round&family=Zen+Maru+Gothic:wght@400;700;900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Varela+Round&display=swap');
 
 :root{
-  --bg1:#f4f8ff; --bg2:#eaf4ff;
-  --panel:#ffffffee; --panel-brd:#e1e9ff;
-  --text:#1b2a45; --muted:#5c6f8f;
-  --accent:#5EA3FF; --accent-2:#96BDFF; --accent-3:#7FD6C2; --accent-4:#F7B7C3; --accent-5:#FFE59A;
-  --card:#fff; --shadow:0 14px 34px rgba(40,80,160,.12);
-  /* 柔らかい多層グラデ（よりおしゃれに） */
-  --grad-app:
+  --text:#182742; --muted:#63728a; --panel:#ffffffee; --panel-brd:#e1e9ff;
+  --shadow:0 14px 34px rgba(40,80,160,.12);
+  --grad:
     radial-gradient(1400px 600px at -10% -10%, #e8f1ff 0%, rgba(232,241,255,0) 60%),
     radial-gradient(1200px 500px at 110% -10%, #ffeef6 0%, rgba(255,238,246,0) 60%),
     radial-gradient(1200px 500px at 50% 110%, #e9fff7 0%, rgba(233,255,247,0) 60%),
@@ -45,58 +39,43 @@ def inject_css():
 }
 
 html, body, .stApp{
-  font-family: "Nunito", "Varela Round", "Zen Maru Gothic", ui-rounded, system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans JP", sans-serif;
-  background: var(--grad-app);
-  color: var(--text);
+  font-family:"Nunito","Varela Round","Noto Sans JP",ui-rounded,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  color:var(--text);
+  background:var(--grad);
 }
-.block-container{ max-width:980px; padding-top:1.0rem; padding-bottom:2.2rem }
+.block-container{ max-width:980px; padding-top:1rem; padding-bottom:2rem }
 
-/* ---------- Sticky Top Tabs（HOMEでは表示しない） ---------- */
+/* ------- top tabs（HOMEでは非表示） ------- */
 .top-tabs{
   position: sticky; top: 0; z-index: 50;
-  background: rgba(250,253,255,.85); backdrop-filter: saturate(160%) blur(8px);
-  border: 1px solid #dfe6ff; border-radius: 16px; box-shadow: 0 12px 24px rgba(70,120,200,.12);
-  padding: 6px 8px; margin-bottom: 14px;
+  background: rgba(250,253,255,.85); backdrop-filter:saturate(160%) blur(8px);
+  border:1px solid #dfe6ff; border-radius:16px; box-shadow:0 12px 24px rgba(70,120,200,.12);
+  padding:6px 8px; margin-bottom:14px;
 }
 .top-tabs .stButton>button{
-  width:100%; height:40px; border-radius: 12px;
-  background: #f6f9ff; border: 1px solid #e1eaff; font-weight: 900; color:#35527a;
+  width:100%; height:40px; border-radius:12px; font-weight:800;
+  background:#f6f9ff; border:1px solid #e1eaff; color:#2b4772;
 }
-.top-tabs .active .stButton>button{
-  background: #eaf3ff; border-bottom: 3px solid var(--accent); border-top: 1px solid #e1eaff; color:#17345c;
-}
+.top-tabs .active .stButton>button{ background:#eaf3ff; border-bottom:3px solid #5EA3FF }
 
-/* ---------- Cards ---------- */
+/* ------- cards / helpers ------- */
 .card{ background:var(--panel); border:1px solid var(--panel-brd); border-radius:22px; padding:18px; box-shadow:var(--shadow) }
-.item{ background:var(--card); border:1px solid var(--panel-brd); border-radius:18px; padding:16px; box-shadow:var(--shadow) }
+.item{ background:#fff; border:1px solid var(--panel-brd); border-radius:18px; padding:16px; box-shadow:var(--shadow) }
 .item .meta{ color:var(--muted); font-size:.9rem; margin-bottom:.2rem }
-.badge{ display:inline-block; padding:.2rem .6rem; border:1px solid #d6e7ff; border-radius:999px; margin-right:.4rem; color:#29466e; background:#f6faff; font-weight:900 }
+.badge{ display:inline-block; padding:.18rem .6rem; border:1px solid #d6e7ff; border-radius:999px; margin-right:.35rem; color:#29466e; background:#f6faff; font-weight:800 }
+.tip{ color:#6a7d9e; font-size:.92rem; }
 
-/* ---------- HOME big buttons ---------- */
+/* ------- big buttons on HOME ------- */
 .bigbtn{ margin-bottom:12px; }
 .bigbtn .stButton>button{
-  width:100%;
-  text-align:left;
-  border-radius:22px;
-  border:1px solid #dfe6ff;
-  box-shadow:var(--shadow);
-  padding:18px 18px 16px;
-  white-space:pre-wrap;
-  line-height:1.35;
-  transition: transform .08s ease, box-shadow .08s ease;
-  background: linear-gradient(135deg,#ffffff 0%,#eef5ff 100%);
-  color:#12294a;
-  font-weight:600;                 /* 本文やや細く */
+  width:100%; text-align:left; border-radius:22px; border:1px solid #dfe6ff; box-shadow:var(--shadow);
+  padding:18px 18px 16px; white-space:pre-wrap; line-height:1.35;
+  background:linear-gradient(135deg,#ffffff 0%,#eef5ff 100%); color:#132748; font-weight:600;
 }
-/* 1行目（タイトル）だけ太字・大きめ＝ご要望どおり */
-.bigbtn .stButton>button::first-line{
-  font-weight:900;
-  font-size:1.06rem;
-  color:#0f2545;
-}
-.bigbtn .stButton>button:hover{ transform: translateY(-1px); box-shadow:0 18px 30px rgba(70,120,200,.14); }
+.bigbtn .stButton>button::first-line{ font-weight:900; font-size:1.06rem; color:#0f2545; }
+.bigbtn .stButton>button:hover{ transform:translateY(-1px); box-shadow:0 18px 30px rgba(70,120,200,.14) }
 
-/* ---------- Emotion pills ---------- */
+/* ------- emotion pills ------- */
 .emopills{display:grid; grid-template-columns:repeat(3,1fr); gap:10px}
 @media (min-width:820px){ .emopills{ grid-template-columns:repeat(6,1fr) } }
 .emopills .chip .stButton>button{
@@ -104,110 +83,37 @@ html, body, .stApp{
   border:2px solid #d6e7ff !important; border-radius:16px !important;
   box-shadow:0 6px 16px rgba(100,140,200,.08) !important; font-weight:900 !important; padding:12px 12px !important;
 }
-.emopills .chip.on .stButton>button{ border:2px solid var(--accent) !important; background:#eefdff !important }
+.emopills .chip.on .stButton>button{ border:2px solid #5EA3FF !important; background:#eefdff !important }
 
-/* ---------- Progress ---------- */
+/* ------- progress ------- */
 .prog{height:12px; background:#eef4ff; border-radius:999px; overflow:hidden}
-.prog > div{height:12px; background:var(--accent-2)}
+.prog > div{height:12px; background:#96BDFF}
 
-/* ---------- Generic Buttons ---------- */
-.stButton>button{ border-radius:14px; font-weight:900; }
-
-/* ---------- Breathing keyframes ---------- */
-@keyframes sora-grow{ from{ transform:scale(1.0);} to{ transform:scale(1.6);} }
-@keyframes sora-steady{ from{ transform:scale(1.6);} to{ transform:scale(1.6);} }
-@keyframes sora-shrink{ from{ transform:scale(1.6);} to{ transform:scale(1.0);} }
-
-/* ---------- CBT journal (from provided code) ---------- */
-.cbt-card{
-  background:#ffffff;
-  border:1px solid #e3e8ff;
-  border-radius:18px; padding:18px 18px 14px 18px;
-  box-shadow:0 6px 20px rgba(31,59,179,0.06);
-  margin-bottom:14px;
-}
-.cbt-heading{font-weight:800; font-size:1.05rem; color:#1b2440; margin:0 0 6px 0;}
-.cbt-sub{color:#63728a; font-size:0.92rem; margin:-2px 0 10px 0;}
-.cbt-badge{display:inline-block; padding:3px 10px; border-radius:999px; background:#eef2ff; color:#3a4aa8; font-size:12px; margin-left:8px;}
-.ok-chip{display:inline-block; padding:2px 8px; border-radius:999px; background:#e8fff3; color:#156f3a; font-size:12px; border:1px solid #b9f3cf;}
-.tip{ color:#6a7d9e; font-size:.92rem; }
+/* ------- CBT cards（用語ラベルは使わない） ------- */
+.cbt-card{ background:#fff; border:1px solid #e3e8ff; border-radius:18px; padding:18px 18px 14px; box-shadow:0 6px 20px rgba(31,59,179,0.06); margin-bottom:14px; }
+.cbt-heading{ font-weight:900; font-size:1.05rem; color:#1b2440; margin:0 0 6px 0;}
+.cbt-sub{ color:#63728a; font-size:0.92rem; margin:-2px 0 10px 0;}
+.ok-chip{ display:inline-block; padding:2px 8px; border-radius:999px; background:#e8fff3; color:#156f3a; font-size:12px; border:1px solid #b9f3cf; }
 </style>
-        """,
-        unsafe_allow_html=True,
-    )
+""", unsafe_allow_html=True)
 
 inject_css()
 
-# ================= Firestore =================
+# ===== Firestore client（今日を伝える/相談のみ） =====
 def firestore_client():
-    creds = service_account.Credentials.from_service_account_info(
-        st.secrets["FIREBASE_SERVICE_ACCOUNT"]
-    )
-    return firestore.Client(
-        project=st.secrets["FIREBASE_SERVICE_ACCOUNT"]["project_id"],
-        credentials=creds,
-    )
+    creds = service_account.Credentials.from_service_account_info(st.secrets["FIREBASE_SERVICE_ACCOUNT"])
+    return firestore.Client(project=st.secrets["FIREBASE_SERVICE_ACCOUNT"]["project_id"], credentials=creds)
 
 DB = firestore_client()
 
-# ================= Storage =================
-class Storage:
-    CBT = "cbt_entries"
-    BREATH = "breath_sessions"
-    MIX = "mix_note"
-    STUDY = "study_blocks"
-    CONSULT = "consult_msgs"
-    SHARED = "school_share"
-    PREFS = "user_prefs"
+# ===== Local（端末＝このセッションに保存する辞書） =====
+def init_local_logs():
+    st.session_state.setdefault("_local_logs", {"note":[], "breath":[], "study":[]})
+init_local_logs()
 
-    @staticmethod
-    def now_iso():
-        return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
-
-    @staticmethod
-    def append_user(table: str, user_id: str, row: dict):
-        row = dict(row)
-        row["_ts_iso"] = row.get("ts", Storage.now_iso())
-        row["ts"] = firestore.SERVER_TIMESTAMP
-        row["user_id"] = user_id
-        DB.collection(table).add(row)
-
-    @staticmethod
-    def load_user(table: str, user_id: str) -> pd.DataFrame:
-        docs = (
-            DB.collection(table)
-            .where("user_id", "==", user_id)
-            .order_by("ts", direction=firestore.Query.DESCENDING)
-            .stream()
-        )
-        rows = []
-        for d in docs:
-            data = d.to_dict()
-            data["_id"] = d.id
-            ts = data.get("ts")
-            data["ts"] = (
-                ts.astimezone().isoformat(timespec="seconds") if ts else data.get("_ts_iso")
-            )
-            rows.append(data)
-        return pd.DataFrame(rows)
-
-    @staticmethod
-    def get_subjects(uid: str) -> List[str]:
-        doc = DB.collection(Storage.PREFS).document(uid).get()
-        if doc.exists:
-            li = doc.to_dict().get("subjects", [])
-            return list(dict.fromkeys(li))
-        return ["国語", "数学", "英語", "理科", "社会", "音楽", "美術", "情報", "その他"]
-
-    @staticmethod
-    def save_subjects(uid: str, subs: List[str]):
-        DB.collection(Storage.PREFS).document(uid).set(
-            {"subjects": list(dict.fromkeys(subs))}, merge=True
-        )
-
-# ================= Utils / State =================
+# ===== Utils / State =====
 def now_iso() -> str:
-    return Storage.now_iso()
+    return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
 
 st.session_state.setdefault("_auth_ok", False)
 st.session_state.setdefault("role", None)
@@ -224,14 +130,13 @@ def admin_pass() -> str:
         return "admin123"
 
 CRISIS = [r"死にたい", r"消えたい", r"自殺", r"希死", r"傷つけ(たい|てしまう)", r"リスカ", r"OD", r"助けて"]
-
 def crisis(text: str) -> bool:
     if not text: return False
     for p in CRISIS:
         if re.search(p, text): return True
     return False
 
-# ================= Nav (Top Tabs) =================
+# ===== Nav (Top Tabs) =====
 SECTIONS = [
     ("HOME",   "🏠 ホーム"),
     ("SHARE",  "🏫 今日を伝える"),
@@ -249,8 +154,7 @@ def navigate(to_key: str, push: bool = True):
     st.session_state.view = to_key
 
 def top_tabs():
-    # HOMEでは上段タブを出さない＝「上の段の選択ボタンを消す」
-    if st.session_state.view == "HOME":
+    if st.session_state.view == "HOME":  # HOMEでは表示しない
         return
     active = st.session_state.view
     st.markdown('<div class="top-tabs">', unsafe_allow_html=True)
@@ -267,13 +171,57 @@ def top_tabs():
 
 def top_status():
     st.markdown('<div class="card" style="padding:8px 12px; margin-bottom:10px">', unsafe_allow_html=True)
-    st.markdown(
-        f"<div class='tip'>ログイン中：{'運営' if st.session_state.role=='admin' else f'利用者（{st.session_state.user_id}）'}</div>",
-        unsafe_allow_html=True,
-    )
+    st.markdown(f"<div class='tip'>ログイン中：{'運営' if st.session_state.role=='admin' else f'利用者（{st.session_state.user_id}）'}</div>", unsafe_allow_html=True)
     st.markdown("</div>", unsafe_allow_html=True)
 
-# ================= Breathing =================
+# ===== Small helpers =====
+def home_big_button(title: str, sub: str, target_view: str, key: str, emoji: str):
+    label = f"{emoji} {title}\n{sub}"   # 1行目=タイトル（CSSで太字）
+    with st.container():
+        st.markdown('<div class="bigbtn">', unsafe_allow_html=True)
+        if st.button(label, key=key):
+            navigate(target_view, push=True); st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
+
+def emo_pills(prefix: str, options: List[str], selected: List[str]) -> List[str]:
+    st.markdown('<div class="emopills">', unsafe_allow_html=True)
+    cols = st.columns(6)
+    for i, label in enumerate(options):
+        with cols[i % 6]:
+            on = label in selected
+            cls = "chip on" if on else "chip"
+            st.markdown(f'<div class="{cls}">', unsafe_allow_html=True)
+            if st.button(("✓ " if on else "") + label, key=f"{prefix}_{i}"):
+                if on: selected.remove(label)
+                else:  selected.append(label)
+            st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+    return selected
+
+# ===== HOME =====
+def home_intro_block():
+    st.markdown("""
+<div class="card" style="margin-bottom:12px">
+  <div style="font-weight:900; font-size:1.05rem; margin-bottom:.3rem">🌙 With You について</div>
+  <div style="color:#3a4a6a; line-height:1.65; white-space:pre-wrap">
+毎日の気持ちを整えて、必要なときに先生や周りとつながれる、やさしいツールボックスです。
+いまの自分に合いそうなカードを選んで、短い時間からはじめてみてください。
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+def view_home():
+    home_intro_block()
+    home_big_button("今日を伝える", "今日の気分や体調を先生や学校と共有します。", "SHARE", "OPEN_SHARE", "🏫")
+    c1, c2 = st.columns(2)
+    with c1: home_big_button("リラックス", "呼吸ワークで心を整えます。", "SESSION", "OPEN_SESSION", "🌙")
+    with c2: home_big_button("心を整えるノート", "感じたことを言葉にして、今の自分を整理します。", "NOTE", "OPEN_NOTE", "📝")
+    c3, c4 = st.columns(2)
+    with c3: home_big_button("Study Tracker", "学習時間をふりかえり、進捗を見える形にします。", "STUDY", "OPEN_STUDY", "📚")
+    with c4: home_big_button("ふりかえり", "このセッションでの記録を見返せます。", "REVIEW", "OPEN_REVIEW", "📒")
+    home_big_button("相談する", "不安や悩みを安心して伝え、必要なサポートにつながります。", "CONSULT", "OPEN_CONSULT", "🕊")
+
+# ===== リラックス（呼吸） =====
 BREATH_PATTERN = (5, 2, 6)  # 5-2-6
 
 def breathing_animation(total_sec: int = 90):
@@ -289,9 +237,7 @@ def breathing_animation(total_sec: int = 90):
             f'<div style="display:flex;justify-content:center;align-items:center;padding:10px 0 6px">'
             f'<div style="width:260px;height:260px;border-radius:999px;background:radial-gradient(circle at 50% 40%, #f7fbff, #e8f2ff 60%, #eef8ff 100%);'
             f'box-shadow:0 18px 36px rgba(90,140,190,.14), inset 0 -10px 25px rgba(120,150,200,.15);animation:{anim_css} {seconds}s linear forwards;border:solid #dbe9ff"></div>'
-            f'</div>',
-            unsafe_allow_html=True,
-        )
+            f'</div>', unsafe_allow_html=True)
         for _ in range(seconds):
             if st.session_state.get("_breath_stop") or st.session_state.view != "SESSION":
                 return False
@@ -311,64 +257,43 @@ def breathing_animation(total_sec: int = 90):
     st.session_state["_breath_stop"] = False
     ph.empty(); spot.empty(); ctrl.empty()
 
-# ================= Small UI helpers =================
-def emo_pills(prefix: str, options: List[str], selected: List[str]) -> List[str]:
-    st.markdown('<div class="emopills">', unsafe_allow_html=True)
-    cols = st.columns(6)
-    for i, label in enumerate(options):
-        with cols[i % 6]:
-            on = label in selected
-            cls = "chip on" if on else "chip"
-            st.markdown(f'<div class="{cls}">', unsafe_allow_html=True)
-            if st.button(("✓ " if on else "") + label, key=f"{prefix}_{i}"):
-                if on: selected.remove(label)
-                else:  selected.append(label)
-            st.markdown("</div>", unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
-    return selected
+def view_session():
+    st.markdown("### 🌙 リラックス（呼吸）")
+    st.caption("円が大きくなったら吸って、小さくなったら吐きます。途中で停止・ページ移動できます。")
 
-# ---------- HOME（簡単な説明＋大ボタンのみ） ----------
-def home_big_button(title: str, sub: str, target_view: str, key: str, emoji: str):
-    label = f"{emoji} {title}\n{sub}"   # 1行目=タイトル（CSSで太字）
-    with st.container():
-        st.markdown('<div class="bigbtn">', unsafe_allow_html=True)
-        if st.button(label, key=key):
-            navigate(target_view, push=True)
-            st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
-
-def home_intro_block():
-    # ホーム専用の簡単な説明文（CBTの詳細はノート画面のみ）
-    st.markdown(
-        """
-<div class="card" style="margin-bottom:12px">
-  <div style="font-weight:800; font-size:1.05rem; margin-bottom:.3rem">🌙 With You について</div>
-  <div style="color:#3a4a6a; line-height:1.65; white-space:pre-wrap">
-毎日の気持ちを整えて、必要なときに先生や周りとつながれる、やさしいツールボックスです。
-いまの自分に合いそうなカードを選んで、短い時間からはじめてみてください。
-  </div>
-</div>
-        """,
-        unsafe_allow_html=True
-    )
-
-def view_home():
-    home_intro_block()
-
-    home_big_button("今日を伝える", "今日の気分や体調を先生や学校と共有します。", "SHARE", "OPEN_SHARE", "🏫")
-    c1, c2 = st.columns(2)
+    c1, c2 = st.columns([1,1])
     with c1:
-        home_big_button("リラックス", "呼吸ワークで心を整えます。", "SESSION", "OPEN_SESSION", "🌙")
+        if not st.session_state.get("_breath_running", False):
+            if st.button("🫁 はじめる（90秒）", type="primary"):
+                st.session_state["_breath_running"] = True
+                st.session_state["_breath_stop"] = False
+                st.rerun()
+        else:
+            st.info("実行中です。上のタブから他ページへ移動できます。")
     with c2:
-        home_big_button("心を整えるノート", "感じたことを言葉にして、今の自分を整理します。", "NOTE", "OPEN_NOTE", "📝")
-    c3, c4 = st.columns(2)
-    with c3:
-        home_big_button("Study Tracker", "学習時間をふりかえり、進捗を見える形にします。", "STUDY", "OPEN_STUDY", "📚")
-    with c4:
-        home_big_button("ふりかえり", "日々の小さな変化を見つけ、明日につながる気づきを得ます。", "REVIEW", "OPEN_REVIEW", "📒")
-    home_big_button("相談する", "不安や悩みを安心して伝え、必要なサポートにつながります。", "CONSULT", "OPEN_CONSULT", "🕊")
+        if st.session_state.get("_breath_running", False):
+            if st.button("⏹ 停止", key="stop_btn", type="secondary"):
+                st.session_state["_breath_stop"] = True
 
-# ---------- NOTE（CBTジャーナル：ご提供コードを統合） ----------
+    if st.session_state.get("_breath_running", False):
+        breathing_animation(90)
+        st.success("お疲れさまでした。ありがとうございます。")
+
+    st.divider()
+    after = st.slider("いまの気分（1 とてもつらい / 10 とても楽）", 1, 10, 5)
+    if st.button("💾 端末に保存（このセッション内）", type="primary"):
+        st.session_state["_local_logs"]["breath"].append({
+            "ts": now_iso(), "pattern": "5-2-6", "mood_after": int(after), "sec": 90
+        })
+        # 端末保存（ダウンロード）
+        doc = st.session_state["_local_logs"]["breath"][-1]
+        st.download_button("⬇️ この記録をダウンロード（JSON）",
+                           data=json.dumps(doc, ensure_ascii=False, indent=2).encode("utf-8"),
+                           file_name=f"breath_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                           mime="application/json", key=f"breath_dl_{len(st.session_state['_local_logs']['breath'])}")
+        st.success("保存しました。（運営には共有されません）")
+
+# ===== ノート（CBT風・専門用語なし） =====
 MOODS = [
     {"emoji":"😢","label":"悲しい","key":"sad"},
     {"emoji":"😠","label":"イライラ","key":"anger"},
@@ -379,40 +304,32 @@ MOODS = [
     {"emoji":"😄","label":"うれしい","key":"joy"},
     {"emoji":"😕","label":"モヤモヤ","key":"confuse"},
 ]
-ACTION_LIBRARY = {
+ACTION_LIB = {
     "sad":       ["好きな音楽を1曲聴く","温かい飲み物をゆっくり飲む","“できたこと”を3つ書く"],
     "anger":     ["深呼吸×3回","その場を少し離れる","手をぎゅっと握ってから開く×5回"],
-    "anx":       ["呼吸を4-4-6で3サイクル","不安を紙に1行だけ書いて“今できる1つ”を丸で囲む","安心できる人にスタンプだけ送る"],
+    "anx":       ["4-4-6で深呼吸×3","不安を1行だけ書いて“今できる1つ”を丸で囲む","安心できる人にスタンプだけ送る"],
     "lonely":    ["5分だけ散歩","好きな人に“元気？”と一言送る","毛布にくるまって目を閉じる1分"],
-    "tired":     ["目を閉じて肩回し×10回","水を一杯飲む","5分だけ横になる（タイマー）"],
+    "tired":     ["肩回し×10回","水を一杯飲む","5分だけ横になる（タイマー）"],
     "relief":    ["今日の“よかったこと”を1つメモ","深呼吸しながら背伸び","好きな香りをかぐ"],
-    "joy":       ["喜びの理由を一言メモ","誰かに良いことをシェア","写真を1枚撮る"],
-    "confuse":   ["頭に浮かぶことを30秒だけ書き出す","軽くストレッチ","“今やること”を1つだけ決める"],
+    "joy":       ["嬉しかった理由を一言メモ","誰かに良いことをシェア","写真を1枚撮る"],
+    "confuse":   ["頭に浮かぶことを30秒だけ書く","軽くストレッチ","“今やること”を1つだけ決める"],
 }
 
-INTRO_SOFT = """このワークは、**考え方**と**気持ち**をやさしく整理するためのメモです。
-うまく書けなくて大丈夫。思いついたことをそのまま書いてみてください。"""
-
 def cbt_intro_block():
-    st.markdown(
-        """
+    st.markdown("""
 <div class="cbt-card">
   <div class="cbt-heading">このワークについて</div>
   <div class="cbt-sub" style="white-space:pre-wrap">
-このワークは、認知行動療法（CBT）という考え方をもとにしています。
-「気持ち」と「考え方」の関係を整理することで、
-今感じている不安やしんどさが少し軽くなることを目指しています。
-自分のペースで、思いつくことを自由に書いてみてください。
+このワークは、考えと気持ちをやさしく整理するためのメモです。
+うまく書けなくて大丈夫。思いついたことをそのまま書いてみてください。
   </div>
 </div>
-        """,
-        unsafe_allow_html=True
-    )
+""", unsafe_allow_html=True)
 
-def mood_radio():
+def mood_radio() -> Dict[str, Any]:
     st.markdown('<div class="cbt-card">', unsafe_allow_html=True)
-    st.markdown(f'<div class="cbt-heading">🌤 Step 1：今の気持ちはどんな感じ？ <span class="cbt-badge">感情のラベリング</span></div>', unsafe_allow_html=True)
-    st.markdown('<div class="cbt-sub">自分の気持ちにいちばん近い絵文字を選んでみよう。</div>', unsafe_allow_html=True)
+    st.markdown('<div class="cbt-heading">🌤 Step 1：今の気持ちはどんな感じ？</div>', unsafe_allow_html=True)
+    st.markdown('<div class="cbt-sub">いちばん近い絵文字を選んでみよう。</div>', unsafe_allow_html=True)
     cols = st.columns(4)
     for i, m in enumerate(MOODS):
         with cols[i % 4]:
@@ -431,9 +348,9 @@ def mood_radio():
         "intensity": intensity
     }
 
-def text_card(title, badge, subtext, key, height=120, placeholder="ここに書いてみてね"):
+def text_card(title: str, subtext: str, key: str, height=120, placeholder="ここに書いてみてね") -> str:
     st.markdown('<div class="cbt-card">', unsafe_allow_html=True)
-    st.markdown(f'<div class="cbt-heading">{title} <span class="cbt-badge">{badge}</span></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="cbt-heading">{title}</div>', unsafe_allow_html=True)
     st.markdown(f'<div class="cbt-sub">{subtext}</div>', unsafe_allow_html=True)
     val = st.text_area("", height=height, key=key, placeholder=placeholder, label_visibility="collapsed")
     st.markdown("</div>", unsafe_allow_html=True)
@@ -441,13 +358,14 @@ def text_card(title, badge, subtext, key, height=120, placeholder="ここに書�
 
 def action_picker(mood_key: str):
     st.markdown('<div class="cbt-card">', unsafe_allow_html=True)
-    st.markdown(f'<div class="cbt-heading">🌸 Step 6：今、気持ちが少し落ち着くためにできそうなことは？ <span class="cbt-badge">行動活性化</span></div>', unsafe_allow_html=True)
+    st.markdown('<div class="cbt-heading">🌸 Step 6：今、気持ちが少し落ち着くためにできそうなことは？</div>', unsafe_allow_html=True)
     st.markdown('<div class="cbt-sub">自分に合いそうな“小さな行動”をひとつ選んでみよう。</div>', unsafe_allow_html=True)
-    suggestions = ACTION_LIBRARY.get(mood_key or "", [])
-    suggested = st.selectbox("おすすめから選ぶ（任意）", ["— 選ばない —"] + suggestions, index=0, key="cbt_action_suggested")
+    suggestions = ACTION_LIB.get(mood_key or "", [])
+    # ▼選べない問題対策：キーの重複を避け、selectboxは1つだけにする
+    suggested = st.selectbox("おすすめから選ぶ（任意）", ["— 選ばない —"] + suggestions, index=0, key="cbt_action_pick")
     custom = st.text_input("自由入力（任意）", key="cbt_action_custom", placeholder="例：外に出て空を見上げる")
     st.markdown("</div>", unsafe_allow_html=True)
-    return suggested if suggested != "— 選ばない —" else "", custom
+    return ("" if suggested == "— 選ばない —" else suggested), custom
 
 def recap_card(doc: dict):
     st.markdown('<div class="cbt-card">', unsafe_allow_html=True)
@@ -455,66 +373,53 @@ def recap_card(doc: dict):
     st.write(f"- 気持ち：{doc['mood'].get('emoji','')} **{doc['mood'].get('label','未選択')}**（強さ {doc['mood'].get('intensity',0)}）")
     st.write(f"- きっかけ：{doc.get('trigger_text','') or '—'}")
     st.write(f"- よぎった言葉：{doc.get('auto_thought','') or '—'}")
-    st.write(f"- そうかも：{doc.get('evidence_for','') or '—'}")
-    st.write(f"- そうでもないかも：{doc.get('evidence_against','') or '—'}")
-    st.write(f"- 友だちへかける言葉：{doc.get('alt_perspective','') or '—'}")
+    st.write(f"- そう思った理由：{doc.get('reason_for','') or '—'}")
+    st.write(f"- そうでもないかも：{doc.get('reason_against','') or '—'}")
+    st.write(f"- 友だちにかける言葉：{doc.get('alt_perspective','') or '—'}")
     chosen = doc.get("action_suggested") or doc.get("action_custom") or "—"
     st.write(f"- 小さな行動：{chosen}")
-    st.write(f"- ふりかえり：{doc.get('reflection','') or '—'}")
-    st.markdown('<span class="ok-chip">保存は端末内でもOK。うまく書けなくて大丈夫。</span>', unsafe_allow_html=True)
+    st.write(f"- 日記：{doc.get('reflection','') or '—'}")
+    st.markdown('<span class="ok-chip">保存はこの端末（このセッション）に残ります。</span>', unsafe_allow_html=True)
     st.markdown("</div>", unsafe_allow_html=True)
 
 def view_note():
     st.markdown("### 📝 心を整えるノート")
-    st.caption(INTRO_SOFT)
-    cbt_intro_block()  # ← ホームでは表示しない「このワークについて」
+    cbt_intro_block()
 
-    # CBTフロー
     mood = mood_radio()
-    trigger_text = text_card("🫧 Step 2：その気持ちは、どんなことがきっかけだったと思う？","状況の特定",
-                             "「○○があったからかも」「なんとなく○○って思ったから」など、思いあたることがあれば自由に書いてみてね。","cbt_trigger")
-    auto_thought = text_card("💭 Step 3：そのとき、頭の中でどんな言葉がよぎった？","自動思考",
-                             "心の中でつぶやいた言葉やイメージをそのまま書いてOK。","cbt_auto")
-    evi_for = text_card("🔍 Step 4-1：その言葉を信じる理由はある？","認知の再評価","「たしかにそうかも」と思うことを書いてみよう。","cbt_for",height=100)
-    evi_against = text_card("🔍 Step 4-2：そうでもないかもと思う理由はある？","認知の再評価","「でも、こういう面もあるかも」も書いてみよう。","cbt_against",height=100)
-    alt_perspective = text_card("🌱 Step 5：もし友だちが同じことを感じていたら、なんて声をかける？","代替視点","自分のことじゃなく“友だち”のこととして考えてみよう。","cbt_alt")
+    trigger_text   = text_card("🫧 Step 2：その気持ちは、どんなことがきっかけだった？", "「○○があったからかも」「なんとなく○○って思ったから」など自由に。", "cbt_trigger")
+    auto_thought   = text_card("💭 Step 3：そのとき、頭の中でどんな言葉がよぎった？", "心の中でつぶやいた言葉やイメージをそのまま書いてOK。", "cbt_auto")
+    reason_for     = text_card("🔍 Step 4-1：そう思った理由はある？", "「たしかにそうかも」と思うことを書いてみよう。", "cbt_for", height=100)
+    reason_against = text_card("🔍 Step 4-2：そうでもないかもと思う理由はある？", "「でも、こういう面もあるかも」も書いてみよう。", "cbt_against", height=100)
+    alt_perspective= text_card("🌱 Step 5：もし友だちが同じことを感じていたら、なんて声をかける？", "自分のことじゃなく“友だち”のこととして考えてみよう。", "cbt_alt")
     act_suggested, act_custom = action_picker(mood.get("key"))
-    reflection = text_card("🌙 Step 7：書いてみてどう感じた？（ふりかえり）","メタ認知","少し気持ちが変わった？同じ？気づいたことを自由にどうぞ。","cbt_reflect",height=100)
+    reflection     = text_card("🌙 Step 7：今日の日記", "気づいたこと・気持ちの変化・これからのことなど自由に。", "cbt_reflect", height=120)
 
-    # 保存＋DL
-    if st.button("📝 記録する", key="cbt_submit"):
-        uid = st.session_state.user_id
+    if st.button("📝 記録する（端末）", key="cbt_submit"):
         doc = {
             "ts": now_iso(),
-            "mood": mood, "trigger_text": trigger_text.strip(), "auto_thought": auto_thought.strip(),
-            "evidence_for": evi_for.strip(), "evidence_against": evi_against.strip(),
+            "mood": mood,
+            "trigger_text": trigger_text.strip(),
+            "auto_thought": auto_thought.strip(),
+            "reason_for": reason_for.strip(),
+            "reason_against": reason_against.strip(),
             "alt_perspective": alt_perspective.strip(),
-            "action_suggested": act_suggested.strip(), "action_custom": act_custom.strip(),
+            "action_suggested": act_suggested.strip(),
+            "action_custom": act_custom.strip(),
             "reflection": reflection.strip(),
-            "meta": {"version":"cbt-journal-v1","source":"with-you/streamlit"}
+            "meta": {"version":"cbt-note-v1","source":"with-you/streamlit"}
         }
-        # Firestore（従来どおり）
-        Storage.append_user(Storage.CBT, uid, {
-            "ts": now_iso(),
-            "payload": json.dumps(doc, ensure_ascii=False)
-        })
-        # MIXにも一行要約
-        emo = f"{mood.get('emoji','')} {mood.get('label','')}"
-        Storage.append_user(Storage.MIX, uid, {
-            "ts": now_iso(), "mode":"note", "emos": emo, "event": trigger_text[:64],
-            "oneword": auto_thought[:64], "memo": f"next: {(act_suggested or act_custom)[:64]}"
-        })
-
+        # 端末（このセッション）に保存
+        st.session_state["_local_logs"]["note"].append(doc)
         recap_card(doc)
-
-        # 端末保存（任意）
-        fname = f"cbt_journal_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        # ダウンロード
         st.download_button("⬇️ この記録をダウンロード（JSON）",
                            data=json.dumps(doc, ensure_ascii=False, indent=2).encode("utf-8"),
-                           file_name=fname, mime="application/json", key="cbt_dl")
-        st.success("保存しました。ありがとうございます。")
+                           file_name=f"cbt_journal_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                           mime="application/json", key=f"cbt_dl_{len(st.session_state['_local_logs']['note'])}")
+        st.success("保存しました。（運営には共有されません）")
 
-# ---------- SHARE ----------
+# ===== 今日を伝える（Firestoreに保存：運営が把握） =====
 def view_share():
     st.markdown("### 🏫 今日を伝える（匿名可）")
 
@@ -531,8 +436,7 @@ def view_share():
         sq = st.radio("睡眠の質", ["ぐっすり","ふつう","浅い"], index=1, horizontal=True, key="share_sleep_q")
 
     st.markdown("#### プレビュー")
-    st.markdown(
-        f"""
+    st.markdown(f"""
 <div class="item">
   <div class="meta">{datetime.now().astimezone().isoformat(timespec="seconds")}</div>
   <div style="font-weight:900; color:#24466e; margin-bottom:.3rem">本日の共有内容</div>
@@ -540,23 +444,26 @@ def view_share():
   <div style="margin:.2rem 0;">体調：{"".join([f"<span class='badge'>{b}</span>" for b in (body or ['なし'])])}</div>
   <div style="margin:.2rem 0;">睡眠：<b>{sh:.1f} 時間</b> / 質：<span class="badge">{sq}</span></div>
 </div>
-        """, unsafe_allow_html=True
-    )
+""", unsafe_allow_html=True)
 
     if st.button("📨 送信（匿名）", type="primary", key="share_submit"):
-        preview = {"mood":mood, "body":body, "sleep_hours":float(sh), "sleep_quality":sq}
-        Storage.append_user(Storage.SHARED, st.session_state.user_id, {
-            "ts": now_iso(), "scope":"本日", "share_flags":{"emotion":True,"body":True,"sleep":True},
-            "payload": preview, "anonymous": True
+        DB.collection("school_share").add({
+            "ts": datetime.now(timezone.utc),
+            "user_id": st.session_state.user_id,
+            "payload": {"mood":mood, "body":body, "sleep_hours":float(sh), "sleep_quality":sq},
+            "anonymous": True
         })
         st.success("送信しました。ありがとうございます。")
 
-# ---------- CONSULT ----------
+# ===== 相談（Firestoreに保存：運営が把握） =====
+CONSULT_TOPICS = ["体調","勉強","人間関係","家庭","進路","いじめ","メンタルの不調","その他"]
+
 def view_consult():
     st.markdown("### 🕊 相談")
     st.caption("お気軽に。秘密は守ります。お名前は任意です。")
 
     to_whom = st.radio("相談先を選んでください", ["カウンセラーに相談したい", "先生に伝えたい"], horizontal=True, key="c_to")
+    topics  = st.multiselect("内容（当てはまるもの）", CONSULT_TOPICS, default=[], key="c_topics")
     anonymous = st.checkbox("匿名で送る", value=True, key="c_anon")
     name = "" if anonymous else st.text_input("お名前（任意）", value="", key="c_name")
     msg = st.text_area("ご相談したい／伝えたい内容について教えてください。", height=220, value=st.session_state.get("c_msg",""), key="c_msg")
@@ -564,82 +471,85 @@ def view_consult():
     if crisis(msg):
         st.warning("とても苦しいお気持ちが伝わってきます。必要に応じて、お住まいの地域の相談窓口や専門機関もご検討ください。")
 
-    if st.button("🕊 送信する", type="primary", disabled=(msg.strip()=="") , key="c_submit"):
+    if st.button("🕊 送信する", type="primary", disabled=(msg.strip()==""), key="c_submit"):
         payload = {
-            "ts": now_iso(),
+            "ts": datetime.now(timezone.utc),
+            "user_id": st.session_state.user_id,
             "message": msg.strip(),
+            "topics": topics,
             "intent": "counselor" if to_whom.startswith("カウンセラー") else "teacher",
             "anonymous": bool(anonymous),
             "name": name.strip() if name else "",
         }
-        Storage.append_user(Storage.CONSULT, st.session_state.user_id, payload)
+        DB.collection("consult_msgs").add(payload)
         st.success("送信しました。ありがとうございます。")
 
-# ---------- REVIEW ----------
-def view_review():
-    st.markdown("### 📒 ふりかえり")
+# ===== Study（端末のみ保存） =====
+def view_study():
+    st.markdown("### 📚 Study Tracker")
     uid = st.session_state.user_id
+    # 簡易：科目は入力・選択（端末保存のみ）
+    subjects_default = ["国語","数学","英語","理科","社会","音楽","美術","情報","その他"]
+    subj = st.selectbox("科目", subjects_default, index=0, key="study_subj")
+    add  = st.text_input("＋ 自分の科目を追加（Enter）", key="study_add")
+    if add.strip(): subj = add.strip()
+    mins = st.number_input("学習時間（分）", 1, 600, 30, 5, key="study_min")
+    mood = st.selectbox("状況", ["順調","難航","しんどい","集中","だるい","眠い","その他"], index=0, key="study_mood")
+    memo = st.text_input("メモ（任意）", key="study_memo")
 
-    def daterange(df: pd.DataFrame) -> pd.DataFrame:
-        if df.empty: return df
-        df["ts"] = pd.to_datetime(df["ts"])
-        today = datetime.now().date()
-        c1, c2 = st.columns(2)
-        with c1:  since = st.date_input("開始日", value=today - timedelta(days=14), key="rev_since")
-        with c2:  until = st.date_input("終了日", value=today, key="rev_until")
-        return df[(df["ts"].dt.date >= since) & (df["ts"].dt.date <= until)].copy().sort_values("ts", ascending=False)
+    if st.button("💾 記録（端末）", type="primary", key="study_save"):
+        rec = {"ts": now_iso(), "subject": subj, "minutes": int(mins), "mood": mood, "memo": memo}
+        st.session_state["_local_logs"]["study"].append(rec)
+        st.download_button("⬇️ この記録をダウンロード（JSON）",
+                           data=json.dumps(rec, ensure_ascii=False, indent=2).encode("utf-8"),
+                           file_name=f"study_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                           mime="application/json", key=f"study_dl_{len(st.session_state['_local_logs']['study'])}")
+        st.success("保存しました。（運営には共有されません）")
 
-    st.markdown('<div class="card" style="padding-top:8px">', unsafe_allow_html=True)
-    tabs = st.tabs(["ホーム/ノート", "呼吸", "Study Tracker"])
+# ===== ふりかえり（端末＝このセッションの履歴を表示） =====
+def view_review():
+    st.markdown("### 📒 ふりかえり（このセッションの履歴）")
+    logs = st.session_state["_local_logs"]
+
+    tabs = st.tabs(["ノート", "呼吸", "Study"])
 
     with tabs[0]:
-        df = Storage.load_user(Storage.MIX, uid)
-        if df.empty:
+        notes = list(reversed(logs["note"]))
+        if not notes:
             st.caption("まだ記録がありません。")
         else:
-            df = daterange(df)
-            for _, r in df.iterrows():
-                badges = []
-                if r.get("mode") == "breath": badges.append("呼吸")
-                title = r.get("oneword") or r.get("switch") or r.get("mode", "")
-                memo = r.get("memo", "")
-                st.markdown(
-                    f"""
+            for r in notes:
+                st.markdown(f"""
 <div class="item">
   <div class="meta">{r['ts']}</div>
-  <div style="font-weight:900; color:#24466e; margin-bottom:.3rem">{title}</div>
-  <div style="white-space:pre-wrap; margin-bottom:.4rem">{memo}</div>
-  <div>{" ".join([f"<span class='badge'>{b}</span>" for b in badges])}</div>
+  <div style="font-weight:900; color:#24466e; margin-bottom:.2rem">{r['mood'].get('emoji','')} {r['mood'].get('label','')}</div>
+  <div style="white-space:pre-wrap; margin-bottom:.3rem">きっかけ：{r.get('trigger_text','')}</div>
+  <div style="white-space:pre-wrap; margin-bottom:.3rem">よぎった言葉：{r.get('auto_thought','')}</div>
+  <div style="white-space:pre-wrap; margin-bottom:.3rem">日記：{r.get('reflection','')}</div>
 </div>
-                    """, unsafe_allow_html=True)
+""", unsafe_allow_html=True)
 
     with tabs[1]:
-        df = Storage.load_user(Storage.BREATH, uid)
-        if df.empty:
+        breaths = list(reversed(logs["breath"]))
+        if not breaths:
             st.caption("まだ記録がありません。")
         else:
-            df = daterange(df)
-            for _, r in df.iterrows():
-                delta = r.get("delta")
-                dtxt = "" if delta is None else f"<span class='badge'>Δ {int(delta):+d}</span>"
-                st.markdown(
-                    f"""
+            for r in breaths:
+                st.markdown(f"""
 <div class="item">
   <div class="meta">{r['ts']}</div>
-  <div>目標：{r.get('target_sec',90)}秒 / パターン：5-2-6</div>
-  <div>前後：{r.get('mood_before','-')} → {r.get('mood_after','-')} {dtxt}</div>
+  <div>パターン：{r['pattern']} / 実施：{r['sec']}秒</div>
+  <div>終了時の気分：{r['mood_after']}</div>
 </div>
-                    """, unsafe_allow_html=True)
+""", unsafe_allow_html=True)
 
     with tabs[2]:
-        df = Storage.load_user(Storage.STUDY, uid)
-        if df.empty:
+        studies = list(reversed(logs["study"]))
+        if not studies:
             st.caption("まだ記録がありません。")
         else:
-            df["ts"] = pd.to_datetime(df["ts"])
-            df = df.sort_values("ts", ascending=False)
-
-            st.markdown("### 教科別の時間配分")
+            # 円グラフ
+            df = pd.DataFrame(studies)
             pie_agg = df.groupby("subject")["minutes"].sum().reset_index().sort_values("minutes", ascending=False)
             if not pie_agg.empty:
                 color_scale = alt.Scale(domain=pie_agg["subject"].tolist(),
@@ -651,36 +561,21 @@ def view_review():
                     ).properties(width=340, height=340))
                 st.altair_chart(pie, use_container_width=False)
 
-            total_min = int(df["minutes"].sum())
-            st.info(f"⏱️ これまでの合計学習時間：**{total_min} 分**")
+            for _, r in df.sort_values("ts", ascending=False).iterrows():
+                st.markdown(f"""
+<div class="item">
+  <div class="meta">{r['ts']}</div>
+  <div style="font-weight:900">{r['subject']}</div>
+  <div>分：{int(r['minutes'])} / 状況：{r.get('mood','')}</div>
+  <div style="white-space:pre-wrap; color:#3b4f71; margin-top:.3rem">{r.get('memo','')}</div>
+</div>
+""", unsafe_allow_html=True)
 
-# ---------- STUDY ----------
-def view_study():
-    st.markdown("### 📚 Study Tracker")
-    uid = st.session_state.user_id
-    subjects = Storage.get_subjects(uid)
-
-    l, r = st.columns(2)
-    with l:
-        subj = st.selectbox("科目", subjects, index=0, key="study_subj")
-        add = st.text_input("＋ 自分の科目を追加（Enter）", key="study_add")
-        if add.strip() and add.strip() not in subjects:
-            subjects.append(add.strip()); Storage.save_subjects(uid, subjects); st.success(f"追加：{add.strip()}")
-    with r:
-        mins = st.number_input("学習時間（分）", 1, 600, 30, 5, key="study_min")
-        mood = st.selectbox("状況", ["順調","難航","しんどい","集中","だるい","眠い","その他"], index=0, key="study_mood")
-    memo = st.text_input("メモ（任意）", key="study_memo")
-
-    if st.button("💾 記録", type="primary", key="study_save"):
-        Storage.append_user(Storage.STUDY, uid, {"ts": now_iso(), "subject": (add.strip() or subj),
-                                                 "minutes": int(mins), "mood": mood, "memo": memo})
-        st.success("保存しました。")
-
-# ================= Router =================
+# ===== Router =====
 def main_router():
     v = st.session_state.view
     if v == "HOME":   view_home()
-    elif v == "SESSION": view_session()
+    elif v == "SESSION": view_session()        # ← NameError対策：必ず存在
     elif v == "NOTE": view_note()
     elif v == "SHARE": view_share()
     elif v == "CONSULT": view_consult()
@@ -688,7 +583,7 @@ def main_router():
     elif v == "STUDY": view_study()
     else: view_home()
 
-# ================= Auth =================
+# ===== Auth =====
 def auth_ui() -> bool:
     if st.session_state._auth_ok: return True
     with st.container():
@@ -715,18 +610,12 @@ def auth_ui() -> bool:
 def logout_btn():
     with st.sidebar:
         if st.button("🚪 ログアウト"):
-            st.session_state["_auth_ok"] = False
-            st.session_state["role"] = None
-            st.session_state["user_id"] = ""
-            st.session_state["view"] = "HOME"
-            st.session_state["_nav_stack"] = []
-            st.session_state["_breath_running"] = False
-            st.session_state["_breath_stop"] = False
+            st.session_state.clear()
             st.rerun()
 
-# ================= App =================
+# ===== App =====
 if auth_ui():
     logout_btn()
-    top_tabs()   # HOMEでは描画されません
+    top_tabs()
     top_status()
     main_router()
