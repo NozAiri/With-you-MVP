@@ -828,11 +828,12 @@ def logout_btn():
             st.rerun()
 
 # ================== App起動 ==================
-if login_ui():
-    pass
+if st.session_state.get("_auth_ok", False):
+    # ← ログイン済みならアプリ本体を描画
+    logout_btn()
+    top_tabs()
+    top_status()
+    main_router()
 else:
-    if st.session_state.get("_auth_ok", False):
-        logout_btn()
-        top_tabs()
-        top_status()
-        main_router()
+    # ← 未ログインならログインUIを表示
+    login_ui()
