@@ -1,11 +1,11 @@
-# app.py — Sora / With You.（重複キー修正／ホーム削除／ノート改訂／選択式 次の一歩）
+# app.py — Sora / With You.（HOME復活：説明つきボタンのみ／重複キー対策／ノート改訂）
 from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import List
 import pandas as pd
 import streamlit as st
 import json, time, re
-import altair as alt  # AltairはStreamlitに同梱
+import altair as alt
 
 # ==== Firestore ====
 from google.cloud import firestore
@@ -33,9 +33,6 @@ def inject_css():
   --accent:#5EA3FF; --accent-2:#96BDFF; --accent-3:#7FD6C2; --accent-4:#F7B7C3; --accent-5:#FFE59A;
   --card:#fff; --shadow:0 14px 34px rgba(40,80,160,.12);
   --grad-app: linear-gradient(180deg, #f4f8ff, #eaf5ff);
-  --grad-mint: linear-gradient(135deg,#eafaf6 0%,#ffffff 90%);
-  --grad-lav:  linear-gradient(135deg,#f3efff 0%,#ffffff 90%);
-  --grad-ice:  linear-gradient(135deg,#f0faff 0%,#ffffff 90%);
 }
 
 html, body, .stApp{
@@ -65,6 +62,24 @@ html, body, .stApp{
 .item{ background:var(--card); border:1px solid var(--panel-brd); border-radius:18px; padding:16px; box-shadow:var(--shadow) }
 .item .meta{ color:var(--muted); font-size:.9rem; margin-bottom:.2rem }
 .badge{ display:inline-block; padding:.2rem .6rem; border:1px solid #d6e7ff; border-radius:999px; margin-right:.4rem; color:#29466e; background:#f6faff; font-weight:900 }
+
+/* ---------- Big buttons on HOME ---------- */
+.bigbtn{ margin-bottom:12px; }
+.bigbtn .stButton>button{
+  width:100%;
+  text-align:left;
+  border-radius:22px;
+  border:1px solid #dfe6ff;
+  box-shadow:var(--shadow);
+  padding:18px 18px 16px;
+  font-weight:700;
+  white-space:pre-wrap;           /* 改行を生かす */
+  line-height:1.35;
+  transition: transform .08s ease, box-shadow .08s ease;
+  background: linear-gradient(135deg,#ffffff 0%,#eef5ff 100%);
+  color:#12294a;
+}
+.bigbtn .stButton>button:hover{ transform: translateY(-1px); box-shadow:0 18px 30px rgba(70,120,200,.14); }
 
 /* ---------- Emotion pills ---------- */
 .emopills{display:grid; grid-template-columns:repeat(3,1fr); gap:10px}
@@ -168,11 +183,11 @@ class Storage:
 def now_iso() -> str:
     return Storage.now_iso()
 
-# 既定ビューは NOTE（ホームは廃止）
+# 既定ビューは HOME
 st.session_state.setdefault("_auth_ok", False)
 st.session_state.setdefault("role", None)
 st.session_state.setdefault("user_id", "")
-st.session_state.setdefault("view", "NOTE")
+st.session_state.setdefault("view", "HOME")
 st.session_state.setdefault("_nav_stack", [])
 st.session_state.setdefault("_breath_running", False)
 st.session_state.setdefault("_breath_stop", False)
@@ -194,8 +209,8 @@ def crisis(text: str) -> bool:
     return False
 
 # ================= Nav (Top Tabs) =================
-# ホームを削除
 SECTIONS = [
+    ("HOME",   "🏠 ホーム"),
     ("SHARE",  "🏫 今日を伝える"),
     ("SESSION","🌙 リラックス"),
     ("NOTE",   "📝 ノート"),
@@ -286,7 +301,60 @@ def emo_pills(prefix: str, options: List[str], selected: List[str]) -> List[str]
     st.markdown("</div>", unsafe_allow_html=True)
     return selected
 
-# ================= Views =================
+# ---------- HOME（説明つきボタンのみ） ----------
+def home_big_button(title: str, desc: str, target_view: str, key: str, emoji: str):
+    with st.container():
+        st.markdown('<div class="bigbtn">', unsafe_allow_html=True)
+        # ラベルはプレーンテキストのみ（改行で説明表示）
+        label = f"{emoji} {title}\n{desc}"
+        if st.button(label, key=key):
+            navigate(target_view, push=True)
+            st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
+
+def view_home():
+    # 1列目：今日を伝える
+    home_big_button(
+        "今日を伝える",
+        "今日の気分や体調を共有して、先生や学校に安心して知ってもらうために。",
+        "SHARE", "OPEN_SHARE", "🏫"
+    )
+    # 2列目：2カラム（リラックス・ノート）
+    c1, c2 = st.columns(2)
+    with c1:
+        home_big_button(
+            "リラックスする",
+            "呼吸に合わせて、緊張や不安を少しずつ和らげるために。",
+            "SESSION", "OPEN_SESSION", "🌙"
+        )
+    with c2:
+        home_big_button(
+            "心を整えるノート",
+            "感じていることを言葉にして、いまの自分を整理するために。",
+            "NOTE", "OPEN_NOTE", "📝"
+        )
+    # 3列目：2カラム（Study・ふりかえり）
+    c3, c4 = st.columns(2)
+    with c3:
+        home_big_button(
+            "Study Tracker",
+            "学習時間をふりかえり、進捗を“見える形”にするために。",
+            "STUDY", "OPEN_STUDY", "📚"
+        )
+    with c4:
+        home_big_button(
+            "ふりかえり",
+            "日々の小さな変化を見つめ、明日につながる気づきを得るために。",
+            "REVIEW", "OPEN_REVIEW", "📒"
+        )
+    # 最後：相談
+    home_big_button(
+        "相談する",
+        "不安や悩みを安心して伝え、必要なサポートにつながるために。",
+        "CONSULT", "OPEN_CONSULT", "🕊"
+    )
+
+# ---------- 他ビュー ----------
 NEXT_STEP_CHOICES = [
     "5分だけ深呼吸する",
     "コップ1杯の水を飲む",
@@ -348,14 +416,12 @@ def view_note():
 
     st.markdown('<div class="card" style="margin-top:8px">', unsafe_allow_html=True)
 
-    # ①②の文面（短く）
     q1 = st.text_area("① その気持ちはどうして？",
                       value=st.session_state.get("note_q1",""), height=110)
 
     q2 = st.text_area("② どうしたいですか？",
                       value=st.session_state.get("note_q2",""), height=100)
 
-    # ③ 選択式＋自由入力
     st.markdown("**③ 状況を少しでもよくする“次の一歩”は？（小さな行動）**")
     chosen = st.multiselect("当てはまるものを選んでください（複数選択可）",
                             NEXT_STEP_CHOICES,
@@ -364,7 +430,6 @@ def view_note():
     q3_free = st.text_input("自由入力（任意）", value=st.session_state.get("note_q3_free",""))
     next_step_str = " / ".join(chosen + ([q3_free] if q3_free.strip() else []))
 
-    # ④ 日記
     q4 = st.text_area("④ 今日の振り返り（日記）",
                       value=st.session_state.get("note_q4",""),
                       height=180,
@@ -372,7 +437,6 @@ def view_note():
 
     st.markdown("</div>", unsafe_allow_html=True)
 
-    # 保存
     st.session_state["note_q1"] = q1
     st.session_state["note_q2"] = q2
     st.session_state["note_q3_free"] = q3_free
@@ -605,7 +669,6 @@ def view_study():
         })
         st.success("保存しました。")
 
-    # 直近の可視化
     df = Storage.load_user(Storage.STUDY, uid)
     if not df.empty:
         st.markdown("### 教科別の時間配分")
@@ -659,7 +722,9 @@ def view_study():
 # ================= Router =================
 def main_router():
     v = st.session_state.view
-    if v == "SESSION":
+    if v == "HOME":
+        view_home()
+    elif v == "SESSION":
         view_session()
     elif v == "NOTE":
         view_note()
@@ -672,7 +737,7 @@ def main_router():
     elif v == "STUDY":
         view_study()
     else:
-        view_note()  # フォールバック
+        view_home()
 
 # ================= Auth =================
 def auth_ui() -> bool:
@@ -713,7 +778,7 @@ def logout_btn():
             st.session_state["_auth_ok"] = False
             st.session_state["role"] = None
             st.session_state["user_id"] = ""
-            st.session_state["view"] = "NOTE"
+            st.session_state["view"] = "HOME"
             st.session_state["_nav_stack"] = []
             st.session_state["_breath_running"] = False
             st.session_state["_breath_stop"] = False
@@ -722,8 +787,7 @@ def logout_btn():
 # ================= App =================
 if auth_ui():
     logout_btn()
-    # --- ここで一度だけタブとステータスを描画（重複禁止）---
+    # 上部タブ & ステータスはここで1回だけ描画（重複キー回避）
     top_tabs()
     top_status()
-    # コンテンツ描画
     main_router()
