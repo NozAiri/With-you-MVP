@@ -358,16 +358,82 @@ def text_card(title: str, subtext: str, key: str, height=120, placeholder="こ�
     st.markdown("</div>", unsafe_allow_html=True)
     return val
 
+# ===== 行動活性化：中高生向けの小さな行動ライブラリ =====
+# 研究で推奨される「落ち着かせる/少し楽しい/つながる/書く」の4タイプをミニマムに統合
+ACTION_LIB_BASE = [
+    "深呼吸をしてみる",                # 落ち着かせる
+    "顔や手を洗う",                    # 感覚リセット
+    "外を少し歩く・空を見上げる",      # 軽い活動
+    "好きな音楽を1曲だけ聴く",        # 少し楽しい
+    "温かい飲み物を飲む",              # 身体×安心
+    "軽く体を伸ばす",                  # ストレッチ
+    "家族や友達に一言だけ話す",        # つながる
+    "スタンプや一言メッセージを送る",  # 手軽な接触
+    "今の気持ちを一言メモする",        # 書く
+    "今日できたことを1つ思い出す",    # 達成感の想起
+]
+
+# 気分別の“相性が良い”候補（行動活性化の適合原則）
+ACTION_BY_MOOD = {
+    # 落ち込み：活動量↑と小さな達成感
+    "sad": ["外を少し歩く・空を見上げる", "今日できたことを1つ思い出す", "軽く体を伸ばす"],
+    # 不安：呼吸・感覚の安定＋安全行動の縮小
+    "anxious": ["深呼吸をしてみる", "温かい飲み物を飲む", "今の気持ちを一言メモする"],
+    # イライラ：身体の放電＋注意の切替
+    "angry": ["軽く体を伸ばす", "顔や手を洗う", "好きな音楽を1曲だけ聴く"],
+    # だるい・疲れ：低コスト行動→次の一歩
+    "tired": ["温かい飲み物を飲む", "外を少し歩く・空を見上げる", "今日できたことを1つ思い出す"],
+    # さみしい：社会的接触の再起動
+    "lonely": ["家族や友達に一言だけ話す", "スタンプや一言メッセージを送る", "好きな音楽を1曲だけ聴く"],
+    # 迷った時のデフォルト
+    "default": ["深呼吸をしてみる", "今の気持ちを一言メモする", "温かい飲み物を飲む"],
+}
+
 def action_picker(mood_key: str):
+    import random
     st.markdown('<div class="cbt-card">', unsafe_allow_html=True)
-    st.markdown('<div class="cbt-heading">🌸 Step 6：今、気持ちが少し落ち着くためにできそうなことは？</div>', unsafe_allow_html=True)
-    st.markdown('<div class="cbt-sub">自分に合いそうな“小さな行動”をひとつ選んでみよう。</div>', unsafe_allow_html=True)
-    suggestions = ACTION_LIB.get(mood_key or "", [])
-    # ▼選べない問題対策：キーの重複を避け、selectboxは1つだけにする
-    suggested = st.selectbox("おすすめから選ぶ（任意）", ["— 選ばない —"] + suggestions, index=0, key="cbt_action_pick")
-    custom = st.text_input("自由入力（任意）", key="cbt_action_custom", placeholder="例：外に出て空を見上げる")
+    st.markdown(
+        '<div class="cbt-heading">🌸 Step 6：今、気持ちが少し落ち着くためにできそうなことは？</div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        '<div class="cbt-sub">自分に合いそうな「小さな行動」をひとつ選んでみよう。（任意）</div>',
+        unsafe_allow_html=True,
+    )
+
+    # 気分に合う候補＋ベースを統合し、重複除去
+    mood_key = (mood_key or "").strip().lower()
+    mood_list = ACTION_BY_MOOD.get(mood_key, ACTION_BY_MOOD["default"])
+    pool = list(dict.fromkeys(mood_list + ACTION_LIB_BASE))  # 順序保持でユニーク化
+
+    # 3件だけおすすめ表示（選びやすさ優先）／poolが少なければその分だけ
+    k = min(3, len(pool))
+    recommended = random.sample(pool, k) if k > 0 else []
+
+    # セレクトボックス（キーはmood別で一意に）
+    select_key = f"act_pick_{mood_key or 'default'}"
+    selected = st.selectbox(
+        "おすすめから選ぶ",
+        ["— 選ばない —"] + recommended,
+        index=0,
+        key=select_key,
+    )
+
+    # 自由入力（例示は“現実的で小さい行動”）
+    custom_key = f"act_custom_{mood_key or 'default'}"
+    custom = st.text_input(
+        "自由入力",
+        key=custom_key,
+        placeholder="例：外を少し歩く・空を見上げる",
+    )
+
     st.markdown("</div>", unsafe_allow_html=True)
-    return ("" if suggested == "— 選ばない —" else suggested), custom
+
+    # 返り値：選択＞自由入力（空白は除去）
+    chosen = "" if selected == "— 選ばない —" else selected
+    custom = (custom or "").strip()
+    return chosen, custom
+
 
 def recap_card(doc: dict):
     st.markdown('<div class="cbt-card">', unsafe_allow_html=True)
