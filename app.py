@@ -1,13 +1,14 @@
 # app.py — With You.（入室コード一意・Cookieで同一端末認識・運営固定コード）
 # 方針：
 #  - 入室コード=合言葉（ユーザー自由設定）を Firestore で一意に管理
-#  - そのコードの「所有端末ID（デバイスID）」を初回にひもづけ、同じ端末なら再入室OK
-#  - 別端末が同じコードを使おうとしたら「使用中」で弾く（他人のデータにアクセス不可）
+#  - 所有端末ID（Cookieの device_id）と結びつけ、同じ端末なら再入室OK
+#  - 別端末が同じコードを使おうとしたら「使用中」で弾く（他人アクセス防止）
 #  - 運営は固定コード（ADMIN_MASTER_CODE=uneiairi0931）のみ
+#  - Cookie未準備時は登録を作らず案内（誤ロック防止）
 
 from __future__ import annotations
 from datetime import datetime, timedelta, timezone
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 import pandas as pd
 import streamlit as st
 import json, time, re, uuid, os
@@ -15,11 +16,10 @@ import altair as alt
 
 # ================== 基本設定 ==================
 st.set_page_config(page_title="With You.", page_icon="🌙", layout="centered", initial_sidebar_state="collapsed")
-
 ADMIN_MASTER_CODE = "uneiairi0931"   # 運営はこれだけ
-FIRESTORE_ENABLED = True
 
-# -------- Firestore ----------
+# ================== Firestore ==================
+FIRESTORE_ENABLED = True
 try:
     from google.cloud import firestore
     import google.oauth2.service_account as service_account
@@ -45,21 +45,20 @@ def safe_db_add(collection: str, payload: dict) -> bool:
     except Exception:
         return False
 
-# -------- Cookie（端末ID） ----------
-# あればCookieで端末を特定。なければセッション内UUIDで代替。
+# ================== Cookie（端末ID） ==================
 COOKIES_OK = False
+COOKIE_PASSWORD = st.secrets.get("COOKIE_PASSWORD", os.environ.get("COOKIES_PW", "withyou-cookie-v1"))
+
 try:
     from streamlit_cookies_manager import EncryptedCookieManager
-    cookies = EncryptedCookieManager(prefix="withyou_", password=os.environ.get("COOKIES_PW","default_pw"))
-    if not cookies.ready():
-        st.stop()
-    COOKIES_OK = True
+    cookies = EncryptedCookieManager(prefix="withyou_", password=COOKIE_PASSWORD)
+    COOKIES_OK = cookies.ready()
 except Exception:
     COOKIES_OK = False
     cookies = None
 
-def get_device_id() -> str:
-    # 端末ごとの安定ID
+def get_device_id() -> Optional[str]:
+    """Cookieがあれば安定ID。なければ None（= 登録側でロックを作らない）"""
     if COOKIES_OK:
         did = cookies.get("device_id")
         if not did:
@@ -67,11 +66,9 @@ def get_device_id() -> str:
             cookies.set("device_id", did, expires_at=datetime.now()+timedelta(days=365*5))
             cookies.save()
         return did
-    # フォールバック（ブラウザ再読み込みで変わる可能性あり）
-    st.session_state.setdefault("_device_id", uuid.uuid4().hex)
-    return st.session_state["_device_id"]
+    return None
 
-# -------- UI/CSS ----------
+# ================== スタイル ==================
 def inject_css():
     st.markdown("""
 <style>
@@ -143,57 +140,46 @@ st.session_state.setdefault("role", None)       # "admin" / "user"
 st.session_state.setdefault("user_id", "")      # 表示名（ニックネーム）
 st.session_state.setdefault("code", "")         # 入室コード
 st.session_state.setdefault("view", "HOME")
-
-# 端末保存ログ（このセッション内）
 st.session_state.setdefault("_local_logs", {"note":[], "breath":[], "study":[]})
 
-# ================== 入室コード登録/検証（重要） ==================
-# Firestore: coll "room_codes" に document_id=code を作る
-# doc: { owner_device_id, nickname, role, created_at }
+# ================== 入室コード登録/検証 ==================
 def codes_coll():
     if not FIRESTORE_ENABLED or DB is None:
         return None
     return DB.collection("room_codes")
 
-def try_enter_with_code(code: str, nickname: str) -> (bool, str, str):
+def try_enter_with_code(code: str, nickname: str) -> Tuple[bool, str, str]:
     """
-    入室コードで入る。成功なら (True, role, display_name) を返す。
-    失敗なら (False, "", エラー理由)。
-    ルール：
-      - ADMIN_MASTER_CODE は常に運営（端末ID制約なし）
-      - それ以外のコードは、未登録なら「この端末ID」をオーナーとして新規作成
-                              既登録なら「所有端末IDと一致する場合のみ」入室可
+    成功時: (True, role, display_name)
+    失敗時: (False, "", error_message)
+    ルール:
+      - ADMIN_MASTER_CODE は常に運営（端末制約なし）
+      - それ以外は、未登録なら Cookie がある時のみ owner_device_id でロックを作成
+                    既登録なら owner_device_id と一致する端末だけ入室可
     """
-    code = code.strip()
+    code = (code or "").strip()
     if not code:
         return False, "", "コードを入力してください。"
 
-    # 運営コードは特別扱い（衝突なし）
+    # 運営コード：端末拘束なし
     if code == ADMIN_MASTER_CODE:
-        st.session_state["_owner_device_id"] = get_device_id()
         return True, "admin", nickname or "admin"
 
+    # Firestore無効時は一時利用のみ（ロック作成しない）
     if not FIRESTORE_ENABLED or DB is None:
-        # オフライン時：暫定でこの端末のみ有効（他端末は弾けない）
-        owner = st.session_state.get("_owner_device_id")
-        if not owner:
-            st.session_state["_owner_device_id"] = get_device_id()
-            st.session_state["code"] = code
-            return True, "user", nickname or code
-        else:
-            # 同一セッションならOK
-            if owner == get_device_id():
-                st.session_state["code"] = code
-                return True, "user", nickname or code
-            return False, "", "このコードは使用中です。（オフラインのため端末制限のみ）"
+        st.session_state["code"] = code
+        return True, "user", nickname or code
 
     coll = codes_coll()
     doc_ref = coll.document(code)
     snap = doc_ref.get()
-    cur_did = get_device_id()
 
+    cur_did = get_device_id()  # None の可能性あり
+
+    # 新規登録
     if not snap.exists:
-        # 新規作成（この端末が所有者）
+        if cur_did is None:
+            return False, "", "この端末の識別が無効です（Cookie未設定）。ブラウザのCookieを有効にして再読み込みしてください。"
         payload = {
             "owner_device_id": cur_did,
             "nickname": nickname or "",
@@ -206,12 +192,14 @@ def try_enter_with_code(code: str, nickname: str) -> (bool, str, str):
             return False, "", "登録に失敗しました。時間をおいて試してください。"
         return True, "user", nickname or code
 
-    # 既存
+    # 既存ロックあり
     data = snap.to_dict() or {}
     owner = data.get("owner_device_id", "")
     role = data.get("role", "user")
 
-    # 所有端末と一致すれば入室OK、違えば弾く
+    if cur_did is None:
+        return False, "", "この入室コードは使用中です。Cookieが無効だと再入室できません。"
+
     if owner == cur_did:
         # ニックネーム更新（任意）
         try:
@@ -221,10 +209,9 @@ def try_enter_with_code(code: str, nickname: str) -> (bool, str, str):
             pass
         return True, role, nickname or data.get("nickname") or code
 
-    # 異なる端末 → 使用中で弾く
     return False, "", "この入室コードは、すでに別の端末で使用中です。別の合言葉にしてください。"
 
-# ================== ナビ/トップUI ==================
+# ================== ナビ/ステータス ==================
 BASE_SECTIONS = [
     ("HOME",   "🏠 ホーム"),
     ("SHARE",  "🏫 今日を伝える"),
@@ -245,7 +232,7 @@ def navigate(to_key: str):
     st.session_state.view = to_key
 
 def top_tabs():
-    if st.session_state.view == "HOME":  # HOMEでは非表示
+    if st.session_state.view == "HOME":
         return
     active = st.session_state.view
     sections = _sections_for_role()
@@ -262,9 +249,10 @@ def top_tabs():
 
 def top_status():
     role_txt = '運営' if st.session_state.role=='admin' else (f'利用者（{st.session_state.user_id}）' if st.session_state.user_id else '未ログイン')
-    fs_txt = "接続済み" if FIRESTORE_ENABLED else "未接続（オフライン送信）"
+    fs_txt = "接続済み" if FIRESTORE_ENABLED else "未接続（オフライン）"
+    cookie_txt = "ON" if COOKIES_OK else "OFF"
     st.markdown('<div class="card" style="padding:8px 12px; margin-bottom:10px">', unsafe_allow_html=True)
-    st.markdown(f"<div class='tip'>ログイン中：{role_txt} / データ共有：{fs_txt}</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='tip'>ログイン中：{role_txt} / データ共有：{fs_txt} / 端末識別（Cookie）：{cookie_txt}</div>", unsafe_allow_html=True)
     st.markdown("</div>", unsafe_allow_html=True)
 
 # ================== HOME/機能UI ==================
@@ -396,9 +384,7 @@ def text_card(title: str, subtext: str, key: str, height=120, placeholder="こ�
     st.markdown("</div>", unsafe_allow_html=True)
     return val
 
-ACTION_CATEGORIES_EMOJI = {
-    "身体": "🫧","環境": "🌤","リズム": "⏯️","つながり": "💬",
-}
+ACTION_CATEGORIES_EMOJI = { "身体": "🫧","環境": "🌤","リズム": "⏯️","つながり": "💬" }
 ACTION_CATEGORIES = {
     "身体": ["顔や手を洗う","深呼吸をする","肩を回す","シャワーを浴びる"],
     "環境": ["窓を開けて外の空気を感じる","カーテンを開けて部屋を明るくする","空をながめる"],
@@ -518,6 +504,7 @@ CONSULT_TOPICS = ["体調","勉強","人間関係","家庭","進路","いじめ"
 def view_consult():
     st.markdown("### 🕊 相談（匿名OK）")
     st.caption("誰にも言いにくいことでも大丈夫。お名前は空欄のまま送れます。")
+
     to_whom = st.radio("相談先", ["カウンセラーに相談したい","先生に伝えたい"], horizontal=True, key="c_to")
     topics  = st.multiselect("内容（当てはまるもの）", CONSULT_TOPICS, default=[], key="c_topics")
     anonymous = st.checkbox("匿名で送る", value=True, key="c_anon")
@@ -542,7 +529,7 @@ def view_consult():
         ok = safe_db_add("consult_msgs", payload)
         if ok:
             st.success("送信しました。ありがとうございます。")
-            # 入力欄のリセット（Streamlitの制約回避：キーを変えず値のみ消す）
+            # 値だけリセットして再描画（キーはそのまま）
             st.session_state["c_msg"] = ""
             st.session_state["c_topics"] = []
             st.session_state["c_anon"] = True
@@ -751,7 +738,7 @@ def view_admin():
     with st.expander("🔎 追加フィルタ", expanded=False):
         if coll == "school_share":
             f_mood = st.multiselect("気分", sorted(df["mood"].dropna().unique().tolist()) if not df.empty else [], key="f_mood")
-            f_body = st.text_input("体調テキストを含む（例：頭痛）", key="f_body")
+            f_body = st.text_input("体調テキスト（例：頭痛）", key="f_body")
             f_uid  = st.text_input("ユーザーID（部分一致）", key="f_uid")
             if f_mood and not df.empty: df = df[df["mood"].isin(f_mood)]
             if f_body and not df.empty: df = df[df["body"].fillna("").str.contains(f_body)]
@@ -831,14 +818,14 @@ def login_ui() -> bool:
     if st.session_state._auth_ok: return True
     with st.container():
         st.markdown('<div class="card">', unsafe_allow_html=True)
-        # ぱっと見で即入力
         st.markdown("### 🌙 With You")
         st.caption("気持ちを整える、やさしいノート。")
-
         code = st.text_input("🔑 入室コード（合言葉）", key="login_code", placeholder="例）sora1125")
         nick = st.text_input("🪞 ニックネーム（任意）", key="login_nick", placeholder="例）あいり")
 
-        # ボタンひとつ
+        if not COOKIES_OK:
+            st.caption("※ 自動再入室（同一端末判定）がOFFの可能性があります。Cookieを有効にして再読み込みしてください。")
+
         if st.button("➡️ はじめる", type="primary", use_container_width=True, key="login_go"):
             ok, role, msg = try_enter_with_code(code, nick)
             if ok:
@@ -851,8 +838,6 @@ def login_ui() -> bool:
                 st.rerun()
             else:
                 st.error(msg)
-
-        st.markdown("<div style='font-size:12px; color:#6a7d9e; margin-top:.6rem'>🔒 「今日を伝える」と「相談」だけが運営に届きます。</div>", unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
     return False
 
@@ -860,16 +845,13 @@ def logout_btn():
     with st.sidebar:
         if st.button("🚪 ログアウト", key="logout_btn"):
             st.session_state.clear()
-            if COOKIES_OK:
-                # 端末IDは保持（再入室のため）。必要なら消す処理も可能。
-                pass
+            # device_id Cookieは残す（再入室のため）
             st.rerun()
 
 # ================== App起動 ==================
 if login_ui():
     pass
 else:
-    # ログイン済みなら以下を描画
     if st.session_state.get("_auth_ok", False):
         logout_btn()
         top_tabs()
