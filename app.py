@@ -1,23 +1,147 @@
-# app.py — Sora / With You.（運営ダッシュボード付き・一発コード認証）
+# app.py — Sora / With You.（アクセスコード占有 + 復帰用PIN / 運営ダッシュボード付き）
 # 保存方針：
-#  - Firestore保存＝「今日を伝える」「相談」だけ（運営が把握）
-#  - それ以外（ノート／リラックス／Study／レビュー）は端末のみ（DL＋このセッション内の履歴）
+# - Firestore保存＝「今日を伝える」「相談」だけ（運営が把握）
+# - それ以外（ノート／リラックス／Study／レビュー）は端末のみ（DL＋このセッション内の履歴）
+# - アクセスコード：初回使用時に占有（同一端末のみ再入室可／別端末は復帰用PINで再紐付け）
+# - 運営コード： 'uneiairi0931' のみ管理者ログイン（現状は端末固定なし）
 
 from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any, Optional
 import pandas as pd
 import streamlit as st
-import json, time, re
-import altair as alt
-
-# --- 万一どこかで help()/st.help(...) が残っていても出力されない応急処置（原因特定後に削除可） ---
-import builtins
-builtins.help = lambda *args, **kwargs: None
-# -----------------------------------------------------------------------------------------------
+import json, time, re, altair as alt
+import hashlib, uuid
 
 # ========= Page config =========
 st.set_page_config(page_title="With You.", page_icon="🌙", layout="centered", initial_sidebar_state="collapsed")
+
+# ========= Optional: Cookies（端末識別） =========
+try:
+    from streamlit_cookies_manager import EncryptedCookieManager
+    COOKIES_AVAILABLE = True
+except Exception:
+    COOKIES_AVAILABLE = False
+
+def get_device_id() -> str:
+    """
+    端末を識別するID。cookies-manager があれば暗号化Cookie、なければ session_state に保存。
+    """
+    if COOKIES_AVAILABLE:
+        cookies = EncryptedCookieManager(prefix="withyou.")
+        if not cookies.ready():
+            st.stop()  # Cookie準備を待つ（自動で再実行）
+        if "device_id" not in cookies:
+            cookies["device_id"] = str(uuid.uuid4())
+            cookies.save()
+        return cookies.get("device_id")
+    st.session_state.setdefault("_device_id", str(uuid.uuid4()))
+    return st.session_state["_device_id"]
+
+# ========= Firestore（今日を伝える／相談のみ） =========
+FIRESTORE_ENABLED = True
+try:
+    from google.cloud import firestore
+    import google.oauth2.service_account as service_account
+
+    @st.cache_resource(show_spinner=False)
+    def firestore_client():
+        creds = service_account.Credentials.from_service_account_info(st.secrets["FIREBASE_SERVICE_ACCOUNT"])
+        return firestore.Client(
+            project=st.secrets["FIREBASE_SERVICE_ACCOUNT"]["project_id"],
+            credentials=creds
+        )
+    DB = firestore_client()
+except Exception:
+    FIRESTORE_ENABLED = False
+    DB = None
+
+def safe_db_add(collection: str, payload: dict) -> bool:
+    if not FIRESTORE_ENABLED or DB is None:
+        return False
+    try:
+        DB.collection(collection).add(payload)
+        return True
+    except Exception:
+        return False
+
+# ========= Access Code 占有（Firestore） =========
+def _code_hash(code: str) -> str:
+    return hashlib.sha256(code.strip().encode("utf-8")).hexdigest()
+
+def _new_user_uid() -> str:
+    return "u_" + uuid.uuid4().hex[:12]
+
+def codes_coll():
+    return DB.collection("access_codes") if FIRESTORE_ENABLED and DB else None
+
+def admin_pass() -> str:
+    # ★ 運営パスワード（あなた専用）
+    return "uneiairi0931"
+
+def claim_or_login_with_code(code: str, nick: str, device_id: str, recovery_pin: str = "") -> Dict[str, str]:
+    """
+    返り値: {"role": "admin"|"user", "user_id": "...", "nick": "..."}
+    仕様:
+      - adminコードなら即 admin で入室（占有不要）
+      - ユーザーコード:
+         * 未登録 → {owner_device, user_uid, nick, recovery_pin} を作成 → 入室
+         * 既登録 → owner_device と一致 → 入室（同一端末）
+                  → 不一致 → recovery_pin が合えば端末再紐付け → 入室
+                  → どれでもない → 入室拒否（「使用中」）
+    """
+    code = code.strip()
+    if code == "":
+        raise ValueError("アクセスコードを入力してください。")
+
+    # Admin: 専用コードのみ
+    if code == admin_pass():
+        return {"role": "admin", "user_id": "_admin_", "nick": "admin"}
+
+    c = codes_coll()
+    if not c:
+        # オフライン時は衝突検知できないので、端末内のみの一時UID
+        uid = st.session_state.get("_fallback_uid")
+        if not uid:
+            uid = _new_user_uid()
+            st.session_state["_fallback_uid"] = uid
+        return {"role": "user", "user_id": uid, "nick": nick or "user"}
+
+    doc_id = _code_hash(code)
+    doc_ref = c.document(doc_id)
+    snap = doc_ref.get()
+    now = datetime.now(timezone.utc)
+
+    if not snap.exists:
+        # 初回占有
+        uid = _new_user_uid()
+        doc_ref.set({
+            "user_uid": uid,
+            "owner_device": device_id,
+            "nick": nick or "user",
+            "recovery_pin": (recovery_pin or "").strip(),
+            "created_at": now,
+            "last_seen": now,
+            "revoked": False,
+        })
+        return {"role": "user", "user_id": uid, "nick": nick or "user"}
+
+    data = snap.to_dict() or {}
+    if data.get("revoked"):
+        raise PermissionError("このコードは無効化されています。別のコードをお使いください。")
+
+    if data.get("owner_device") == device_id:
+        # 同一端末
+        doc_ref.update({"last_seen": now, "nick": nick or data.get("nick","user")})
+        return {"role": "user", "user_id": data.get("user_uid","user"), "nick": data.get("nick","user")}
+
+    # 端末が違う → 復帰用PINの一致で再紐付け
+    saved_pin = (data.get("recovery_pin") or "").strip()
+    if saved_pin and recovery_pin.strip() and (saved_pin == recovery_pin.strip()):
+        doc_ref.update({"owner_device": device_id, "last_seen": now, "nick": nick or data.get("nick","user")})
+        return {"role": "user", "user_id": data.get("user_uid","user"), "nick": data.get("nick","user")}
+
+    raise PermissionError("このアクセスコードはすでに使用中です。別のコードにするか、復帰用PINで再紐付けしてください。")
 
 # ========= Fonts / Styles =========
 def inject_css():
@@ -87,33 +211,6 @@ html, body, .stApp{
 
 inject_css()
 
-# ========= Firestore（今日を伝える／相談のみ） =========
-FIRESTORE_ENABLED = True
-try:
-    from google.cloud import firestore
-    import google.oauth2.service_account as service_account
-
-    @st.cache_resource(show_spinner=False)
-    def firestore_client():
-        creds = service_account.Credentials.from_service_account_info(st.secrets["FIREBASE_SERVICE_ACCOUNT"])
-        return firestore.Client(
-            project=st.secrets["FIREBASE_SERVICE_ACCOUNT"]["project_id"],
-            credentials=creds
-        )
-    DB = firestore_client()
-except Exception:
-    FIRESTORE_ENABLED = False
-    DB = None
-
-def safe_db_add(collection: str, payload: dict) -> bool:
-    if not FIRESTORE_ENABLED or DB is None:
-        return False
-    try:
-        DB.collection(collection).add(payload)
-        return True
-    except Exception:
-        return False
-
 # ========= Local（端末＝このセッションに保存する辞書） =========
 def init_local_logs():
     st.session_state.setdefault("_local_logs", {"note":[], "breath":[], "study":[]})
@@ -124,16 +221,12 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
 
 st.session_state.setdefault("_auth_ok", False)
-st.session_state.setdefault("role", None)          # "admin" / "user" / None
+st.session_state.setdefault("role", None)
 st.session_state.setdefault("user_id", "")
 st.session_state.setdefault("view", "HOME")
 st.session_state.setdefault("_nav_stack", [])
 st.session_state.setdefault("_breath_running", False)
 st.session_state.setdefault("_breath_stop", False)
-
-# ★ 固定管理パスワード（運営コード）
-def admin_pass() -> str:
-    return "uneiairi0931"
 
 CRISIS_PATTERNS = [r"死にたい", r"消えたい", r"自殺", r"希死", r"傷つけ(たい|てしまう)", r"リスカ", r"\bOD\b", r"助けて"]
 def crisis(text: str) -> bool:
@@ -184,7 +277,7 @@ def top_tabs():
     st.markdown("</div>", unsafe_allow_html=True)
 
 def top_status():
-    role_txt = '運営' if st.session_state.role=='admin' else (f'利用者（{st.session_state.user_id}）' if st.session_state.user_id else '利用者')
+    role_txt = '運営' if st.session_state.role=='admin' else (f'利用者（{st.session_state.user_id}）' if st.session_state.user_id else '未ログイン')
     fs_txt = "接続済み" if FIRESTORE_ENABLED else "未接続（オフライン送信）"
     st.markdown('<div class="card" style="padding:8px 12px; margin-bottom:10px">', unsafe_allow_html=True)
     st.markdown(f"<div class='tip'>ログイン中：{role_txt} / データ共有：{fs_txt}</div>", unsafe_allow_html=True)
@@ -298,7 +391,7 @@ def view_session():
                            mime="application/json", key=f"breath_dl_{len(st.session_state['_local_logs']['breath'])}")
         st.success("保存しました。（運営には共有されません）")
 
-# ========= ノート =========
+# ========= ノート（CBT） =========
 MOODS = [
     {"emoji":"😢","label":"悲しい","key":"sad"},
     {"emoji":"😠","label":"イライラ","key":"anger"},
@@ -482,42 +575,30 @@ def view_share():
             "payload": {"mood":mood, "body":body, "sleep_hours":float(sh), "sleep_quality":sq},
             "anonymous": True
         })
-        if ok:
-            st.success("送信しました。ありがとうございます。")
-        else:
-            st.error("送信できませんでした（接続が無効です）。")
+        st.success("送信しました。ありがとうございます。") if ok else st.error("送信できませんでした（接続が無効です）。")
 
-# ========= 相談（Firestoreに保存） =========
+# ========= 相談（Firestoreに保存｜フォームで安全クリア） =========
 CONSULT_TOPICS = ["体調","勉強","人間関係","家庭","進路","いじめ","メンタルの不調","その他"]
 
 def view_consult():
     st.markdown("### 🕊 相談")
     st.caption("お気軽に。秘密は守ります。お名前は任意です。")
 
-    # 入力フォーム（送信後に自動で入力欄をクリア）
     with st.form("consult_form", clear_on_submit=True):
-        to_whom = st.radio(
-            "相談先を選んでください",
-            ["カウンセラーに相談したい", "先生に伝えたい"],
-            horizontal=True, key="c_to"
-        )
+        to_whom = st.radio("相談先を選んでください", ["カウンセラーに相談したい", "先生に伝えたい"], horizontal=True, key="c_to")
         topics  = st.multiselect("内容（当てはまるもの）", CONSULT_TOPICS, default=[], key="c_topics")
 
-        # 匿名 ON/OFF（名前欄は消さずに disabled 切替にする＝キー衝突を防ぐ）
         anonymous = st.checkbox("匿名で送る", value=True, key="c_anon")
         name = st.text_input("お名前（任意）", key="c_name", disabled=anonymous)
 
         msg = st.text_area("ご相談したい／伝えたい内容について教えてください。", height=220, key="c_msg")
 
-        # 危機ワード検知の注意（リアルタイムで見せたいのでフォーム内で表示）
         if crisis(msg):
             st.warning("とても苦しいお気持ちが伝わってきます。必要に応じて、お住まいの地域の相談窓口や専門機関もご検討ください。")
 
-        # Firestore未接続や本文空白のときは送信ボタンを無効化
         disabled = (not FIRESTORE_ENABLED) or (msg.strip() == "")
         submit = st.form_submit_button("🕊 送信する", disabled=disabled)
 
-    # フォーム外で処理（フォームは送信後クリアされるので session_state を触らなくて良い）
     if submit:
         payload = {
             "ts": datetime.now(timezone.utc),
@@ -529,12 +610,7 @@ def view_consult():
             "name": "" if anonymous else (name.strip() if name else ""),
         }
         ok = safe_db_add("consult_msgs", payload)
-        if ok:
-            st.success("送信しました。ありがとうございます。")
-            # 明示的な session_state の上書きや del/pop は不要（clear_on_submit=True でクリア済み）
-        else:
-            st.error("送信できませんでした（接続が無効です）。")
-
+        st.success("送信しました。ありがとうございます。") if ok else st.error("送信できませんでした（接続が無効です）。")
 
 # ========= Study（端末のみ保存） =========
 def view_study():
@@ -628,6 +704,9 @@ def view_review():
 
 # ========= 運営：Firestore 取得ヘルパ =========
 def _fetch_firestore_df(coll: str, start_dt: Optional[datetime], end_dt: Optional[datetime], limit: int) -> pd.DataFrame:
+    """
+    Firestoreから coll（'school_share' or 'consult_msgs'）を取得し、表示用にフラット化してDataFrameで返す。
+    """
     if not FIRESTORE_ENABLED or DB is None:
         return pd.DataFrame()
 
@@ -759,8 +838,8 @@ def view_admin():
     now_utc = datetime.now(timezone.utc)
     start_dt = None if days == "すべて" else now_utc - timedelta(days=int(days.replace("直近","").replace("日","")))
     end_dt = None
-
     coll = "school_share" if dataset.startswith("今日を伝える") else "consult_msgs"
+
     df = _fetch_firestore_df(coll, start_dt, end_dt, limit)
 
     with st.expander("🔎 追加フィルタ", expanded=False):
@@ -823,18 +902,17 @@ def view_admin():
             n_show = 1
             st.caption("表示件数（最新から）：1")
         else:
-            n_show = st.slider("表示件数（最新から）", 1, int(max_n), int(default_n), key="adm_nshow")
+            n_show = st.slider("表示件数（最新から）", min_value=1, max_value=int(max_n), value=int(default_n), key="adm_nshow")
 
         count = 0
         for gdate, gdf in groups:
-            if count >= n_show: break
+            if count >= n_show:
+                break
             st.markdown(f"##### 📅 {gdate}")
             for _, row in gdf.sort_values("ts", ascending=False).iterrows():
                 if count >= n_show: break
-                if coll == "school_share":
-                    _render_share_card(row)
-                else:
-                    _render_consult_card(row)
+                if coll == "school_share": _render_share_card(row)
+                else: _render_consult_card(row)
                 count += 1
 
 # ========= Router =========
@@ -850,31 +928,52 @@ def main_router():
     elif v == "ADMIN" and st.session_state.role == "admin": view_admin()
     else: view_home()
 
-# ========= Auth（1画面コード入力。admin=uneiairi0931のみ） =========
+# ========= Auth（アクセスコード1本化） =========
 def auth_ui() -> bool:
-    if st.session_state._auth_ok: return True
+    if st.session_state._auth_ok:
+        return True
+
+    device_id = get_device_id()
+
     with st.container():
         st.markdown('<div class="card">', unsafe_allow_html=True)
-        st.markdown("### 🔐 入室コードを入力")
-        code = st.text_input("アクセスコード（※運営は専用コード）", type="password", key="auth_code")
-        nick = st.text_input("ニックネーム（利用者のみ・任意）", value="", key="auth_nick")
-        if st.button("➡️ 入る", type="primary", key="auth_enter"):
-            if code.strip() == "":
-                st.warning("アクセスコードをご入力ください。")
-            elif code.strip() == admin_pass():
-                st.session_state.user_id = "_admin_"
-                st.session_state.role = "admin"
+        st.markdown("### 🔐 入室コード")
+        with st.form("auth_form", clear_on_submit=False):
+            code = st.text_input("アクセスコード（あなた専用の合言葉）", type="password", key="auth_code")
+            nick = st.text_input("ニックネーム（利用者のみ・任意）", value=st.session_state.get("auth_nick",""), key="auth_nick")
+            col1, col2 = st.columns([1,1])
+            with col1:
+                set_pin = st.text_input("復帰用PIN（任意｜新規登録時に保存）", type="password", key="auth_setpin")
+            with col2:
+                use_pin = st.text_input("復帰用PIN（別端末で再入室時に入力）", type="password", key="auth_usepin")
+            ok = st.form_submit_button("➡️ 入る", type="primary")
+
+        if ok:
+            try:
+                res = claim_or_login_with_code(code, nick, device_id, recovery_pin=(use_pin or set_pin))
+                st.session_state.user_id = res["user_id"]
+                st.session_state.role = res["role"]
                 st.session_state._auth_ok = True
-                st.success("運営ログインが完了しました。")
-                st.session_state.view = "ADMIN"
+                if res["role"] == "admin":
+                    st.success("運営ログインが完了しました。")
+                    st.session_state.view = "ADMIN"
+                else:
+                    st.success("ようこそ。")
+                    st.session_state.view = "HOME"
                 return True
-            else:
-                st.session_state.user_id = (nick.strip() or "user")
-                st.session_state.role = "user"
-                st.session_state._auth_ok = True
-                st.success("ようこそ。")
-                st.session_state.view = "HOME"
-                return True
+            except ValueError as e:
+                st.warning(str(e))
+            except PermissionError as e:
+                st.error(str(e))
+            except Exception:
+                st.error("ログインに失敗しました。通信状況や入力内容をご確認ください。")
+
+        st.markdown("""
+<div class="tip" style="margin-top:.5rem">
+・初めてのコードは「あなた専用」に登録されます（他の人は使えません）<br>
+・別の端末から入るときは、同じコードに加えて<span style="font-weight:800">復帰用PIN</span>を入力すると再紐付けできます
+</div>
+""", unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
     return False
 
