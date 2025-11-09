@@ -11,6 +11,11 @@ import streamlit as st
 import json, time, re
 import altair as alt
 
+# --- 万一どこかで help()/st.help(...) が残っていても出力されない応急処置（原因特定後に削除可） ---
+import builtins
+builtins.help = lambda *args, **kwargs: None
+# -----------------------------------------------------------------------------------------------
+
 # ========= Page config =========
 st.set_page_config(page_title="With You.", page_icon="🌙", layout="centered", initial_sidebar_state="collapsed")
 
@@ -73,7 +78,7 @@ html, body, .stApp{
 .cbt-sub{ color:#63728a; font-size:0.92rem; margin:-2px 0 10px 0;}
 .ok-chip{ display:inline-block; padding:2px 8px; border-radius:999px; background:#e8fff3; color:#156f3a; font-size:12px; border:1px solid #b9f3cf; }
 
-/* ------- 呼吸アニメ keyframes（足りていないと無音になりがちなので定義） ------- */
+/* ------- 呼吸アニメ keyframes ------- */
 @keyframes sora-grow   { from{transform:scale(0.85)} to{transform:scale(1.0)} }
 @keyframes sora-steady { from{transform:scale(1.0)}  to{transform:scale(1.0)} }
 @keyframes sora-shrink { from{transform:scale(1.0)}  to{transform:scale(0.85)} }
@@ -448,7 +453,7 @@ def view_share():
     mood = st.radio("気分", ["🙂", "😐", "😟"], index=1, horizontal=True, key="share_mood")
     body_opts = ["頭痛","腹痛","吐き気","食欲低下","だるさ","その他","なし"]
     body = st.multiselect("体調（当てはまるもの）", body_opts, default=["なし"], key="share_body")
-    if "その他なし" in body and len(body) > 1:
+    if "なし" in body and len(body) > 1:
         body = [b for b in body if b != "なし"]
 
     c1, c2 = st.columns(2)
@@ -707,7 +712,6 @@ def _render_share_card(row: pd.Series):
 """, unsafe_allow_html=True)
 
 def _render_consult_card(row: pd.Series):
-    # 危険語の軽いハイライト（任意）
     msg = str(row.get("message",""))
     for kw in ["死にたい","自殺","消えたい","助けて"]:
         if kw in msg:
@@ -801,7 +805,7 @@ def view_admin():
     # ダウンロード
     _download_buttons(df, basename=f"{coll}_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
 
-        # 一覧
+    # 一覧
     st.markdown("#### 📋 一覧")
     if view_mode == "テーブル表示":
         show_cols = [c for c in df.columns if c not in ["_doc", "_date"]]
