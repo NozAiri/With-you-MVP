@@ -1,4 +1,4 @@
-# app.py — Sora / With You.（HOME復活：説明つきボタンのみ／重複キー対策／ノート改訂）
+# app.py — Sora / With You.（HOME=下ボタンのみ／タイトル+小見出し／CBT説明カード）
 from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import List
@@ -72,11 +72,17 @@ html, body, .stApp{
   border:1px solid #dfe6ff;
   box-shadow:var(--shadow);
   padding:18px 18px 16px;
-  font-weight:700;
   white-space:pre-wrap;           /* 改行を生かす */
   line-height:1.35;
   transition: transform .08s ease, box-shadow .08s ease;
   background: linear-gradient(135deg,#ffffff 0%,#eef5ff 100%);
+  color:#12294a;
+  font-weight:500;                /* デフォはやや細く */
+}
+/* 一行目＝タイトルを強調（タイトル＋小見出しの2段表示） */
+.bigbtn .stButton>button::first-line{
+  font-weight:900;
+  font-size:1.05rem;
   color:#12294a;
 }
 .bigbtn .stButton>button:hover{ transform: translateY(-1px); box-shadow:0 18px 30px rgba(70,120,200,.14); }
@@ -226,6 +232,9 @@ def navigate(to_key: str, push: bool = True):
     st.session_state.view = to_key
 
 def top_tabs():
+    """HOMEでは表示しない（＝上段ボタンを消す）"""
+    if st.session_state.view == "HOME":
+        return
     active = st.session_state.view
     st.markdown('<div class="top-tabs">', unsafe_allow_html=True)
     cols = st.columns(len(SECTIONS))
@@ -301,56 +310,72 @@ def emo_pills(prefix: str, options: List[str], selected: List[str]) -> List[str]
     st.markdown("</div>", unsafe_allow_html=True)
     return selected
 
-# ---------- HOME（説明つきボタンのみ） ----------
-def home_big_button(title: str, desc: str, target_view: str, key: str, emoji: str):
+# ---------- HOME（説明つきボタンのみ / 上段タブ非表示） ----------
+def home_big_button(title: str, sub: str, target_view: str, key: str, emoji: str):
+    """ボタンの1行目=タイトル、2行目=小見出し（CSSでfirst-lineを強調）"""
     with st.container():
         st.markdown('<div class="bigbtn">', unsafe_allow_html=True)
-        # ラベルはプレーンテキストのみ（改行で説明表示）
-        label = f"{emoji} {title}\n{desc}"
+        label = f"{emoji} {title}\n{sub}"
         if st.button(label, key=key):
             navigate(target_view, push=True)
             st.rerun()
         st.markdown('</div>', unsafe_allow_html=True)
 
+def cbt_intro_block():
+    st.markdown(
+        """
+<div class="card" style="margin-bottom:12px">
+  <div style="font-weight:900; font-size:1.05rem; margin-bottom:.3rem">🧠 このワークについて</div>
+  <div style="color:#3a4a6a; line-height:1.6; white-space:pre-wrap">
+このワークは、認知行動療法（CBT）という考え方をもとにしています。
+「気持ち」と「考え方」の関係を整理することで、
+今感じている不安やしんどさが少し軽くなることを目指しています。
+自分のペースで、思いつくことを自由に書いてみてください。
+  </div>
+</div>
+        """,
+        unsafe_allow_html=True
+    )
+
 def view_home():
-    # 1列目：今日を伝える
+    # CBT説明カード
+    cbt_intro_block()
+
+    # 大きい選択ボタン（タイトル＋小見出し／“します/です”トーン）
     home_big_button(
         "今日を伝える",
-        "今日の気分や体調を共有して、先生や学校に安心して知ってもらうために。",
+        "今日の気分や体調を先生や学校と共有します。",
         "SHARE", "OPEN_SHARE", "🏫"
     )
-    # 2列目：2カラム（リラックス・ノート）
     c1, c2 = st.columns(2)
     with c1:
         home_big_button(
-            "リラックスする",
-            "呼吸に合わせて、緊張や不安を少しずつ和らげるために。",
+            "リラックス",
+            "呼吸ワークで心を整えます。",
             "SESSION", "OPEN_SESSION", "🌙"
         )
     with c2:
         home_big_button(
             "心を整えるノート",
-            "感じていることを言葉にして、いまの自分を整理するために。",
+            "感じたことを言葉にして、今の自分を整理します。",
             "NOTE", "OPEN_NOTE", "📝"
         )
-    # 3列目：2カラム（Study・ふりかえり）
     c3, c4 = st.columns(2)
     with c3:
         home_big_button(
             "Study Tracker",
-            "学習時間をふりかえり、進捗を“見える形”にするために。",
+            "学習時間をふりかえり、進捗を見える形にします。",
             "STUDY", "OPEN_STUDY", "📚"
         )
     with c4:
         home_big_button(
             "ふりかえり",
-            "日々の小さな変化を見つめ、明日につながる気づきを得るために。",
+            "日々の小さな変化を見つけ、明日につながる気づきを得ます。",
             "REVIEW", "OPEN_REVIEW", "📒"
         )
-    # 最後：相談
     home_big_button(
         "相談する",
-        "不安や悩みを安心して伝え、必要なサポートにつながるために。",
+        "不安や悩みを安心して伝え、必要なサポートにつながります。",
         "CONSULT", "OPEN_CONSULT", "🕊"
     )
 
@@ -400,7 +425,7 @@ def view_session():
         )
         Storage.append_user(
             Storage.MIX, st.session_state.user_id,
-            {"ts": now_iso(), "mode": "breath", "mood_after": int(after), "delta": None, "rescue_used": True}
+            {"ts": now_iso(), "mode":"breath", "mood_after": int(after), "delta": None, "rescue_used": True}
         )
         st.success("保存しました。")
 
@@ -787,7 +812,7 @@ def logout_btn():
 # ================= App =================
 if auth_ui():
     logout_btn()
-    # 上部タブ & ステータスはここで1回だけ描画（重複キー回避）
+    # 上部タブはHOMEでは非表示（＝上段の選択ボタンを消す）
     top_tabs()
     top_status()
     main_router()
