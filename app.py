@@ -446,10 +446,10 @@ def view_share():
     st.markdown("### 🏫 今日を伝える（匿名可）")
 
     mood = st.radio("気分", ["🙂", "😐", "😟"], index=1, horizontal=True, key="share_mood")
-    body_opts = ["頭痛","腹痛","吐き気","食欲低下","だるさ","生理関連","その他なし"]
-    body = st.multiselect("体調（当てはまるもの）", body_opts, default=["その他なし"], key="share_body")
+    body_opts = ["頭痛","腹痛","吐き気","食欲低下","だるさ","その他","なし"]
+    body = st.multiselect("体調（当てはまるもの）", body_opts, default=["なし"], key="share_body")
     if "その他なし" in body and len(body) > 1:
-        body = [b for b in body if b != "その他なし"]
+        body = [b for b in body if b != "なし"]
 
     c1, c2 = st.columns(2)
     with c1:
