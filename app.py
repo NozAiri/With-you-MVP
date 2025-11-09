@@ -77,7 +77,7 @@ html, body, .stApp{
 }
 .emopills .chip.on .stButton>button{ border:2px solid #5EA3FF !important; background:#eefdff !important }
 
-/* ------- CBT cards（用語ラベルは使わない） ------- */
+/* ------- CBT cards ------- */
 .cbt-card{ background:#fff; border:1px solid #e3e8ff; border-radius:18px; padding:18px 18px 14px; box-shadow:0 6px 20px rgba(31,59,179,0.06); margin-bottom:14px; }
 .cbt-heading{ font-weight:900; font-size:1.05rem; color:#1b2440; margin:0 0 6px 0;}
 .cbt-sub{ color:#63728a; font-size:0.92rem; margin:-2px 0 10px 0;}
@@ -136,9 +136,9 @@ st.session_state.setdefault("_nav_stack", [])
 st.session_state.setdefault("_breath_running", False)
 st.session_state.setdefault("_breath_stop", False)
 
-# ========= 運営パスワード（固定設定：要望対応） =========
+# ========= 運営パスワード（固定設定） =========
 def admin_pass() -> str:
-    return "uneiairi0931"  # ★希望に合わせ固定。運用では secrets 化推奨。
+    return "uneiairi0931"  # 本番は secrets 化推奨
 
 CRISIS_PATTERNS = [r"死にたい", r"消えたい", r"自殺", r"希死", r"傷つけ(たい|てしまう)", r"リスカ", r"\bOD\b", r"助けて"]
 def crisis(text: str) -> bool:
@@ -149,7 +149,7 @@ def crisis(text: str) -> bool:
     return False
 
 # ========= Nav (Top Tabs) =========
-SECTIONS = [
+BASE_SECTIONS = [
     ("HOME",   "🏠 ホーム"),
     ("SHARE",  "🏫 今日を伝える"),
     ("SESSION","🌙 リラックス"),
@@ -158,6 +158,10 @@ SECTIONS = [
     ("REVIEW", "📒 ふりかえり"),
     ("CONSULT","🕊 相談"),
 ]
+def nav_sections():
+    if st.session_state.role == "admin":
+        return BASE_SECTIONS + [("ADMIN","🛡 運営ダッシュボード")]
+    return BASE_SECTIONS
 
 def navigate(to_key: str, push: bool = True):
     cur = st.session_state.view
@@ -168,10 +172,11 @@ def navigate(to_key: str, push: bool = True):
 def top_tabs():
     if st.session_state.view == "HOME":  # HOMEでは表示しない
         return
+    sections = nav_sections()
     active = st.session_state.view
     st.markdown('<div class="top-tabs">', unsafe_allow_html=True)
-    cols = st.columns(len(SECTIONS))
-    for i, (key, label) in enumerate(SECTIONS):
+    cols = st.columns(len(sections))
+    for i, (key, label) in enumerate(sections):
         with cols[i]:
             cls = "active" if key == active else ""
             st.markdown(f"<div class='{cls}'>", unsafe_allow_html=True)
@@ -291,7 +296,7 @@ def view_session():
                            mime="application/json", key=f"breath_dl_{len(st.session_state['_local_logs']['breath'])}")
         st.success("保存しました。（運営には共有されません）")
 
-# ========= ノート（専門用語なしのやさしい説明） =========
+# ========= ノート =========
 MOODS = [
     {"emoji":"😢","label":"悲しい","key":"sad"},
     {"emoji":"😠","label":"イライラ","key":"anger"},
@@ -346,100 +351,38 @@ def text_card(title: str, subtext: str, key: str, height=120, placeholder="こ�
     st.markdown("</div>", unsafe_allow_html=True)
     return val
 
-# ===== 行動活性化（小さな行動ライブラリ） =====
-ACTION_LIB_BASE = [
-    "深呼吸をしてみる",
-    "顔や手を洗う",
-    "外を少し歩く・空を見上げる",
-    "好きな音楽を1曲だけ聴く",
-    "温かい飲み物を飲む",
-    "軽く体を伸ばす",
-    "家族や友達に一言だけ話す",
-    "スタンプや一言メッセージを送る",
-    "今の気持ちを一言メモする",
-    "今日できたことを1つ思い出す",
-]
-
-ACTION_BY_MOOD = {
-    "sad": ["外を少し歩く・空を見上げる", "今日できたことを1つ思い出す", "軽く体を伸ばす"],
-    "anxious": ["深呼吸をしてみる", "温かい飲み物を飲む", "今の気持ちを一言メモする"],
-    "angry": ["軽く体を伸ばす", "顔や手を洗う", "好きな音楽を1曲だけ聴く"],
-    "tired": ["温かい飲み物を飲む", "外を少し歩く・空を見上げる", "今日できたことを1つ思い出す"],
-    "lonely": ["家族や友達に一言だけ話す", "スタンプや一言メッセージを送る", "好きな音楽を1曲だけ聴く"],
-    "default": ["深呼吸をしてみる", "今の気持ちを一言メモする", "温かい飲み物を飲む"],
-}
-
-# 表記ゆれ補正（重複定義を避けて1回だけ）
-MOOD_KEY_ALIAS = {"anx":"anxious", "anger":"angry"}
-
-# ===== 行動活性化：絵文字カテゴリ × シンプル行動 =====
-ACTION_CATEGORIES_EMOJI = {
-    "身体": "🫧",
-    "環境": "🌤",
-    "リズム": "⏯️",
-    "つながり": "💬",
-}
+# ===== 行動活性化（選択簡素・絵文字カテゴリ） =====
+ACTION_CATEGORIES_EMOJI = {"身体":"🫧","環境":"🌤","リズム":"⏯️","つながり":"💬"}
 ACTION_CATEGORIES = {
-    "身体": [
-        "顔や手を洗う",
-        "深呼吸をする",
-        "肩を回す",
-        "シャワーを浴びる",
-    ],
-    "環境": [
-        "窓を開けて外の空気を感じる",
-        "カーテンを開けて部屋を明るくする",
-        "空をながめる",
-    ],
-    "リズム": [
-        "水を飲む",
-        "温かい飲み物を飲む",
-        "立ち上がって少し歩く",
-        "外を少し歩く",
-    ],
-    "つながり": [
-        "スタンプを送る",
-        "「ありがとう」を書く",
-        "家族や友達に一言だけ話す",
-    ],
+    "身体": ["顔や手を洗う","深呼吸をする","肩を回す","シャワーを浴びる"],
+    "環境": ["窓を開けて外の空気を感じる","カーテンを開けて部屋を明るくする","空をながめる"],
+    "リズム": ["水を飲む","温かい飲み物を飲む","立ち上がって少し歩く","外を少し歩く"],
+    "つながり": ["スタンプを送る","「ありがとう」を書く","家族や友達に一言だけ話す"],
 }
 def _flat_action_options_emoji():
-    """表示は『絵文字 + 行動』、値は『行動テキストのみ』"""
-    order = ["身体", "環境", "リズム", "つながり"]
+    order = ["身体","環境","リズム","つながり"]
     seen, disp, vals = set(), [], []
     for cat in order:
         emoji = ACTION_CATEGORIES_EMOJI.get(cat, "•")
         for a in ACTION_CATEGORIES.get(cat, []):
-            if a in seen:
-                continue
-            seen.add(a)
-            disp.append(f"{emoji} {a}")
-            vals.append(a)
-    return disp, vals  # 固定順
+            if a in seen: continue
+            seen.add(a); disp.append(f"{emoji} {a}"); vals.append(a)
+    return disp, vals
 
 def action_picker(mood_key: str):
     st.markdown('<div class="cbt-card">', unsafe_allow_html=True)
     st.markdown('<div class="cbt-heading">🌸 Step 6：今、気持ちが少し落ち着くためにできそうなことは？</div>', unsafe_allow_html=True)
     st.markdown('<div class="cbt-sub">ぴったりを1つだけ。選ばなくてもOKだよ。</div>', unsafe_allow_html=True)
-
     disp, vals = _flat_action_options_emoji()
     options_disp = disp + ["— 選ばない —"]
     pick_key = f"act_pick_single_{(mood_key or 'default').strip().lower()}"
-
-    sel_disp = st.selectbox(
-        "小さな行動（任意・スクロールや入力で探せます）",
-        options=options_disp,
-        index=len(options_disp) - 1,  # 末尾＝選ばない
-        key=pick_key,
-    )
+    sel_disp = st.selectbox("小さな行動（任意・スクロールや入力で探せます）", options=options_disp,
+                            index=len(options_disp)-1, key=pick_key)
     chosen = "" if sel_disp == "— 選ばない —" else vals[disp.index(sel_disp)]
-
     custom_key = f"act_custom_single_{(mood_key or 'default').strip().lower()}"
     custom = st.text_input("＋ 自分の言葉で書く（任意）", key=custom_key, placeholder="例：窓を開けて深呼吸する").strip()
-
     st.markdown("</div>", unsafe_allow_html=True)
-    if custom:
-        return "", custom
+    if custom: return "", custom
     return (chosen or ""), ""
 
 def recap_card(doc: dict):
@@ -460,15 +403,14 @@ def recap_card(doc: dict):
 def view_note():
     st.markdown("### 📝 心を整えるノート")
     cbt_intro_block()
-
     mood = mood_radio()
-    trigger_text   = text_card("🫧 Step 2：その気持ちは、どんなことがきっかけだった？", "「○○があったからかも」「なんとなく○○って思ったから」など自由に。", "cbt_trigger")
-    auto_thought   = text_card("💭 Step 3：そのとき、頭の中でどんな言葉がよぎった？", "心の中でつぶやいた言葉やイメージをそのまま書いてOK。", "cbt_auto")
-    reason_for     = text_card("🔍 Step 4-1：そう思った理由はある？", "「たしかにそうかも」と思うことを書いてみよう。", "cbt_for", height=100)
-    reason_against = text_card("🔍 Step 4-2：そうでもないかもと思う理由はある？", "「でも、こういう面もあるかも」も書いてみよう。", "cbt_against", height=100)
-    alt_perspective= text_card("🌱 Step 5：もし友だちが同じことを感じていたら、なんて声をかける？", "自分のことじゃなく“友だち”のこととして考えてみよう。", "cbt_alt")
+    trigger_text   = text_card("🫧 Step 2：その気持ちは、どんなことがきっかけだった？", "自由に。", "cbt_trigger")
+    auto_thought   = text_card("💭 Step 3：そのとき、頭の中でどんな言葉がよぎった？", "そのままでOK。", "cbt_auto")
+    reason_for     = text_card("🔍 Step 4-1：そう思った理由はある？", "「たしかにそうかも」。", "cbt_for", height=100)
+    reason_against = text_card("🔍 Step 4-2：そうでもないかもと思う理由はある？", "別の見方も。", "cbt_against", height=100)
+    alt_perspective= text_card("🌱 Step 5：友だちにかける言葉は？", "やさしい言葉を。", "cbt_alt")
     act_suggested, act_custom = action_picker(mood.get("key"))
-    reflection     = text_card("🌙 Step 7：今日の日記", "気づいたこと・気持ちの変化・これからのことなど自由に。", "cbt_reflect", height=120)
+    reflection     = text_card("🌙 Step 7：今日の日記", "気づきや今後のことなど。", "cbt_reflect", height=120)
 
     if st.button("📝 記録する（端末）", key="cbt_submit"):
         doc = {
@@ -652,6 +594,152 @@ def view_review():
 </div>
 """, unsafe_allow_html=True)
 
+# ========= 運営ダッシュボード（Firestoreの利用データ閲覧・検索・DL） =========
+def _fetch_firestore_df(collection: str, start_dt: datetime | None, end_dt: datetime | None, limit: int = 1000) -> pd.DataFrame:
+    if not FIRESTORE_ENABLED or DB is None:
+        return pd.DataFrame()
+    try:
+        q = DB.collection(collection)
+        # 範囲条件は order_by 対象に合わせる
+        if start_dt: q = q.where("ts", ">=", start_dt)
+        if end_dt:   q = q.where("ts", "<=", end_dt)
+        q = q.order_by("ts", direction=firestore.Query.DESCENDING).limit(limit)
+        rows = []
+        for d in q.stream():
+            data = d.to_dict() or {}
+            ts = data.get("ts")
+            ts_iso = ts.isoformat() if hasattr(ts, "isoformat") else str(ts)
+            if collection == "school_share":
+                p = data.get("payload", {})
+                rows.append({
+                    "ts": ts_iso,
+                    "user_id": data.get("user_id",""),
+                    "mood": p.get("mood",""),
+                    "body": " / ".join(p.get("body",[]) or []),
+                    "sleep_hours": p.get("sleep_hours", None),
+                    "sleep_quality": p.get("sleep_quality",""),
+                    "anonymous": data.get("anonymous", True),
+                    "_doc": data
+                })
+            elif collection == "consult_msgs":
+                rows.append({
+                    "ts": ts_iso,
+                    "user_id": data.get("user_id",""),
+                    "intent": data.get("intent",""),
+                    "topics": " / ".join(data.get("topics",[]) or []),
+                    "anonymous": data.get("anonymous", True),
+                    "name": data.get("name",""),
+                    "message": data.get("message",""),
+                    "_doc": data
+                })
+            else:
+                # 予備
+                flat = {k: v for k, v in data.items()}
+                rows.append({"ts": ts_iso, **flat})
+        return pd.DataFrame(rows)
+    except Exception as e:
+        st.error(f"読み込みに失敗しました: {e}")
+        return pd.DataFrame()
+
+def _download_buttons(df: pd.DataFrame, basename: str):
+    if df.empty: return
+    csv = df.drop(columns=["_doc"], errors="ignore").to_csv(index=False).encode("utf-8-sig")
+    st.download_button("⬇️ CSVダウンロード", csv, file_name=f"{basename}.csv", mime="text/csv", key=f"dll_csv_{basename}")
+    json_bytes = df.drop(columns=["_doc"], errors="ignore").to_json(orient="records", force_ascii=False, indent=2).encode("utf-8")
+    st.download_button("⬇️ JSONダウンロード", json_bytes, file_name=f"{basename}.json", mime="application/json", key=f"dll_json_{basename}")
+
+def view_admin():
+    st.markdown("### 🛡 運営ダッシュボード（利用データ）")
+    if not FIRESTORE_ENABLED:
+        st.warning("Firestore 未接続のため、一覧は表示できません。Streamlit Secrets に `FIREBASE_SERVICE_ACCOUNT` を設定してください。")
+
+    # 期間フィルタ
+    c1, c2, c3 = st.columns([1,1,1])
+    with c1:
+        days = st.selectbox("対象期間", ["直近7日","直近14日","直近30日","すべて"], index=1, key="adm_range")
+    with c2:
+        dataset = st.selectbox("データ種類", ["今日を伝える（school_share）","相談（consult_msgs）"], index=0, key="adm_kind")
+    with c3:
+        limit = st.number_input("最大取得件数", min_value=100, max_value=5000, value=1000, step=100, key="adm_limit")
+
+    # 期間計算
+    now = datetime.now(timezone.utc)
+    if days == "すべて":
+        start_dt = None
+    else:
+        n = int(days.replace("直近","").replace("日",""))
+        start_dt = now - timedelta(days=n)
+    end_dt = None  # 最新優先
+
+    # 取得
+    coll = "school_share" if dataset.startswith("今日を伝える") else "consult_msgs"
+    df = _fetch_firestore_df(coll, start_dt, end_dt, limit)
+
+    # 絞り込みUI
+    with st.expander("🔎 追加フィルタ", expanded=False):
+        if coll == "school_share":
+            f_mood = st.multiselect("気分（複数選択可）", sorted(df["mood"].dropna().unique().tolist()) if not df.empty else [], key="f_mood")
+            f_body = st.text_input("体調テキストを含む（例：頭痛）", key="f_body")
+            f_uid  = st.text_input("ユーザーID（部分一致）", key="f_uid")
+            if f_mood: df = df[df["mood"].isin(f_mood)]
+            if f_body: df = df[df["body"].fillna("").str.contains(f_body)]
+            if f_uid:  df = df[df["user_id"].fillna("").str.contains(f_uid)]
+        else:
+            f_int = st.multiselect("相談先", ["teacher","counselor"], key="f_int")
+            f_topic = st.text_input("トピックを含む（例：いじめ）", key="f_topic")
+            f_kw = st.text_input("本文キーワード", key="f_kw")
+            f_uid = st.text_input("ユーザーID（部分一致）", key="f_uid_c")
+            if f_int: df = df[df["intent"].isin(f_int)]
+            if f_topic: df = df[df["topics"].fillna("").str.contains(f_topic)]
+            if f_kw: df = df[df["message"].fillna("").str.contains(f_kw)]
+            if f_uid: df = df[df["user_id"].fillna("").str.contains(f_uid)]
+
+    # 概要メトリクス
+    if df.empty:
+        st.info("該当データがありません。条件を変更してください。")
+    else:
+        st.markdown("#### 📈 概要")
+        c1, c2, c3 = st.columns(3)
+        with c1: st.metric("件数", len(df))
+        with c2: 
+            unique_users = df["user_id"].replace("", pd.NA).dropna().nunique()
+            st.metric("ユニーク利用者", int(unique_users))
+        with c3:
+            first_ts = df["ts"].iloc[-1] if len(df) > 0 else "-"
+            st.metric("最古の記録（表示中）", first_ts)
+
+        # 日別件数チャート
+        st.markdown("#### 🗓 日別件数")
+        df["_date"] = pd.to_datetime(df["ts"]).dt.tz_localize(None).dt.date
+        agg = df.groupby("_date").size().reset_index(name="count")
+        chart = alt.Chart(agg).mark_bar().encode(
+            x=alt.X("_date:T", title="日付"),
+            y=alt.Y("count:Q", title="件数"),
+            tooltip=[alt.Tooltip("_date:T", title="日付"), alt.Tooltip("count:Q", title="件数")]
+        ).properties(height=180)
+        st.altair_chart(chart, use_container_width=True)
+
+        # 一覧テーブル
+        st.markdown("#### 📋 一覧")
+        show_cols = [c for c in df.columns if c != "_doc"]
+        st.dataframe(df[show_cols], use_container_width=True, hide_index=True)
+
+        # ダウンロード
+        _download_buttons(df, basename=f"{coll}_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+
+        # 詳細カード（選択表示）
+        st.markdown("#### 🔍 詳細表示（最新から）")
+        n_show = st.slider("表示件数", 1, min(50, len(df)), min(10, len(df)), key="adm_nshow")
+        for i, (_, row) in enumerate(df.head(n_show).iterrows()):
+            st.markdown(f"<div class='item'><div class='meta'>{row['ts']}</div>", unsafe_allow_html=True)
+            if coll == "school_share":
+                st.markdown(f"**ユーザー**：{row['user_id'] or '—'}（匿名={row['anonymous']}）  /  **気分**：{row['mood']}  /  **睡眠**：{row.get('sleep_hours','')}h・{row.get('sleep_quality','')}", unsafe_allow_html=True)
+                st.markdown(f"**体調**：{row['body'] or '—'}", unsafe_allow_html=True)
+            else:
+                st.markdown(f"**ユーザー**：{row['user_id'] or '—'}（匿名={row['anonymous']} / 名前={row.get('name','') or '—'}） / **相談先**：{row['intent']} / **トピック**：{row['topics'] or '—'}", unsafe_allow_html=True)
+                st.markdown(f"<div style='white-space:pre-wrap; color:#2b3d5c'>**本文**：{row.get('message','')}</div>", unsafe_allow_html=True)
+            st.markdown("</div>", unsafe_allow_html=True)
+
 # ========= Router =========
 def main_router():
     v = st.session_state.view
@@ -662,6 +750,7 @@ def main_router():
     elif v == "CONSULT": view_consult()
     elif v == "REVIEW": view_review()
     elif v == "STUDY": view_study()
+    elif v == "ADMIN" and st.session_state.role == "admin": view_admin()
     else: view_home()
 
 # ========= Auth =========
