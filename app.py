@@ -227,9 +227,9 @@ def login_register_ui() -> bool:
             st.session_state.mode = "LOGIN"
 
     st.divider()
-    st.markdown("**ご自由なパスワード（みんな共通）**")
-    group_pw = st.text_input("パスワード（例：sakura2025）", key="inp_group_pw", label_visibility="collapsed", placeholder="例：sakura2025")
-    st.markdown("**自分だけの名前（4〜12文字）**")
+    st.markdown("**ご自由にパスワードを設定ください**")
+    group_pw = st.text_input("パスワード", key="inp_group_pw", label_visibility="collapsed", placeholder="例：sakura2025")
+    st.markdown("**ご自身のニックネーム（4〜12文字）**")
     st.caption("同じ名前は1人だけ使えます（先着）。英数字・ひらがな・カタカナ・漢字と _ - が使えます。")
     handle_raw = st.text_input("自分だけの名前", key="inp_handle", label_visibility="collapsed", placeholder="例：mika / ねこ_3 / sora")
 
@@ -292,10 +292,13 @@ def home_intro():
 <div class="card" style="margin-bottom:12px">
   <div style="font-weight:900; font-size:1.05rem; margin-bottom:.3rem">🌙 With You</div>
   <div style="color:#3a4a6a; line-height:1.65; white-space:pre-wrap">
-気持ちを整える、やさしいノートです。
+気持ちを整理したい日も、誰かに話したい日も。
+With You は、あなたの心のそばにある、小さなツールボックスです。
 
-🏫 <b>今日を伝える</b> と 🕊 <b>相談</b> だけが先生・学校に届きます。
-それ以外の記録は <b>この端末だけ</b> に残ります。
+今の自分に合うカードを選んで、少しずつ整える時間をつくってみてください。
+
+🔒 「今日を伝える」と「相談する」だけが運営に届きます。
+それ以外の記録は、すべてあなたの端末だけに残ります。
   </div>
 </div>
 """, unsafe_allow_html=True)
@@ -366,8 +369,10 @@ def cbt_intro():
 <div class="cbt-card">
   <div class="cbt-heading">このワークについて</div>
   <div class="cbt-sub" style="white-space:pre-wrap">
-このノートは、考え方や気持ちを整理するためのシンプルなワークです。
-自分のペースで、思いつくことを自由に書いてみてください。
+このノートは、認知行動療法（CBT）という考え方をもとにしています。
+ 「気持ち」と「考え方」の関係を整理することで、
+ 今感じている不安やしんどさが少し軽くなることを目指しています。
+ 自分のペースで、思いつくことを自由に書いてみてください。
   </div>
 </div>
 """, unsafe_allow_html=True)
@@ -396,11 +401,16 @@ def text_card(title: str, sub: str, key: str, height=120, placeholder="ここに
 
 def view_note():
     st.markdown("### 📝 心を整えるノート")
-    cbt_intro()
+    cbt_intro_block()
+
     mood = mood_radio()
-    trigger = text_card("🫧 きっかけ", "「○○があったからかも」「なんとなく○○って思った」など自由に。", "t_trigger")
-    auto   = text_card("💭 よぎった言葉", "頭の中でつぶやいた言葉やイメージ。", "t_auto")
-    diary  = text_card("🌙 今日の日記", "気づいたこと・変化・これからのことなど自由に。", "t_diary", height=140)
+    trigger_text   = text_card("🫧 Step 2：その気持ちは、どんなことがきっかけだった？", "「○○があったからかも」「なんとなく○○って思ったから」など自由に。", "cbt_trigger")
+    auto_thought   = text_card("💭 Step 3：そのとき、頭の中でどんな言葉がよぎった？", "心の中でつぶやいた言葉やイメージをそのまま書いてOK。", "cbt_auto")
+    reason_for     = text_card("🔍 Step 4-1：そう思った理由はある？", "「たしかにそうかも」と思うことを書いてみよう。", "cbt_for", height=100)
+    reason_against = text_card("🔍 Step 4-2：そうでもないかもと思う理由はある？", "「でも、こういう面もあるかも」も書いてみよう。", "cbt_against", height=100)
+    alt_perspective= text_card("🌱 Step 5：もし友だちが同じことを感じていたら、なんて声をかける？", "自分のことじゃなく“友だち”のこととして考えてみよう。", "cbt_alt")
+    act_suggested, act_custom = action_picker(mood.get("key"))
+    reflection     = text_card("🌙 Step 7：今日の日記", "気づいたこと・気持ちの変化・これからのことなど自由に。", "cbt_reflect", height=120)
     if st.button("💾 記録（この端末）", type="primary", key="cbt_save"):
         doc = {"ts": now_iso(), "mood": mood, "trigger": (trigger or "").strip(), "auto": (auto or "").strip(), "diary": (diary or "").strip()}
         st.session_state["_local_logs"]["note"].append(doc)
