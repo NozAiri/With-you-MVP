@@ -2,7 +2,7 @@
 # （共通パス＋自分だけの名前｜登録先着専有・同時利用OK・Cookie/URL/本人コードなし｜ADMIN対応＋フォールバック）
 from __future__ import annotations
 from datetime import datetime, timezone
-from typing import Dict, Tuple
+from typing import Dict, Tuple, List
 import streamlit as st
 import pandas as pd
 import altair as alt
@@ -364,10 +364,8 @@ MOODS = [
     {"emoji":"😄","label":"うれしい","key":"joy"},
     {"emoji":"😕","label":"モヤモヤ","key":"confuse"},
 ]
+
 def cbt_intro():
-    def cbt_intro_block():
-    # 互換用エイリアス（中身は変更なし）
-    return cbt_intro()
     st.markdown("""
 <div class="cbt-card">
   <div class="cbt-heading">このワークについて</div>
@@ -379,6 +377,10 @@ def cbt_intro():
   </div>
 </div>
 """, unsafe_allow_html=True)
+
+# ★ 互換エイリアス（view_note が呼ぶ名称）
+def cbt_intro_block():
+    return cbt_intro()
 
 def mood_radio() -> Dict:
     st.markdown('<div class="cbt-card">', unsafe_allow_html=True)
@@ -402,6 +404,29 @@ def text_card(title: str, sub: str, key: str, height=120, placeholder="ここに
     st.markdown("</div>", unsafe_allow_html=True)
     return val
 
+# 小さな行動の選択（内容は最小限・UI文面はそのまま）
+ACTION_LIB: Dict[str, List[str]] = {
+    "sad":     ["外に出て空を見上げる", "温かい飲み物を飲む", "安心できる人にLINEする"],
+    "anger":   ["深呼吸を3回する", "場所を変える", "紙に思いを書き出す"],
+    "anx":     ["5分だけ散歩", "今できる1つを小さくやる", "肩回しをする"],
+    "lonely":  ["好きな音楽を1曲", "今日よかったことを1つ書く", "家族にメッセージを送る"],
+    "tired":   ["目を閉じて30秒休む", "水を飲む", "ストレッチをする"],
+    "relief":  ["ホッとした理由を書き留める", "その気持ちを誰かと共有する", "軽い散歩"],
+    "joy":     ["嬉しかった理由を書く", "自分を褒める言葉を書く", "その瞬間の写真を撮る"],
+    "confuse": ["頭の中を箇条書き", "優先順位を3つに分ける", "5分だけ手を止める"],
+    None:      ["外に出て空を見上げる", "深呼吸を3回する", "水を飲む"],
+}
+
+def action_picker(mood_key: str):
+    st.markdown('<div class="cbt-card">', unsafe_allow_html=True)
+    st.markdown('<div class="cbt-heading">🌸 Step 6：今、気持ちが少し落ち着くためにできそうなことは？</div>', unsafe_allow_html=True)
+    st.markdown('<div class="cbt-sub">自分に合いそうな“小さな行動”をひとつ選んでみよう。</div>', unsafe_allow_html=True)
+    suggestions = ACTION_LIB.get(mood_key, ACTION_LIB.get(None, []))
+    suggested = st.selectbox("おすすめから選ぶ（任意）", ["— 選ばない —"] + suggestions, index=0, key="cbt_action_pick")
+    custom = st.text_input("自由入力（任意）", key="cbt_action_custom", placeholder="例：外に出て空を見上げる")
+    st.markdown("</div>", unsafe_allow_html=True)
+    return (suggested if suggested != "— 選ばない —" else ""), (custom or "")
+
 def view_note():
     st.markdown("### 📝 心を整えるノート")
     cbt_intro_block()
@@ -414,14 +439,29 @@ def view_note():
     alt_perspective= text_card("🌱 Step 5：もし友だちが同じことを感じていたら、なんて声をかける？", "自分のことじゃなく“友だち”のこととして考えてみよう。", "cbt_alt")
     act_suggested, act_custom = action_picker(mood.get("key"))
     reflection     = text_card("🌙 Step 7：今日の日記", "気づいたこと・気持ちの変化・これからのことなど自由に。", "cbt_reflect", height=120)
+
     if st.button("💾 記録（この端末）", type="primary", key="cbt_save"):
-        doc = {"ts": now_iso(), "mood": mood, "trigger": (trigger or "").strip(), "auto": (auto or "").strip(), "diary": (diary or "").strip()}
+        # 保存用ドキュメント（UI文言は変更なし・キー名だけ整合）
+        doc = {
+            "ts": now_iso(),
+            "mood": mood,
+            "trigger": (trigger_text or "").strip(),
+            "auto": (auto_thought or "").strip(),
+            "reason_for": (reason_for or "").strip(),
+            "reason_against": (reason_against or "").strip(),
+            "alt_perspective": (alt_perspective or "").strip(),
+            "action": {"suggested": act_suggested, "custom": act_custom},
+            "diary": (reflection or "").strip(),
+        }
         st.session_state["_local_logs"]["note"].append(doc)
         st.success("保存しました。（運営には共有されません）")
-        st.download_button("⬇️ この記録をダウンロード（JSON）",
-                           data=json.dumps(doc, ensure_ascii=False, indent=2).encode("utf-8"),
-                           file_name=f"note_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-                           mime="application/json", key=f"dl_note_{len(st.session_state['_local_logs']['note'])}")
+        st.download_button(
+            "⬇️ この記録をダウンロード（JSON）",
+            data=json.dumps(doc, ensure_ascii=False, indent=2).encode("utf-8"),
+            file_name=f"note_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+            mime="application/json",
+            key=f"dl_note_{len(st.session_state['_local_logs']['note'])}"
+        )
 
 # ----- 今日を伝える（Firestoreに匿名共有） -----
 def view_share():
