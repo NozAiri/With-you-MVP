@@ -1,4 +1,5 @@
-# app.py — With You.（共通パス＋自分だけの名前｜登録先着専有・同時利用OK・Cookie/URL/本人コードなし｜ADMIN対応）
+# app.py — With You.
+# （共通パス＋自分だけの名前｜登録先着専有・同時利用OK・Cookie/URL/本人コードなし｜ADMIN対応＋フォールバック）
 from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Dict, Tuple
@@ -29,9 +30,8 @@ except Exception:
 ADMIN_MASTER_CODE = (
     st.secrets.get("ADMIN_MASTER_CODE")
     or os.environ.get("ADMIN_MASTER_CODE")
-    or "uneiairi"   # ← ここを変更
+    or "uneiairi0931"   # ← 既定は 0931 付き
 )
-
 
 # ================== アプリ秘密鍵（HMAC用） ==================
 APP_SECRET = st.secrets.get("APP_SECRET") or os.environ.get("APP_SECRET") or "dev-app-secret-change-me"
@@ -235,7 +235,7 @@ def login_register_ui() -> bool:
 
     err = ""
     ok_handle, handle_norm = validate_handle(handle_raw)
-    if group_pw.strip() == "":
+    if (group_pw or "").strip() == "":
         err = "パスワードを入力してください。"
     elif not ok_handle:
         err = handle_norm  # エラーメッセージ
@@ -250,11 +250,10 @@ def login_register_ui() -> bool:
         st.session_state.handle_norm = handle_norm
         st.session_state.user_disp = handle_norm
 
-        # 管理者判定（パスワードがADMIN_MASTER_CODEと完全一致ならadmin）
-        if group_pw.strip() == ADMIN_MASTER_CODE:
-            st.session_state.role = "admin"
-        else:
-            st.session_state.role = "user"
+        # 管理者判定（normalize して完全一致）
+        entered = unicodedata.normalize("NFKC", group_pw or "").strip()
+        master  = unicodedata.normalize("NFKC", ADMIN_MASTER_CODE or "").strip()
+        st.session_state.role = "admin" if entered == master else "user"
 
         if mode == "REGISTER":
             ok, msg = db_create_user(gid, handle_norm)
@@ -560,39 +559,40 @@ def view_admin():
         st.error("Firestore未接続です。st.secretsの設定を確認してください。")
         return
 
-    gid = st.session_state.get("group_id","")
+    # ▼ 表示範囲の切替（同じパスのグループのみ / 全グループ）
+    scope = st.radio("表示範囲", ["このパスワードのグループだけ", "全グループ"], horizontal=True, key="adm_scope")
+    gid_filter = st.session_state.get("group_id","") if scope.startswith("この") else None
 
     def fetch_rows(coll_name: str, limit_n: int):
         q = DB.collection(coll_name)
-        if gid:
-            q = q.where("group_id", "==", gid)
-
-        # 1) まずは ts で order_by（複合インデックスがあれば高速）
+        if gid_filter:
+            q = q.where("group_id", "==", gid_filter)
+        # 1) インデックスがあれば高速ルート（ts desc）
         try:
             q2 = q.order_by("ts", direction="DESCENDING").limit(int(limit_n))
             docs = list(q2.stream())
             return [d.to_dict() for d in docs], None
         except Exception as e:
-            # 2) フォールバック：order_byを外し、クライアント側で降順ソート（インデックス不要）
+            # 2) フォールバック：order_byなし→Python側でts降順
             try:
                 docs = list(q.limit(int(limit_n)).stream())
                 rows = [d.to_dict() for d in docs]
-                # ts（datetime）で降順。無いものは最小扱い
-                from datetime import datetime
+                from datetime import datetime as _dt
                 def _key(r):
                     v = r.get("ts")
-                    return v if isinstance(v, datetime) else datetime.min
+                    return v if isinstance(v, _dt) else _dt.min
                 rows.sort(key=_key, reverse=True)
                 return rows, "fallback"
             except Exception as e2:
-                return [], f"{e}\n{e2}"
+                st.error(f"取得エラー: {e}\n{e2}")
+                return [], "error"
 
     # ------- 今日を伝える -------
     st.markdown("#### 🏫 今日を伝える（school_share）")
     n1 = st.number_input("取得件数（最新から）", 1, 200, 50, 1, key="adm_n1")
     rows1, mode1 = fetch_rows("school_share", n1)
     if mode1 == "fallback":
-        st.caption("（インデックス未作成のためフォールバック動作中：サーバ並べ替え→クライアント側で降順）")
+        st.caption("（インデックス未作成のためフォールバック動作中：サーバ取得→クライアント側で降順）")
     if rows1:
         df1 = pd.DataFrame([{
             "時刻": r.get("ts"),
@@ -612,7 +612,7 @@ def view_admin():
     n2 = st.number_input("取得件数（最新から） ", 1, 200, 50, 1, key="adm_n2")
     rows2, mode2 = fetch_rows("consult_msgs", n2)
     if mode2 == "fallback":
-        st.caption("（インデックス未作成のためフォールバック動作中：サーバ並べ替え→クライアント側で降順）")
+        st.caption("（インデックス未作成のためフォールバック動作中：サーバ取得→クライアント側で降順）")
     if rows2:
         df2 = pd.DataFrame([{
             "時刻": r.get("ts"),
@@ -625,7 +625,6 @@ def view_admin():
         st.dataframe(df2, use_container_width=True, hide_index=True)
     else:
         st.caption("データがありません。")
-
 
 # ================== ルーター ==================
 def main_router():
