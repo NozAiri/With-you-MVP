@@ -370,62 +370,86 @@ def cbt_intro():
 <div class="cbt-card">
   <div class="cbt-heading">このワークについて</div>
   <div class="cbt-sub" style="white-space:pre-wrap">
-このノートは、認知行動療法（CBT）という考え方をもとにしています。
- 「気持ち」と「考え方」の関係を整理することで、
- 今感じている不安やしんどさが少し軽くなることを目指しています。
- 自分のペースで、思いつくことを自由に書いてみてください。
+このノートは、認知行動療法（CBT）の考え方をもとにしています。
+気持ちと言葉を整理して、少し軽くなることを目指します。
   </div>
 </div>
 """, unsafe_allow_html=True)
 
-# ★ 互換エイリアス（view_note が呼ぶ名称）
-def cbt_intro_block():
-    return cbt_intro()
-
-def mood_radio() -> Dict:
+def mood_radio() -> Dict[str, Any]:
     st.markdown('<div class="cbt-card">', unsafe_allow_html=True)
     st.markdown('<div class="cbt-heading">🌤 Step 1：今の気持ちは？</div>', unsafe_allow_html=True)
     cols = st.columns(4)
     for i, m in enumerate(MOODS):
         with cols[i % 4]:
-            if st.button(f"{m['emoji']} {m['label']}", key=f"m_{m['key']}"):
-                st.session_state["cbt_mood"] = m
-    cur = st.session_state.get("cbt_mood", {"emoji":"","label":"未選択","key":None})
-    st.write(f"選択中：**{cur.get('emoji','')} {cur.get('label','')}**")
-    intensity = st.slider("今の強さ（0〜100）", 0, 100, 60, key="cbt_int")
+            if st.button(f"{m['emoji']} {m['label']}", key=f"cbt_btn_mood_{m['key']}"):
+                st.session_state["cbt_mood_key"] = m["key"]
+                st.session_state["cbt_mood_label"] = m["label"]
+                st.session_state["cbt_mood_emoji"] = m["emoji"]
+    sel = st.session_state.get("cbt_mood_label", "未選択")
+    st.write(f"選択中：**{st.session_state.get('cbt_mood_emoji','')} {sel}**")
+    intensity = st.slider("今の強さ（0〜100）", 0, 100, 60, key="cbt_intensity")
     st.markdown("</div>", unsafe_allow_html=True)
-    return {"emoji":cur.get("emoji",""), "label":cur.get("label",""), "key":cur.get("key"), "intensity":intensity}
+    return {
+        "key": st.session_state.get("cbt_mood_key"),
+        "label": st.session_state.get("cbt_mood_label"),
+        "emoji": st.session_state.get("cbt_mood_emoji"),
+        "intensity": intensity
+    }
 
-def text_card(title: str, sub: str, key: str, height=120, placeholder="ここに書いてみてね") -> str:
+def text_card(title: str, subtext: str, key: str, height=120, placeholder="ここに書いてみてね") -> str:
     st.markdown('<div class="cbt-card">', unsafe_allow_html=True)
     st.markdown(f'<div class="cbt-heading">{title}</div>', unsafe_allow_html=True)
-    st.markdown(f'<div class="cbt-sub">{sub}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="cbt-sub">{subtext}</div>', unsafe_allow_html=True)
     val = st.text_area("", height=height, key=key, placeholder=placeholder, label_visibility="collapsed")
     st.markdown("</div>", unsafe_allow_html=True)
     return val
 
-# 小さな行動の選択（内容は最小限・UI文面はそのまま）
-ACTION_LIB: Dict[str, List[str]] = {
-    "sad":     ["外に出て空を見上げる", "温かい飲み物を飲む", "安心できる人にLINEする"],
-    "anger":   ["深呼吸を3回する", "場所を変える", "紙に思いを書き出す"],
-    "anx":     ["5分だけ散歩", "今できる1つを小さくやる", "肩回しをする"],
-    "lonely":  ["好きな音楽を1曲", "今日よかったことを1つ書く", "家族にメッセージを送る"],
-    "tired":   ["目を閉じて30秒休む", "水を飲む", "ストレッチをする"],
-    "relief":  ["ホッとした理由を書き留める", "その気持ちを誰かと共有する", "軽い散歩"],
-    "joy":     ["嬉しかった理由を書く", "自分を褒める言葉を書く", "その瞬間の写真を撮る"],
-    "confuse": ["頭の中を箇条書き", "優先順位を3つに分ける", "5分だけ手を止める"],
-    None:      ["外に出て空を見上げる", "深呼吸を3回する", "水を飲む"],
+ACTION_CATEGORIES_EMOJI = { "身体": "🫧","環境": "🌤","リズム": "⏯️","つながり": "💬" }
+ACTION_CATEGORIES = {
+    "身体": ["顔や手を洗う","深呼吸をする","肩を回す","シャワーを浴びる"],
+    "環境": ["窓を開けて外の空気を感じる","カーテンを開けて部屋を明るくする","空をながめる"],
+    "リズム": ["水を飲む","温かい飲み物を飲む","立ち上がって少し歩く","外を少し歩く"],
+    "つながり": ["スタンプを送る","「ありがとう」を書く","家族や友達に一言だけ話す"],
 }
+def _flat_action_options_emoji():
+    order = ["身体","環境","リズム","つながり"]
+    seen, disp, vals = set(), [], []
+    for cat in order:
+        for a in ACTION_CATEGORIES.get(cat, []):
+            if a in seen: continue
+            seen.add(a); disp.append(f"{ACTION_CATEGORIES_EMOJI[cat]} {a}"); vals.append(a)
+    return disp, vals
 
-def action_picker(mood_key: str):
+def action_picker(mood_key: Optional[str]):
     st.markdown('<div class="cbt-card">', unsafe_allow_html=True)
-    st.markdown('<div class="cbt-heading">🌸 Step 6：今、気持ちが少し落ち着くためにできそうなことは？</div>', unsafe_allow_html=True)
-    st.markdown('<div class="cbt-sub">自分に合いそうな“小さな行動”をひとつ選んでみよう。</div>', unsafe_allow_html=True)
-    suggestions = ACTION_LIB.get(mood_key, ACTION_LIB.get(None, []))
-    suggested = st.selectbox("おすすめから選ぶ（任意）", ["— 選ばない —"] + suggestions, index=0, key="cbt_action_pick")
-    custom = st.text_input("自由入力（任意）", key="cbt_action_custom", placeholder="例：外に出て空を見上げる")
+    st.markdown('<div class="cbt-heading">🌸 Step 6：今できそうなことは？</div>', unsafe_allow_html=True)
+    st.markdown('<div class="cbt-sub">ぴったりを1つだけ。選ばなくてもOKだよ。</div>', unsafe_allow_html=True)
+    disp, vals = _flat_action_options_emoji()
+    options_disp = disp + ["— 選ばない —"]
+    key_pick = f"act_pick_single_{(mood_key or 'default').strip().lower()}"
+    sel_disp = st.selectbox("小さな行動（任意）", options=options_disp, index=len(options_disp)-1, key=key_pick)
+    chosen = "" if sel_disp == "— 選ばない —" else vals[disp.index(sel_disp)]
+    custom_key = f"act_custom_single_{(mood_key or 'default').strip().lower()}"
+    custom = st.text_input("＋ 自分の言葉で書く（任意）", key=custom_key, placeholder="例：窓を開けて深呼吸する").strip()
     st.markdown("</div>", unsafe_allow_html=True)
-    return (suggested if suggested != "— 選ばない —" else ""), (custom or "")
+    if custom: return "", custom
+    return (chosen or ""), ""
+
+def recap_card(doc: dict):
+    st.markdown('<div class="cbt-card">', unsafe_allow_html=True)
+    st.markdown('<div class="cbt-heading">🧾 まとめ</div>', unsafe_allow_html=True)
+    st.write(f"- 気持ち：{doc['mood'].get('emoji','')} **{doc['mood'].get('label','未選択')}**（強さ {doc['mood'].get('intensity',0)}）")
+    st.write(f"- きっかけ：{doc.get('trigger_text','') or '—'}")
+    st.write(f"- よぎった言葉：{doc.get('auto_thought','') or '—'}")
+    st.write(f"- そう思った理由：{doc.get('reason_for','') or '—'}")
+    st.write(f"- そうでもないかも：{doc.get('reason_against','') or '—'}")
+    st.write(f"- 友だちにかける言葉：{doc.get('alt_perspective','') or '—'}")
+    chosen = doc.get("action_suggested") or doc.get("action_custom") or "—"
+    st.write(f"- 小さな行動：{chosen}")
+    st.write(f"- 日記：{doc.get('reflection','') or '—'}")
+    st.markdown('<span class="ok-chip">保存はこの端末（このセッション）に残ります。</span>', unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
 def view_note():
     st.markdown("### 📝 心を整えるノート")
