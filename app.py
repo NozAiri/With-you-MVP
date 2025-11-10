@@ -1,20 +1,38 @@
-# app.py — With You.（端末Cookie × 入室コードで一意化 / ADMIN固定コード）
-# 2025-11-09 fix:
-#  - Cookie無効でも入室OK（セッション内一時IDで代替）
-#  - 端末×コード＝user_id（cookie / session-fallback 両対応）
-#  - スライダー重複回避（表示件数=1のときはsliderを出さない）
+# app.py — With You.（Cookie不要：セッションロック×TTL×復帰PIN / ADMIN固定コード）
+# 2025-11-10:
+#  - Cookieを完全に使わない方針
+#  - 入室コードは「同時1人だけ」：entry_codes に所有セッションIDを保持（TTLで自動解放）
+#  - 復帰PIN（6桁）で端末/ブラウザを引き継ぎ
+#  - 運営/本人のロック解除（リリース）ボタン
+#  - 既存の機能（今日を伝える／相談／ノート／呼吸／Study／ふりかえり／運営ダッシュボード）を維持
 
 from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any, Optional, Tuple
 import pandas as pd
 import streamlit as st
-import json, time, re, uuid, os, hashlib
+import json, time, re, uuid, os, hashlib, hmac, random, string
 import altair as alt
 
 # ================== 基本設定 ==================
 st.set_page_config(page_title="With You.", page_icon="🌙", layout="centered", initial_sidebar_state="collapsed")
-ADMIN_MASTER_CODE = "uneiairi0931"   # 運営はこれだけ
+
+ADMIN_MASTER_CODE = "uneiairi0931"    # 運営固定コード
+LOCK_TTL_SECONDS = int(os.environ.get("LOCK_TTL_SECONDS", 180))             # 所有が生きているとみなす猶予（例：3分）
+HEARTBEAT_INTERVAL_SECONDS = int(os.environ.get("HEARTBEAT_INTERVAL", 45))  # ハートビート更新間隔
+PIN_LENGTH = 6
+
+# 内部ハッシュ用シークレット（必ず secrets に置くのが望ましい）
+def _default_secret() -> str:
+    s = st.secrets.get("CODE_HMAC_SECRET")
+    if s: return str(s)
+    # 代替：Firebase SAのprivate_key_idがあればそれを流用（あくまで暫定）
+    try:
+        return st.secrets["FIREBASE_SERVICE_ACCOUNT"]["private_key_id"]
+    except Exception:
+        return "withyou-hmac-secret-fallback-please-set-CODE_HMAC_SECRET"
+
+HMAC_SECRET = _default_secret()
 
 # ================== Firestore ==================
 FIRESTORE_ENABLED = True
@@ -43,27 +61,46 @@ def safe_db_add(collection: str, payload: dict) -> bool:
     except Exception:
         return False
 
-# ================== Cookie（端末ID） ==================
-COOKIES_OK = False
-COOKIE_PASSWORD = st.secrets.get("COOKIE_PASSWORD", os.environ.get("COOKIES_PW", "withyou-cookie-v1"))
-try:
-    from streamlit_cookies_manager import EncryptedCookieManager
-    cookies = EncryptedCookieManager(prefix="withyou_", password=COOKIE_PASSWORD)
-    COOKIES_OK = cookies.ready()
-except Exception:
-    COOKIES_OK = False
-    cookies = None
+# ================== ユーティリティ ==================
+def now_utc() -> datetime:
+    return datetime.now(timezone.utc)
 
-def get_device_id() -> Optional[str]:
-    """Cookieがあれば安定ID。なければ None"""
-    if COOKIES_OK:
-        did = cookies.get("device_id")
-        if not did:
-            did = uuid.uuid4().hex
-            cookies.set("device_id", did, expires_at=datetime.now()+timedelta(days=365*5))
-            cookies.save()
-        return did
-    return None
+def now_iso() -> str:
+    return now_utc().astimezone().isoformat(timespec="seconds")
+
+def sha256_hex(s: str) -> str:
+    return hashlib.sha256(s.encode("utf-8")).hexdigest()
+
+def hmac_sha256_hex(key: str, data: str) -> str:
+    return hmac.new(key.encode("utf-8"), data.encode("utf-8"), hashlib.sha256).hexdigest()
+
+def code_hash(code: str) -> str:
+    """ユーザー入力コードを直接保存しないため、HMACで不可逆化"""
+    return hmac_sha256_hex(HMAC_SECRET, (code or "").strip())
+
+def gen_session_id() -> str:
+    return uuid.uuid4().hex
+
+def gen_pin(n: int = PIN_LENGTH) -> str:
+    return "".join(random.choices(string.digits, k=n))
+
+def hash_pin(pin: str, salt: str) -> str:
+    return sha256_hex(f"{pin}:{salt}")
+
+# ================== セッション状態 ==================
+st.session_state.setdefault("_auth_ok", False)
+st.session_state.setdefault("role", None)              # "admin" / "user"
+st.session_state.setdefault("user_id", "")             # 表示用（code_hashの先頭など）
+st.session_state.setdefault("nickname", "")            # 表示名（任意）
+st.session_state.setdefault("code", "")                # 入室コード（平文は保持しない方が安全。ここではUI利便性で保持）
+st.session_state.setdefault("view", "HOME")
+st.session_state.setdefault("_local_logs", {"note":[], "breath":[], "study":[]})
+st.session_state.setdefault("_session_id", gen_session_id())
+st.session_state.setdefault("_lock_doc", "")           # entry_codes の doc id (= code_hash)
+st.session_state.setdefault("_needs_pin", False)       # 使用中でPIN入力が必要フラグ
+st.session_state.setdefault("_pin_message", "")        # PIN関連メッセージ
+st.session_state.setdefault("_recovery_pin_show", "")  # 直近生成PIN（初回のみ画面表示）
+st.session_state.setdefault("_last_heartbeat", 0.0)    # 最終ハートビートのepoch
 
 # ================== スタイル ==================
 def inject_css():
@@ -106,40 +143,37 @@ html, body, .stApp{ background:var(--grad); color:var(--text); }
 .cbt-heading{ font-weight:900; font-size:1.05rem; color:#1b2440; margin:0 0 6px 0;}
 .cbt-sub{ color:#63728a; font-size:0.92rem; margin:-2px 0 10px 0;}
 .ok-chip{ display:inline-block; padding:2px 8px; border-radius:999px; background:#e8fff3; color:#156f3a; font-size:12px; border:1px solid #b9f3cf; }
-@keyframes sora-grow   { from{transform:scale(0.85)} to{transform:scale(1.0)} }
-@keyframes sora-steady { from{transform:scale(1.0)}  to{transform:scale(1.0)} }
-@keyframes sora-shrink { from{transform:scale(1.0)}  to{transform:scale(0.85)} }
 </style>
 """, unsafe_allow_html=True)
 inject_css()
 
-# ================== 共通ヘルパ ==================
-def now_iso() -> str:
-    return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+# ================== ロック/占有（entry_codes） ==================
+def entry_doc_ref(ch: str):
+    return DB.collection("entry_codes").document(ch)
 
-def sha256_hex(s: str) -> str:
-    return hashlib.sha256(s.encode("utf-8")).hexdigest()
+def _is_alive(last_seen_at: datetime) -> bool:
+    return (now_utc() - last_seen_at) <= timedelta(seconds=LOCK_TTL_SECONDS)
 
-CRISIS_PATTERNS = [r"死にたい", r"消えたい", r"自殺", r"希死", r"傷つけ(たい|てしまう)", r"\bOD\b", r"助けて"]
-def crisis(text: str) -> bool:
-    if not text: return False
-    for p in CRISIS_PATTERNS:
-        if re.search(p, text):
-            return True
-    return False
+def _heartbeat_if_owner():
+    if not (FIRESTORE_ENABLED and DB): return
+    doc_id = st.session_state.get("_lock_doc") or ""
+    if not doc_id: return
+    sid = st.session_state["_session_id"]
+    try:
+        ref = entry_doc_ref(doc_id)
+        snap = ref.get()
+        if not snap.exists: return
+        data = snap.to_dict() or {}
+        if data.get("owner_session_id") == sid:
+            # 更新は重すぎないように間隔を絞る
+            now_epoch = time.time()
+            if now_epoch - st.session_state.get("_last_heartbeat", 0.0) >= HEARTBEAT_INTERVAL_SECONDS:
+                ref.update({"last_seen_at": now_utc()})
+                st.session_state["_last_heartbeat"] = now_epoch
+    except Exception:
+        pass
 
-# ================== 状態初期化 ==================
-st.session_state.setdefault("_auth_ok", False)
-st.session_state.setdefault("role", None)       # "admin" / "user"
-st.session_state.setdefault("user_id", "")      # 表示用
-st.session_state.setdefault("nickname", "")     # 表示名（任意）
-st.session_state.setdefault("code", "")         # 入室コード
-st.session_state.setdefault("view", "HOME")
-st.session_state.setdefault("_local_logs", {"note":[], "breath":[], "study":[]})
-st.session_state.setdefault("_did_src", "")     # "cookie" / "session"
-
-# ================== 入室処理（device_id × code で一意化） ==================
-def try_enter_with_code(code: str, nickname: str) -> Tuple[bool, str, str]:
+def try_enter_with_code(code: str, nickname: str, pin_input: str = "") -> Tuple[bool, str, str]:
     """
     成功: (True, role, display_name)
     失敗: (False, "", error_message)
@@ -148,37 +182,134 @@ def try_enter_with_code(code: str, nickname: str) -> Tuple[bool, str, str]:
     if not code:
         return False, "", "コードを入力してください。"
 
+    # 運営は固定コードのみ
     if code == ADMIN_MASTER_CODE:
+        st.session_state["user_id"] = "admin"
+        st.session_state["_lock_doc"] = ""
+        st.session_state["_recovery_pin_show"] = ""
         return True, "admin", nickname or "admin"
 
-    # ① Cookie優先で端末ID取得
-    cur_did = get_device_id()
-    did_src = "cookie"
-    # ② Cookieが無効ならセッション内の一時IDで代替（再読込で変わるが入室は可）
-    if cur_did is None:
-        cur_did = st.session_state.setdefault("_session_did", uuid.uuid4().hex)
-        did_src = "session"
+    if not (FIRESTORE_ENABLED and DB):
+        return False, "", "サーバ接続が必要です（Firestore 未接続）。"
 
-    # 一意ユーザーID
-    user_hash = sha256_hex(f"{cur_did}:{code}")
-    display_user_id = user_hash[:10]
+    ch = code_hash(code)
+    sid = st.session_state["_session_id"]
+    ref = entry_doc_ref(ch)
 
-    # メタ（任意）
-    if FIRESTORE_ENABLED and DB is not None:
-        try:
-            DB.collection("users_meta").document(user_hash).set({
-                "created_at": datetime.now(timezone.utc),
-                "nickname": nickname or "",
-                "device_hint": (cur_did or "")[:6],
-                "ver": "device+code@v2" if did_src=="cookie" else "session-fallback@v2"
-            }, merge=True)
-        except Exception:
-            pass
+    # トランザクションで占有の取得/移譲/失効判定
+    def _txn_ops(tx: firestore.Client.transaction):
+        snap = ref.get(transaction=tx)
+        now = now_utc()
+        if not snap.exists:
+            # 初回作成（このタイミングで復帰PINを生成して画面表示）
+            pin = gen_pin()
+            salt = uuid.uuid4().hex
+            tx.set(ref, {
+                "owner_session_id": sid,
+                "owner_hint": sid[:6],
+                "created_at": now,
+                "last_seen_at": now,
+                "pin_salt": salt,
+                "pin_hash": hash_pin(pin, salt),
+                "pin_issued_at": now,
+                "pin_rev": 1,
+            })
+            return ("ACQUIRED_NEW", pin)
+        data = snap.to_dict() or {}
+        owner = data.get("owner_session_id")
+        last_seen = data.get("last_seen_at") or data.get("created_at") or now
+        alive = _is_alive(last_seen)
 
-    st.session_state["user_id"] = display_user_id
+        # すでに自分のセッションが所有者
+        if owner == sid:
+            # 心配性のためPINは再発行しない（既存維持）
+            tx.update(ref, {"last_seen_at": now})
+            return ("ALREADY_OWNER", None)
+
+        if not alive:
+            # 失効している → 所有権を奪取（PINは新規発行）
+            pin = gen_pin()
+            salt = uuid.uuid4().hex
+            rev = int(data.get("pin_rev", 1)) + 1
+            tx.update(ref, {
+                "owner_session_id": sid,
+                "owner_hint": sid[:6],
+                "last_seen_at": now,
+                "pin_salt": salt,
+                "pin_hash": hash_pin(pin, salt),
+                "pin_issued_at": now,
+                "pin_rev": rev,
+            })
+            return ("TAKEOVER_EXPIRED", pin)
+
+        # 生きている所有者が別にいる → PINが一致すれば移譲
+        if pin_input:
+            salt = data.get("pin_salt", "")
+            expect = data.get("pin_hash", "")
+            if salt and expect and hash_pin(pin_input, salt) == expect:
+                pin = gen_pin()  # 引き継いだ新オーナーに新しいPINを再発行
+                new_salt = uuid.uuid4().hex
+                rev = int(data.get("pin_rev", 1)) + 1
+                tx.update(ref, {
+                    "owner_session_id": sid,
+                    "owner_hint": sid[:6],
+                    "last_seen_at": now,
+                    "pin_salt": new_salt,
+                    "pin_hash": hash_pin(pin, new_salt),
+                    "pin_issued_at": now,
+                    "pin_rev": rev,
+                })
+                return ("TRANSFER_BY_PIN", pin)
+            else:
+                return ("PIN_MISMATCH", None)
+
+        # PINなし → 使用中
+        return ("IN_USE", None)
+
+    try:
+        result, pin = DB.transaction(_txn_ops)
+    except Exception as e:
+        return False, "", f"入室処理に失敗しました。もう一度お試しください。({e})"
+
+    # 結果ハンドリング
+    display_uid = ch[:10]  # 表示用user_idはコード固有（引き継いでも同じIDのまま）
+    st.session_state["user_id"] = display_uid
     st.session_state["nickname"] = nickname or ""
-    st.session_state["_did_src"] = did_src
-    return True, "user", nickname or display_user_id
+    st.session_state["_lock_doc"] = ch
+
+    if result in ("ACQUIRED_NEW", "TAKEOVER_EXPIRED", "TRANSFER_BY_PIN"):
+        st.session_state["_recovery_pin_show"] = pin or ""
+        st.session_state["_needs_pin"] = False
+        st.session_state["_pin_message"] = ""
+        return True, "user", nickname or display_uid
+
+    if result in ("ALREADY_OWNER",):
+        st.session_state["_recovery_pin_show"] = ""
+        st.session_state["_needs_pin"] = False
+        st.session_state["_pin_message"] = ""
+        return True, "user", nickname or display_uid
+
+    if result == "IN_USE":
+        st.session_state["_needs_pin"] = True
+        st.session_state["_pin_message"] = f"このコードは使用中です。復帰PINを入力すると引き継げます。"
+        return False, "", "このコードは現在使用中です。復帰PINを入力してください。"
+
+    if result == "PIN_MISMATCH":
+        st.session_state["_needs_pin"] = True
+        st.session_state["_pin_message"] = "復帰PINが違います。もう一度ご確認ください。"
+        return False, "", "復帰PINが一致しません。"
+
+    return False, "", "入室できませんでした。"
+
+def release_code(ch: str) -> bool:
+    """entry_codes の所有を解放（ドキュメント削除）"""
+    if not (FIRESTORE_ENABLED and DB): return False
+    try:
+        ref = entry_doc_ref(ch)
+        ref.delete()
+        return True
+    except Exception:
+        return False
 
 # ================== ナビ/ステータス ==================
 BASE_SECTIONS = [
@@ -219,14 +350,11 @@ def top_tabs():
 def top_status():
     role_txt = '運営' if st.session_state.role=='admin' else (f'利用者（{st.session_state.nickname or st.session_state.user_id}）' if st.session_state.user_id else '未ログイン')
     fs_txt = "接続済み" if FIRESTORE_ENABLED else "未接続（オフライン）"
-    if st.session_state.get("_did_src") == "session":
-        cookie_txt = "OFF（セッションID）"
-    else:
-        cookie_txt = "ON" if COOKIES_OK else "OFF"
+    ttl = f"{LOCK_TTL_SECONDS//60}分" if LOCK_TTL_SECONDS>=60 else f"{LOCK_TTL_SECONDS}秒"
     st.markdown('<div class="card" style="padding:8px 12px; margin-bottom:10px">', unsafe_allow_html=True)
-    st.markdown(f"<div class='tip'>ログイン中：{role_txt} / データ共有：{fs_txt} / 端末識別（Cookie）：{cookie_txt}</div>", unsafe_allow_html=True)
-    if st.session_state.get("_did_src") == "session":
-        st.markdown("<div class='tip'>※ Cookieが無効のため、再読み込みや別タブでは同一ユーザーとして扱われません。</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='tip'>ログイン中：{role_txt} / データ共有：{fs_txt} / ロックTTL：{ttl}</div>", unsafe_allow_html=True)
+    if st.session_state.get("_recovery_pin_show"):
+        st.info(f"🔐 復帰PIN（メモ推奨）：**{st.session_state['_recovery_pin_show']}**（このコードの引き継ぎに使います）")
     st.markdown("</div>", unsafe_allow_html=True)
 
 # ================== HOME/機能UI ==================
@@ -246,7 +374,7 @@ def home_intro_block():
 気持ちを整える、やさしいノートです。
 
 🔒 「今日を伝える」と「相談」だけが運営に届きます。
-それ以外の記録は、この端末だけに残ります。
+それ以外の記録は、この端末（このセッション）だけに残ります。
   </div>
 </div>
 """, unsafe_allow_html=True)
@@ -469,8 +597,8 @@ def view_share():
     label = "📨 送信（匿名）" if FIRESTORE_ENABLED else "📨 送信（無効：未接続）"
     if st.button(label, type="primary", key="share_submit", disabled=disabled):
         ok = safe_db_add("school_share", {
-            "ts": datetime.now(timezone.utc),
-            "user_id": st.session_state.user_id,  # 端末×コード or セッション×コード
+            "ts": now_utc(),
+            "user_id": st.session_state.user_id,  # コード固有ID（引き継ぎでも同一）
             "payload": {"mood":mood, "body":body, "sleep_hours":float(sh), "sleep_quality":sq},
             "anonymous": True
         })
@@ -478,6 +606,14 @@ def view_share():
 
 # ----- 相談（Firestore） -----
 CONSULT_TOPICS = ["体調","勉強","人間関係","家庭","進路","いじめ","メンタルの不調","その他"]
+CRISIS_PATTERNS = [r"死にたい", r"消えたい", r"自殺", r"希死", r"傷つけ(たい|てしまう)", r"\bOD\b", r"助けて"]
+def crisis(text: str) -> bool:
+    if not text: return False
+    for p in CRISIS_PATTERNS:
+        if re.search(p, text):
+            return True
+    return False
+
 def view_consult():
     st.markdown("### 🕊 相談（匿名OK）")
     st.caption("誰にも言いにくいことでも大丈夫。お名前は空欄のまま送れます。")
@@ -495,7 +631,7 @@ def view_consult():
     label = "🕊 送信する" if FIRESTORE_ENABLED else "🕊 送信（無効：未接続）"
     if st.button(label, type="primary", disabled=disabled, key="c_submit"):
         payload = {
-            "ts": datetime.now(timezone.utc),
+            "ts": now_utc(),
             "user_id": st.session_state.user_id,
             "message": msg.strip(),
             "topics": topics,
@@ -616,7 +752,7 @@ def _fetch_firestore_df(coll: str, start_dt: Optional[datetime], end_dt: Optiona
         elif isinstance(ts, datetime):
             ts_dt = ts.astimezone(timezone.utc)
         else:
-            ts_dt = datetime.now(timezone.utc)
+            ts_dt = now_utc()
         base = {
             "_doc": d.id,
             "ts": ts_dt.astimezone().isoformat(timespec="seconds"),
@@ -706,28 +842,18 @@ def view_admin():
     with c3:
         limit = st.number_input("最大取得件数", min_value=100, max_value=5000, value=1000, step=100, key="adm_limit")
 
-    now_utc = datetime.now(timezone.utc)
-    start_dt = None if days=="すべて" else now_utc - timedelta(days=int(days.replace("直近","").replace("日","")))
+    now_u = now_utc()
+    start_dt = None if days=="すべて" else now_u - timedelta(days=int(days.replace("直近","").replace("日","")))
     coll = "school_share" if dataset.startswith("今日を伝える") else "consult_msgs"
     df = _fetch_firestore_df(coll, start_dt, None, limit)
 
-    with st.expander("🔎 追加フィルタ", expanded=False):
-        if coll == "school_share":
-            f_mood = st.multiselect("気分", sorted(df["mood"].dropna().unique().tolist()) if not df.empty else [], key="f_mood")
-            f_body = st.text_input("体調テキスト（例：頭痛）", key="f_body")
-            f_uid  = st.text_input("ユーザーID（部分一致）", key="f_uid")
-            if f_mood and not df.empty: df = df[df["mood"].isin(f_mood)]
-            if f_body and not df.empty: df = df[df["body"].fillna("").str.contains(f_body)]
-            if f_uid  and not df.empty: df = df[df["user_id"].fillna("").str.contains(f_uid)]
-        else:
-            f_int = st.multiselect("相談先", ["teacher","counselor"], key="f_int")
-            f_topic = st.text_input("トピック（例：いじめ）", key="f_topic")
-            f_kw = st.text_input("本文キーワード", key="f_kw")
-            f_uid = st.text_input("ユーザーID（部分一致）", key="f_uid_c")
-            if f_int and not df.empty: df = df[df["intent"].isin(f_int)]
-            if f_topic and not df.empty: df = df[df["topics"].fillna("").str.contains(f_topic)]
-            if f_kw and not df.empty: df = df[df["message"].fillna("").str.contains(f_kw)]
-            if f_uid and not df.empty: df = df[df["user_id"].fillna("").str.contains(f_uid)]
+    with st.expander("🔧 ロック管理（運営）", expanded=False):
+        st.caption("占有中のコードを解除できます。ユーザーから問い合わせがあった場合に使用してください。")
+        code_to_release = st.text_input("解除したい入室コード（合言葉）", key="adm_release_code")
+        if st.button("🔓 強制リリース", key="adm_release_btn") and code_to_release.strip():
+            ch = code_hash(code_to_release.strip())
+            ok = release_code(ch)
+            st.success("リリースしました。") if ok else st.error("解除できませんでした。")
 
     if df.empty:
         st.info("該当データがありません。条件を変更してください。")
@@ -765,15 +891,12 @@ def view_admin():
         groups = df.sort_values("ts", ascending=False).groupby("_date", sort=False)
         max_n = max(1, min(50, len(df)))
         default_n = min(10, max_n)
-        if int(max_n) <= 1:
-            n_show = 1
-        else:
-            n_show = st.slider("表示件数（最新から）", 1, int(max_n), int(default_n), key="adm_nshow")
+        n_show = 1 if int(max_n) <= 1 else st.slider("表示件数（最新から）", 1, int(max_n), int(default_n), key="adm_nshow")
         count = 0
         for gdate, gdf in groups:
             if count >= n_show: break
             st.markdown(f"##### 📅 {gdate}")
-            for _, row in gdf.sort_values("ts", ascending=False).iterrows():
+            for _, row in gdf.sort_values("ts", descending=False if False else True).iterrows():
                 if count >= n_show: break
                 if coll == "school_share": _render_share_card(row)
                 else: _render_consult_card(row)
@@ -792,21 +915,25 @@ def main_router():
     elif v == "ADMIN" and st.session_state.role == "admin": view_admin()
     else: view_home()
 
-# ================== ログインUI ==================
+# ================== ログインUI / リリースUI ==================
 def login_ui() -> bool:
     if st.session_state._auth_ok: return True
     with st.container():
         st.markdown('<div class="card">', unsafe_allow_html=True)
         st.markdown("### 🌙 With You")
         st.caption("気持ちを整える、やさしいノート。")
-        code = st.text_input("🔑 入室コード（合言葉）", key="login_code", placeholder="お好きなパスワードをご入力ください")
-        nick = st.text_input("🪞 ニックネーム（任意）", key="login_nick", placeholder="ニックネームをご入力ください")
+        code = st.text_input("🔑 入室コード（合言葉）", key="login_code", placeholder="自分専用の合言葉（同時1端末）")
+        nick = st.text_input("🪞 ニックネーム（任意）", key="login_nick", placeholder="ニックネーム（なくてもOK）")
 
-        if not COOKIES_OK:
-            st.caption("※ CookieがOFFのため、同一ユーザー判定はこのセッション内のみです。可能ならCookieを有効にしてください。")
+        pin_help = st.session_state.get("_pin_message", "")
+        if st.session_state.get("_needs_pin", False):
+            if pin_help: st.info(pin_help)
+            pin_in = st.text_input("🔐 復帰PIN（使用中のときの引き継ぎに使用）", key="login_pin", placeholder="6桁", max_chars=6)
+        else:
+            pin_in = st.text_input("🔐 復帰PIN（必要なときのみ）", key="login_pin", placeholder="任意（6桁）", max_chars=6)
 
         if st.button("➡️ はじめる", type="primary", use_container_width=True, key="login_go"):
-            ok, role, msg = try_enter_with_code(code, nick)
+            ok, role, msg = try_enter_with_code(code, nick, pin_in.strip())
             if ok:
                 st.session_state["_auth_ok"] = True
                 st.session_state["role"] = role
@@ -820,23 +947,46 @@ def login_ui() -> bool:
         st.markdown("</div>", unsafe_allow_html=True)
     return False
 
-def logout_btn():
+def sidebar_controls():
     with st.sidebar:
+        st.markdown("### ⚙️ 設定")
+        st.caption("この端末のセッションは一定時間操作がないと自動的に解放（他端末からログイン可能）されます。")
+        if st.button("🔄 ハートビートを今すぐ送る", key="hb_now"):
+            _heartbeat_if_owner()
+            st.success("更新しました。")
+        if st.button("🔓 自己リリース（このコードの占有を解除）", key="self_release"):
+            code_plain = st.session_state.get("code","")
+            if not code_plain:
+                st.warning("入室コードが見つかりません。")
+            else:
+                ok = release_code(code_hash(code_plain))
+                if ok:
+                    st.success("解除しました。ログアウトします。")
+                    # ログアウト
+                    st.session_state.clear()
+                    st.session_state["_session_id"] = gen_session_id()
+                    st.rerun()
+                else:
+                    st.error("解除できませんでした。")
+
+        st.divider()
         if st.button("🚪 ログアウト", key="logout_btn"):
-            keep_cookie = cookies.get("device_id") if COOKIES_OK else None
             st.session_state.clear()
-            if COOKIES_OK and keep_cookie:
-                cookies.set("device_id", keep_cookie, expires_at=datetime.now()+timedelta(days=365*5))
-                cookies.save()
+            st.session_state["_session_id"] = gen_session_id()
             st.rerun()
 
 # ================== App起動 ==================
+# ログイン済みならハートビートを定期送信（st_autorefreshで画面を軽く更新）
+if st.session_state.get("_auth_ok", False) and st.session_state.get("role") != "admin":
+    # 所有者時のみ更新（内部で判定）
+    _heartbeat_if_owner()
+    st_autoref = st.experimental_rerun  # placeholder to keep compatibility if needed
+
+# 画面描画
 if st.session_state.get("_auth_ok", False):
-    # ← ログイン済みならアプリ本体を描画
-    logout_btn()
+    sidebar_controls()
     top_tabs()
     top_status()
     main_router()
 else:
-    # ← 未ログインならログインUIを表示
     login_ui()
