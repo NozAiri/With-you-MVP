@@ -336,31 +336,27 @@ def view_home():
 BREATH_PATTERN = (5, 2, 6)  # 5-2-6
 
 def breathing_animation(total_sec: int = 90):
-    """円は1つ。カウントダウンは円の下に表示。"""
+    """円は1つのみ。カウントダウンは円の下に表示。"""
     inhale, hold, exhale = BREATH_PATTERN
     cycle = inhale + hold + exhale
     cycles = max(1, round(total_sec / cycle))
 
-    # 表示用プレースホルダ（円 → カウントダウン → 停止ボタン）
     circle_area = st.empty()
     countdown_area = st.empty()
-    stop_area = st.empty()
     phase_area = st.empty()
+    stop_area = st.empty()
 
-    # 円（固定サイズ）
-    def draw_circle():
-        circle_area.markdown(
-            """
+    # 円を一度だけ描く
+    circle_area.markdown(
+        """
 <div style="display:flex;justify-content:center;align-items:center;padding:8px 0 6px">
-  <div class="breath-spot" style="width:260px;height:260px"></div>
+  <div id="breath-circle" class="breath-spot" style="width:260px;height:260px"></div>
 </div>
 """,
-            unsafe_allow_html=True,
-        )
+        unsafe_allow_html=True,
+    )
 
-    # カウントダウン（円の下）
     def set_countdown(sec: int, label: str = ""):
-        # 大きめのテキストで下に表示
         countdown_area.markdown(
             f"""
 <div style="text-align:center;font-size:1.05rem;color:#3a4a6a;">
@@ -370,9 +366,7 @@ def breathing_animation(total_sec: int = 90):
             unsafe_allow_html=True,
         )
 
-    draw_circle()
-
-    # 停止ボタン（さらに下）
+    # 停止ボタン（下）
     with stop_area.container():
         cols = st.columns([1, 1, 1])
         with cols[1]:
@@ -383,25 +377,19 @@ def breathing_animation(total_sec: int = 90):
                 use_container_width=True,
             )
 
-    def tick(label: str, seconds: int) -> bool:
-        phase_area.markdown(f"**{label}**")
-        for remain in range(seconds, 0, -1):
-            if st.session_state.get("_breath_stop") or st.session_state.view != "SESSION":
-                return False
-            draw_circle()
-            set_countdown(remain, label)
-            time.sleep(1)
-        return True
-
-    # 実行
+    # カウントダウンだけ変化させる（円は固定）
     for _ in range(cycles):
-        if not tick("吸ってください", inhale): break
-        if hold > 0 and not tick("止めてください", hold): break
-        if not tick("吐いてください", exhale): break
+        for label, seconds in [("吸ってください", inhale), ("止めてください", hold), ("吐いてください", exhale)]:
+            if seconds <= 0:
+                continue
+            phase_area.markdown(f"**{label}**")
+            for remain in range(seconds, 0, -1):
+                if st.session_state.get("_breath_stop") or st.session_state.view != "SESSION":
+                    return
+                set_countdown(remain, label)
+                time.sleep(1)
 
-    # 後片付け
     phase_area.empty()
-    # （円とカウントダウンはそのまま消さずに終了表示にしてもよいが、今回は空にする）
     countdown_area.empty()
     stop_area.empty()
 
@@ -413,17 +401,7 @@ def view_session():
     total_seconds = 90
     inhale, hold, exhale = BREATH_PATTERN
 
-    # 円（静止表示）
-    st.markdown(
-        """
-<div style="display:flex;justify-content:center;align-items:center;padding:8px 0 6px">
-  <div class="breath-spot" style="width:260px;height:260px"></div>
-</div>
-""",
-        unsafe_allow_html=True
-    )
-
-    # ボタン（円の下）
+    # はじめるボタンのみ最初に表示
     cols = st.columns([1, 1, 1])
     with cols[1]:
         if st.button("🫁 はじめる（90秒）", key="breath_start", type="primary", use_container_width=True):
@@ -431,11 +409,10 @@ def view_session():
             breathing_animation(total_seconds)
             st.success("お疲れさまでした。ありがとうございます。")
 
-    # パターン表記（ボタンのさらに下）
     st.caption(f"パターン：{inhale}-{hold}-{exhale}／合計 {total_seconds} 秒")
 
     st.divider()
-    # メーターは1つ（スライダーのみ）
+    # メーター（スライダー1つのみ）
     after = st.slider("いまの気分（1 とてもつらい / 10 とても楽）", 1, 10, 5, key="breath_mood_after")
 
     if st.button("💾 端末に保存（このセッション内）", type="primary", key="breath_save"):
@@ -443,6 +420,7 @@ def view_session():
             "ts": now_iso(), "pattern": "5-2-6", "mood_after": int(after), "sec": total_seconds
         })
         st.success("保存しました。（運営には共有されません）")
+
 
 
 # ----- ノート（ローカル保存） -----
