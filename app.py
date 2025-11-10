@@ -1,8 +1,8 @@
 # app.py — With You.
 # （共通パス＋自分だけの名前｜登録先着専有・同時利用OK・Cookie/URL/本人コードなし｜ADMIN対応＋フォールバック）
 from __future__ import annotations
-from datetime import datetime, timezone
-from typing import Dict, Tuple, List
+from datetime import datetime, timezone, timedelta
+from typing import Dict, Tuple, List, Optional, Any
 import streamlit as st
 import pandas as pd
 import altair as alt
@@ -121,6 +121,9 @@ st.session_state.setdefault("view", "HOME")   # 画面
 st.session_state.setdefault("flash_msg", "")  # 再描画時の一時メッセージ
 st.session_state.setdefault("role", "user")   # "user" or "admin"
 
+# ローカルログ（端末保存）
+st.session_state.setdefault("_local_logs", {"note":[], "breath":[], "study":[]})
+
 # ================== スタイル ==================
 def inject_css():
     st.markdown("""
@@ -159,6 +162,14 @@ html, body, .stApp{ background:var(--grad); color:var(--text); }
 .cbt-card{ background:#fff; border:1px solid #e3e8ff; border-radius:18px; padding:18px 18px 14px; box-shadow:0 6px 20px rgba(31,59,179,0.06); margin-bottom:14px; }
 .cbt-heading{ font-weight:900; font-size:1.05rem; color:#1b2440; margin:0 0 6px 0;}
 .cbt-sub{ color:#63728a; font-size:0.92rem; margin:-2px 0 10px 0;}
+.meta{ color:#6a7d9e; font-size:.86rem; margin-bottom:.3rem}
+.ok-chip{ display:inline-block; background:#eefaf1; color:#147a3d; border:1px solid #cfeedd; border-radius:999px; padding:.2rem .6rem; font-size:.82rem }
+.breath-spot{
+  width:260px;height:260px;border-radius:999px;
+  background:radial-gradient(circle at 50% 40%, #f7fbff, #e8f2ff 60%, #eef8ff 100%);
+  border:1px solid #dbe9ff;
+  box-shadow:0 18px 36px rgba(90,140,190,.14), inset 0 -10px 25px rgba(120,150,200,.15);
+}
 </style>
 """, unsafe_allow_html=True)
 inject_css()
@@ -315,45 +326,113 @@ def view_home():
     big_button("今日を伝える", "今日の体調や気分を先生・学校に共有します。", "SHARE", "share", "🏫")
     c1, c2 = st.columns(2)
     with c1: big_button("リラックス", "90秒の呼吸で、いまを落ち着ける。", "SESSION", "session", "🌙")
-    with c2: big_button("心を整えるノート", "気持ちを言葉にして、頭の中を整理。", "NOTE", "note", "📝")
+    with c2: big_button("心を整えるノート", "感じたことを言葉にして、今の自分を整理します。", "NOTE", "note", "📝")
     c3, c4 = st.columns(2)
     with c3: big_button("Study Tracker", "学習時間を見える化。", "STUDY", "study", "📚")
     with c4: big_button("ふりかえり", "この端末に残した記録をまとめて確認。", "REVIEW", "review", "📒")
     big_button("相談する", "匿名OK。困りごとがあれば短くでも。", "CONSULT", "consult", "🕊")
 
-# ----- リラックス（簡易） -----
-BREATH_PATTERN = (5,2,6)
+# ----- リラックス（呼吸） -----
+BREATH_PATTERN = (5, 2, 6)  # 5-2-6
+
 def breathing_animation(total_sec: int = 90):
+    """簡易アニメーション：フェーズに応じて円のサイズを変えて更新。"""
     inhale, hold, exhale = BREATH_PATTERN
     cycle = inhale + hold + exhale
     cycles = max(1, round(total_sec / cycle))
-    ph = st.empty(); spot = st.empty(); ctrl = st.empty()
-    def phase(label, seconds):
-        ph.markdown(f"**{label}**")
-        spot.markdown(
-            f'<div style="display:flex;justify-content:center;align-items:center;padding:10px 0 6px">'
-            f'<div style="width:240px;height:240px;border-radius:999px;background:radial-gradient(circle at 50% 40%, #f7fbff, #e8f2ff 60%, #eef8ff 100%);'
-            f'box-shadow:0 18px 36px rgba(90,140,190,.14), inset 0 -10px 25px rgba(120,150,200,.15);border:solid #dbe9ff"></div>'
-            f'</div>', unsafe_allow_html=True)
-        for _ in range(seconds): time.sleep(1)
+
+    phase_placeholder = st.empty()
+    circle_placeholder = st.empty()
+    ctrl_placeholder = st.empty()
+    seconds_placeholder = st.empty()
+
+    def draw_circle(scale: float = 1.0):
+        # scale に応じてサイズを変更
+        base = 220
+        size = int(base * scale)
+        circle_placeholder.markdown(
+            f"""
+<div style="display:flex;justify-content:center;align-items:center;padding:8px 0 4px">
+  <div class="breath-spot" style="width:{size}px;height:{size}px"></div>
+</div>
+""", unsafe_allow_html=True)
+
+    def tick(label: str, seconds: int, start_scale: float, end_scale: float) -> bool:
+        phase_placeholder.markdown(f"**{label}**")
+        # 線形補間でサイズを変える
+        steps = max(1, seconds)
+        for i in range(steps):
+            if st.session_state.get("_breath_stop") or st.session_state.view != "SESSION":
+                return False
+            ratio = (i + 1) / steps
+            scale = start_scale + (end_scale - start_scale) * ratio
+            draw_circle(scale)
+            left_total = seconds - i
+            seconds_placeholder.caption(f"のこり {left_total} 秒")
+            time.sleep(1)
         return True
-    with ctrl.container():
-        if st.button("⏹ 停止する", key="breath_stop"): return
+
+    # 下部に停止ボタン（円の「下」に配置）
+    with ctrl_placeholder.container():
+        stop_cols = st.columns([1,1,1])
+        with stop_cols[1]:
+            st.button("⏹ 停止する", key="breath_stop_btn", on_click=lambda: st.session_state.update({"_breath_stop": True}), use_container_width=True)
+
+    # 実行
     for _ in range(cycles):
-        if not phase("吸ってください", inhale): break
-        if hold>0 and not phase("止めてください", hold): break
-        if not phase("吐いてください", exhale): break
-    ph.empty(); spot.empty(); ctrl.empty()
+        if not tick("吸ってください", inhale, 0.8, 1.2): break
+        if BREATH_PATTERN[1] > 0:
+            if not tick("止めてください", hold, 1.2, 1.2): break
+        if not tick("吐いてください", exhale, 1.2, 0.8): break
+
+    # 後片付け
+    phase_placeholder.empty()
+    circle_placeholder.empty()
+    ctrl_placeholder.empty()
+    seconds_placeholder.empty()
 
 def view_session():
     st.markdown("### 🌙 リラックス（呼吸）")
-    st.caption("円が大きくなったら吸って、小さくなったら吐きます。")
-    if st.button("🫁 はじめる（90秒）", type="primary", key="breath_start"):
-        breathing_animation(90); st.success("お疲れさまでした。ありがとうございます。")
+    st.caption("円が大きくなったら吸って、小さくなったら吐きます。途中で停止・ページ移動できます。")
+
+    total_seconds = 90
+    inhale, hold, exhale = BREATH_PATTERN
+
+    # 円（最初に静止表示）
+    st.markdown(
+        """
+<div style="display:flex;justify-content:center;align-items:center;padding:8px 0 4px">
+  <div class="breath-spot"></div>
+</div>
+""", unsafe_allow_html=True
+    )
+
+    # ボタンは「円の下」に配置
+    c_btn = st.container()
+    with c_btn:
+        cols = st.columns([1,1,1])
+        with cols[1]:
+            if st.button("🫁 はじめる（90秒）", key="breath_start", type="primary", use_container_width=True):
+                st.session_state["_breath_stop"] = False
+                breathing_animation(total_seconds)
+                st.success("お疲れさまでした。ありがとうございます。")
+
+    # 秒数の表記（ボタンのさらに下）
+    st.caption(f"パターン：{inhale}-{hold}-{exhale}／合計 {total_seconds} 秒")
+
+    st.divider()
+    # リラックス後のメーター（スライダー＋バー）
+    after = st.slider("いまの気分（1 とてもつらい / 10 とても楽）", 1, 10, 5, key="breath_mood_after")
+    # 進捗バーを“メーター風”に（右端=10）
+    st.progress(int(after * 10))
+
+    if st.button("💾 端末に保存（このセッション内）", type="primary", key="breath_save"):
+        st.session_state["_local_logs"]["breath"].append({
+            "ts": now_iso(), "pattern": "5-2-6", "mood_after": int(after), "sec": total_seconds
+        })
+        st.success("保存しました。（運営には共有されません）")
 
 # ----- ノート（ローカル保存） -----
-st.session_state.setdefault("_local_logs", {"note":[], "breath":[], "study":[]})
-
 MOODS = [
     {"emoji":"😢","label":"悲しい","key":"sad"},
     {"emoji":"😠","label":"イライラ","key":"anger"},
@@ -365,22 +444,22 @@ MOODS = [
     {"emoji":"😕","label":"モヤモヤ","key":"confuse"},
 ]
 
-def cbt_intro():
-    cbt_intro_block = cbt_intro
-
-    # 互換エイリアス（過去コード呼び出し維持用）
 def cbt_intro_block():
-    return cbt_intro()
-
+    # ご指定の文章をそのまま表示
     st.markdown("""
 <div class="cbt-card">
   <div class="cbt-heading">このワークについて</div>
   <div class="cbt-sub" style="white-space:pre-wrap">
-このノートは、認知行動療法（CBT）の考え方をもとにしています。
-気持ちと言葉を整理して、少し軽くなることを目指します。
+このノートは、認知行動療法（CBT）という考え方をもとにしています。
+「気持ち」と「考え方」の関係を整理することで、
+今感じている不安やしんどさが少し軽くなることを目指しています。
+自分のペースで、思いつくことを自由に書いてみてください。
   </div>
 </div>
 """, unsafe_allow_html=True)
+
+def cbt_intro():
+    return cbt_intro_block()
 
 def mood_radio() -> Dict[str, Any]:
     st.markdown('<div class="cbt-card">', unsafe_allow_html=True)
@@ -459,8 +538,7 @@ def recap_card(doc: dict):
 
 def view_note():
     st.markdown("### 📝 心を整えるノート")
-    cbt_intro()
-
+    cbt_intro()  # ← ご指定の冒頭文を表示
 
     mood = mood_radio()
     trigger_text   = text_card("🫧 Step 2：その気持ちは、どんなことがきっかけだった？", "「○○があったからかも」「なんとなく○○って思ったから」など自由に。", "cbt_trigger")
