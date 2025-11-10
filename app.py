@@ -445,8 +445,6 @@ MOODS = [
     {"emoji":"😟","label":"不安","key":"anx"},
     {"emoji":"😔","label":"さみしい","key":"lonely"},
     {"emoji":"😩","label":"しんどい","key":"tired"},
-    {"emoji":"😊","label":"少しホッとした","key":"relief"},
-    {"emoji":"😄","label":"うれしい","key":"joy"},
     {"emoji":"😕","label":"モヤモヤ","key":"confuse"},
 ]
 
@@ -457,8 +455,8 @@ def cbt_intro_block():
   <div class="cbt-heading">このワークについて</div>
   <div class="cbt-sub" style="white-space:pre-wrap">
 このノートは、認知行動療法（CBT）という考え方をもとにしています。
-「気持ち」と「考え方」の関係を整理することで、
-今感じている不安やしんどさが少し軽くなることを目指しています。
+「気持ち」と「考え方」を整理することで、
+今感じている不安やしんどさを感じたとき、その心が少し軽くなることを目指しています。
 自分のペースで、思いつくことを自由に書いてみてください。
   </div>
 </div>
@@ -549,8 +547,7 @@ def view_note():
     mood = mood_radio()
     trigger_text   = text_card("🫧 Step 2：その気持ちは、どんなことがきっかけだった？", "「○○があったからかも」「なんとなく○○って思ったから」など自由に。", "cbt_trigger")
     auto_thought   = text_card("💭 Step 3：そのとき、頭の中でどんな言葉がよぎった？", "心の中でつぶやいた言葉やイメージをそのまま書いてOK。", "cbt_auto")
-    reason_for     = text_card("🔍 Step 4-1：そう思った理由はある？", "「たしかにそうかも」と思うことを書いてみよう。", "cbt_for", height=100)
-    reason_against = text_card("🔍 Step 4-2：そうでもないかもと思う理由はある？", "「でも、こういう面もあるかも」も書いてみよう。", "cbt_against", height=100)
+    reason_against = text_card("🔍 Step 4：そうでもないかもと思う理由はある？", "「でも、こういう面もあるかも」も書いてみよう。", "cbt_against", height=100)
     alt_perspective= text_card("🌱 Step 5：もし友だちが同じことを感じていたら、なんて声をかける？", "自分のことじゃなく“友だち”のこととして考えてみよう。", "cbt_alt")
     act_suggested, act_custom = action_picker(mood.get("key"))
     reflection     = text_card("🌙 Step 7：今日の日記", "気づいたこと・気持ちの変化・これからのことなど自由に。", "cbt_reflect", height=120)
