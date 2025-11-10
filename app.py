@@ -366,6 +366,10 @@ MOODS = [
 ]
 
 def cbt_intro():
+    # 互換エイリアス（過去コード呼び出し維持用）
+def cbt_intro_block():
+    return cbt_intro()
+
     st.markdown("""
 <div class="cbt-card">
   <div class="cbt-heading">このワークについて</div>
@@ -453,7 +457,8 @@ def recap_card(doc: dict):
 
 def view_note():
     st.markdown("### 📝 心を整えるノート")
-    cbt_intro_block()
+    cbt_intro()
+
 
     mood = mood_radio()
     trigger_text   = text_card("🫧 Step 2：その気持ちは、どんなことがきっかけだった？", "「○○があったからかも」「なんとなく○○って思ったから」など自由に。", "cbt_trigger")
