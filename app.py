@@ -336,7 +336,8 @@ def view_home():
 BREATH_PATTERN = (5, 2, 6)  # 5-2-6
 
 def breathing_animation(total_sec: int = 90):
-    """円は1つのみ。カウントダウンは円の下に表示。"""
+    """円は1つのみ。カウントダウンは円の下に表示。実行中は _breath_running = True。"""
+    st.session_state["_breath_running"] = True
     inhale, hold, exhale = BREATH_PATTERN
     cycle = inhale + hold + exhale
     cycles = max(1, round(total_sec / cycle))
@@ -346,11 +347,11 @@ def breathing_animation(total_sec: int = 90):
     phase_area = st.empty()
     stop_area = st.empty()
 
-    # 円を一度だけ描く
+    # 円（一度だけ描画）
     circle_area.markdown(
         """
 <div style="display:flex;justify-content:center;align-items:center;padding:8px 0 6px">
-  <div id="breath-circle" class="breath-spot" style="width:260px;height:260px"></div>
+  <div class="breath-spot" style="width:260px;height:260px"></div>
 </div>
 """,
         unsafe_allow_html=True,
@@ -377,21 +378,26 @@ def breathing_animation(total_sec: int = 90):
                 use_container_width=True,
             )
 
-    # カウントダウンだけ変化させる（円は固定）
-    for _ in range(cycles):
-        for label, seconds in [("吸ってください", inhale), ("止めてください", hold), ("吐いてください", exhale)]:
-            if seconds <= 0:
-                continue
-            phase_area.markdown(f"**{label}**")
-            for remain in range(seconds, 0, -1):
-                if st.session_state.get("_breath_stop") or st.session_state.view != "SESSION":
-                    return
-                set_countdown(remain, label)
-                time.sleep(1)
+    try:
+        # カウントダウン（円は固定）
+        for _ in range(cycles):
+            for label, seconds in [("吸ってください", inhale), ("止めてください", hold), ("吐いてください", exhale)]:
+                if seconds <= 0:
+                    continue
+                phase_area.markdown(f"**{label}**")
+                for remain in range(seconds, 0, -1):
+                    if st.session_state.get("_breath_stop") or st.session_state.view != "SESSION":
+                        return
+                    set_countdown(remain, label)
+                    time.sleep(1)
+    finally:
+        # 終了/中断時の後片付け
+        st.session_state["_breath_running"] = False
+        st.session_state["_breath_stop"] = False
+        phase_area.empty()
+        countdown_area.empty()
+        stop_area.empty()
 
-    phase_area.empty()
-    countdown_area.empty()
-    stop_area.empty()
 
 
 def view_session():
@@ -401,14 +407,22 @@ def view_session():
     total_seconds = 90
     inhale, hold, exhale = BREATH_PATTERN
 
-    # はじめるボタンのみ最初に表示
-    cols = st.columns([1, 1, 1])
-    with cols[1]:
-        if st.button("🫁 はじめる（90秒）", key="breath_start", type="primary", use_container_width=True):
-            st.session_state["_breath_stop"] = False
-            breathing_animation(total_seconds)
-            st.success("お疲れさまでした。ありがとうございます。")
+    running = st.session_state.get("_breath_running", False)
 
+    if not running:
+        # 実行前のみ「はじめる」ボタンを表示（押すと実行に切替）
+        cols = st.columns([1, 1, 1])
+        with cols[1]:
+            if st.button("🫁 はじめる（90秒）", key="breath_start", type="primary", use_container_width=True):
+                st.session_state["_breath_stop"] = False
+                # すぐに実行フェーズへ
+                breathing_animation(total_seconds)
+                st.success("お疲れさまでした。ありがとうございます。")
+    else:
+        # 実行中はボタンを出さない（円とカウントダウンは animation 内で描画）
+        pass
+
+    # 実行前/実行後ともにパターン表記は出す
     st.caption(f"パターン：{inhale}-{hold}-{exhale}／合計 {total_seconds} 秒")
 
     st.divider()
