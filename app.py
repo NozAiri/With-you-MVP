@@ -799,8 +799,8 @@ def login_ui() -> bool:
         st.markdown('<div class="card">', unsafe_allow_html=True)
         st.markdown("### 🌙 With You")
         st.caption("気持ちを整える、やさしいノート。")
-        code = st.text_input("🔑 入室コード（合言葉）", key="login_code", placeholder="例）sora1125")
-        nick = st.text_input("🪞 ニックネーム（任意）", key="login_nick", placeholder="例）あいり")
+        code = st.text_input("🔑 入室コード（合言葉）", key="login_code", placeholder="お好きなパスワードをご入力ください")
+        nick = st.text_input("🪞 ニックネーム（任意）", key="login_nick", placeholder="ニックネームをご入力ください")
 
         if not COOKIES_OK:
             st.caption("※ CookieがOFFのため、同一ユーザー判定はこのセッション内のみです。可能ならCookieを有効にしてください。")
