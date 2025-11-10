@@ -365,6 +365,9 @@ MOODS = [
     {"emoji":"😕","label":"モヤモヤ","key":"confuse"},
 ]
 def cbt_intro():
+    def cbt_intro_block():
+    # 互換用エイリアス（中身は変更なし）
+    return cbt_intro()
     st.markdown("""
 <div class="cbt-card">
   <div class="cbt-heading">このワークについて</div>
