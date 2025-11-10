@@ -26,12 +26,12 @@ except Exception:
     DB = None
 
 # ================== 運営パスワード ==================
-# secrets/env優先。未設定時は既定値 "uneiaiei0931"
 ADMIN_MASTER_CODE = (
     st.secrets.get("ADMIN_MASTER_CODE")
     or os.environ.get("ADMIN_MASTER_CODE")
-    or "uneiaiei0931"
+    or "uneiairi"   # ← ここを変更
 )
+
 
 # ================== アプリ秘密鍵（HMAC用） ==================
 APP_SECRET = st.secrets.get("APP_SECRET") or os.environ.get("APP_SECRET") or "dev-app-secret-change-me"
@@ -559,64 +559,73 @@ def view_admin():
     if not FIRESTORE_ENABLED:
         st.error("Firestore未接続です。st.secretsの設定を確認してください。")
         return
+
     gid = st.session_state.get("group_id","")
 
+    def fetch_rows(coll_name: str, limit_n: int):
+        q = DB.collection(coll_name)
+        if gid:
+            q = q.where("group_id", "==", gid)
+
+        # 1) まずは ts で order_by（複合インデックスがあれば高速）
+        try:
+            q2 = q.order_by("ts", direction="DESCENDING").limit(int(limit_n))
+            docs = list(q2.stream())
+            return [d.to_dict() for d in docs], None
+        except Exception as e:
+            # 2) フォールバック：order_byを外し、クライアント側で降順ソート（インデックス不要）
+            try:
+                docs = list(q.limit(int(limit_n)).stream())
+                rows = [d.to_dict() for d in docs]
+                # ts（datetime）で降順。無いものは最小扱い
+                from datetime import datetime
+                def _key(r):
+                    v = r.get("ts")
+                    return v if isinstance(v, datetime) else datetime.min
+                rows.sort(key=_key, reverse=True)
+                return rows, "fallback"
+            except Exception as e2:
+                return [], f"{e}\n{e2}"
+
+    # ------- 今日を伝える -------
     st.markdown("#### 🏫 今日を伝える（school_share）")
     n1 = st.number_input("取得件数（最新から）", 1, 200, 50, 1, key="adm_n1")
-    q1 = DB.collection("school_share")
-    if gid: q1 = q1.where("group_id", "==", gid)
-    try:
-        q1 = q1.order_by("ts", direction="DESCENDING").limit(int(n1))
-    except Exception:
-        st.caption("（インデックス未作成の場合があります。Firestoreのインデックスを確認してください。）")
-    rows1 = []
-    try:
-        for d in q1.stream():
-            r = d.to_dict()
-            rows1.append({
-                "時刻": r.get("ts"),
-                "名前": r.get("handle",""),
-                "気分": r.get("payload",{}).get("mood",""),
-                "体調": ",".join(r.get("payload",{}).get("body",[])),
-                "睡眠(h)": r.get("payload",{}).get("sleep_hours",""),
-                "睡眠の質": r.get("payload",{}).get("sleep_quality",""),
-                "匿名": r.get("anonymous", True),
-            })
-    except Exception as e:
-        st.error(f"取得エラー: {e}")
+    rows1, mode1 = fetch_rows("school_share", n1)
+    if mode1 == "fallback":
+        st.caption("（インデックス未作成のためフォールバック動作中：サーバ並べ替え→クライアント側で降順）")
     if rows1:
-        df1 = pd.DataFrame(rows1)
+        df1 = pd.DataFrame([{
+            "時刻": r.get("ts"),
+            "名前": r.get("handle",""),
+            "気分": (r.get("payload",{}) or {}).get("mood",""),
+            "体調": ",".join((r.get("payload",{}) or {}).get("body",[]) or []),
+            "睡眠(h)": (r.get("payload",{}) or {}).get("sleep_hours",""),
+            "睡眠の質": (r.get("payload",{}) or {}).get("sleep_quality",""),
+            "匿名": r.get("anonymous", True),
+        } for r in rows1])
         st.dataframe(df1, use_container_width=True, hide_index=True)
     else:
         st.caption("データがありません。")
 
+    # ------- 相談 -------
     st.markdown("#### 🕊 相談（consult_msgs）")
     n2 = st.number_input("取得件数（最新から） ", 1, 200, 50, 1, key="adm_n2")
-    q2 = DB.collection("consult_msgs")
-    if gid: q2 = q2.where("group_id", "==", gid)
-    try:
-        q2 = q2.order_by("ts", direction="DESCENDING").limit(int(n2))
-    except Exception:
-        st.caption("（インデックス未作成の場合があります。Firestoreのインデックスを確認してください。）")
-    rows2 = []
-    try:
-        for d in q2.stream():
-            r = d.to_dict()
-            rows2.append({
-                "時刻": r.get("ts"),
-                "名前": (r.get("name") or r.get("handle") or ""),
-                "匿名": r.get("anonymous", True),
-                "宛先": r.get("intent",""),
-                "内容": r.get("message",""),
-                "トピック": ",".join(r.get("topics",[])),
-            })
-    except Exception as e:
-        st.error(f"取得エラー: {e}")
+    rows2, mode2 = fetch_rows("consult_msgs", n2)
+    if mode2 == "fallback":
+        st.caption("（インデックス未作成のためフォールバック動作中：サーバ並べ替え→クライアント側で降順）")
     if rows2:
-        df2 = pd.DataFrame(rows2)
+        df2 = pd.DataFrame([{
+            "時刻": r.get("ts"),
+            "名前": (r.get("name") or r.get("handle") or ""),
+            "匿名": r.get("anonymous", True),
+            "宛先": r.get("intent",""),
+            "内容": r.get("message",""),
+            "トピック": ",".join(r.get("topics",[]) or []),
+        } for r in rows2])
         st.dataframe(df2, use_container_width=True, hide_index=True)
     else:
         st.caption("データがありません。")
+
 
 # ================== ルーター ==================
 def main_router():
