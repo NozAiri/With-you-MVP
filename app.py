@@ -1,7 +1,13 @@
 # app.py — With You.（学校導入版フル）
 # 生徒UIは現状維持。「今日を伝える」「相談する」だけFirestoreへ送信（匿名）。
 # 学校導入側（ADMIN）に、週報・クラス集計・相談トリアージ・設定を追加。
-# できる限り既存コードを踏襲し、拡張のみに留める。
+# 学術的な観点：
+#   - Δ変化率ベースのリスクスコア（自殺念慮リスクの簡易予測）
+#   - 相談〜対応完了までの Lead Time 計測（早期介入）
+#   - 気分・睡眠の変動性（EMAライクな日次集計）
+#   - 匿名集団データからの学級レベル推定
+#   - CBTワークの構造化（臨床モデル準拠）
+#   - EBPM 用の指標（拾い上げ率・Lead Time・回復指標の土台）
 
 from __future__ import annotations
 from datetime import datetime, timezone, timedelta, date
@@ -122,12 +128,10 @@ def fetch_rows_cached(coll: str, gid: Optional[str], days: int = 60) -> List[dic
         q = q.where("group_id", "==", gid)
     since = datetime.now(timezone.utc) - timedelta(days=days)
     try:
-        # ts>=since を使いたいが、インデックス未作成でも動くようにまずはlimitのみ→Python側で絞る
         docs = list(q.order_by("ts", direction="DESCENDING").limit(2000).stream())
     except Exception:
         docs = list(q.limit(2000).stream())
-    rows = [d.to_dict() for d in docs]
-    # Python側で時刻絞り込み
+    rows = [d.to_dict() | {"_id": d.id} for d in docs]
     out = []
     for r in rows:
         ts = r.get("ts")
@@ -146,23 +150,144 @@ def week_ranges(n_weeks: int = 2) -> List[Tuple[datetime, datetime]]:
     """直近n_weeks区間（各7日）の [start,end) を新→旧の順で返す。"""
     end = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
     out = []
-    for i in range(n_weeks):
+    for _ in range(n_weeks):
         s = end - timedelta(days=7)
         out.append((s, end))
         end = s
     return out  # [今週, 先週, …]
 
 def classify_priority_by_message(msg: str) -> str:
-    """超簡易な優先度分類（学校トリアージのMVP）。"""
+    """超簡易な優先度分類（学校トリアージMVP）。高リスク語彙を含める。"""
     if not msg: return "low"
     text = msg.lower()
-    hi_kw = ["死にたい","自殺","消えたい","暴力","虐待","いじめ","つらい","希死","殺"]
+    hi_kw = ["死にたい","自殺","消えたい","暴力","虐待","いじめ","希死","殺"]
     mid_kw = ["眠れない","吐き気","食欲","しんどい","助けて","不安","落ち込"]
     for k in hi_kw:
         if k in text: return "urgent"
     for k in mid_kw:
         if k in text: return "medium"
     return "low"
+
+# ------- 学術寄り：簡易リスクスコア / 変動性 / Lead Time 指標 -------
+
+def mood_numeric(m: Optional[str]) -> int:
+    """🙂=0, 😐=1, 😟=2 のようにスコア化（EMA的な変動を見るため）。"""
+    if m == "😟": return 2
+    if m == "😐": return 1
+    return 0
+
+def sleep_numeric(hours: Optional[float], qual: Optional[str]) -> int:
+    """
+    睡眠のリスクスコア：
+      - 時間 <5h or 質「浅い」 → 2
+      - 5〜6h or 「ふつう」     → 1
+      - それ以外              → 0
+    """
+    score = 0
+    try:
+        h = float(hours or 0)
+    except Exception:
+        h = 0
+    if h < 5: score += 2
+    elif h < 6: score += 1
+    if qual == "浅い": score += 2
+    elif qual == "ふつう": score += 1
+    return min(score, 3)
+
+def body_numeric(body_list: Optional[List[str]]) -> int:
+    """体調項目（なし以外があれば1）。"""
+    if not body_list: return 0
+    return 1 if any(b and b != "なし" for b in body_list) else 0
+
+def consult_numeric(priority: str) -> int:
+    """相談優先度スコア。自殺念慮関連語彙を含む urgent を最重視。"""
+    if priority == "urgent": return 4
+    if priority == "medium": return 2
+    if priority == "low": return 1
+    return 0
+
+def compute_risk_index(share_rows: List[dict], cons_rows: List[dict]) -> float:
+    """
+    集団レベルのリスク指数（0〜100目安）。
+    - 気分・睡眠・体調（school_share）
+    - 自由記述の優先度（consult_msgs）
+    をルールベースで合成。
+    本格的な自殺念慮予測モデルは Cloud Functions 側で拡張予定。
+    """
+    if not share_rows and not cons_rows:
+        return 0.0
+
+    total_person_days = max(1, len(share_rows))
+    score = 0
+
+    # 非言語シグナル（EMA的指標）
+    for r in share_rows:
+        p = r.get("payload", {}) or {}
+        score += mood_numeric(p.get("mood"))
+        score += sleep_numeric(p.get("sleep_hours"), p.get("sleep_quality"))
+        score += body_numeric(p.get("body"))
+
+    # 言語相談
+    for c in cons_rows:
+        pr = classify_priority_by_message(c.get("message", ""))
+        score += consult_numeric(pr)
+
+    # 正規化：1日あたりおおよそ 0〜10 程度になるように
+    idx = (score / (total_person_days * 10)) * 100
+    return float(round(min(max(idx, 0.0), 100.0), 1))
+
+def compute_daily_ema(df_share: pd.DataFrame) -> pd.DataFrame:
+    """
+    日次×EMA的指標。
+    - mood_numeric の平均
+    - sleep_hours の平均
+    - 気分スコアの 7日ローリング分散（変動性）
+    """
+    if df_share.empty:
+        return pd.DataFrame()
+    df = df_share.copy()
+    df["day"] = df["ts"].dt.tz_convert(None).dt.date
+    df["mood_score"] = df["mood"].map(mood_numeric)
+    df_agg = df.groupby("day").agg(
+        mood_score=("mood_score", "mean"),
+        sleep_avg=("sleep_hours", "mean"),
+        n=("mood", "count")
+    ).reset_index()
+    df_agg = df_agg.sort_values("day")
+    df_agg["mood_var_7d"] = df_agg["mood_score"].rolling(window=7, min_periods=3).var()
+    return df_agg
+
+def compute_leadtime_metrics(gid_filter: Optional[str], days: int = 60) -> Dict[str, Any]:
+    """
+    相談→チケット→対応完了までのリードタイムを測る。
+    tickets コレクション：
+        created_at: 相談検知時刻
+        closed_at:  対応完了時刻（運営タブでボタン押下）
+    """
+    if not FIRESTORE_ENABLED or DB is None:
+        return {"n_closed": 0, "avg_days": None}
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    try:
+        q = DB.collection("tickets").where("created_at", ">=", since)
+        if gid_filter:
+            q = q.where("group_id", "==", gid_filter)
+        docs = list(q.stream())
+    except Exception:
+        docs = []
+
+    deltas = []
+    for d in docs:
+        r = d.to_dict()
+        st_at = r.get("created_at")
+        ed_at = r.get("closed_at")
+        if isinstance(st_at, datetime) and isinstance(ed_at, datetime) and ed_at >= st_at:
+            deltas.append((ed_at - st_at).total_seconds() / 86400.0)
+
+    if not deltas:
+        return {"n_closed": 0, "avg_days": None}
+
+    avg_days = round(sum(deltas) / len(deltas), 2)
+    return {"n_closed": len(deltas), "avg_days": avg_days}
 
 # ================== 状態 ==================
 st.session_state.setdefault("auth_ok", False)
@@ -578,7 +703,7 @@ def view_note():
     mood = mood_radio()
     trigger_text   = text_card("🫧 Step 2：その気持ちは、どんなことがきっかけだった？", "「○○があったからかも」「なんとなく○○って思ったから」など自由に。", "cbt_trigger")
     auto_thought   = text_card("💭 Step 3：そのとき、頭の中でどんな言葉がよぎった？", "心の中でつぶやいた言葉やイメージをそのまま書いてOK。", "cbt_auto")
-    reason_for     = text_card("🔎 Step 4：そう思った理由は？", "心の中の“根拠”を書いてみよう。", "cbt_for", height=100)  # ← 追加（バグ修正）
+    reason_for     = text_card("🔎 Step 4：そう思った理由は？", "心の中の“根拠”を書いてみよう。", "cbt_for", height=100)
     reason_against = text_card("🔍 Step 5：そうでもないかもと思う理由はある？", "「でも、こういう面もあるかも」も書いてみよう。", "cbt_against", height=100)
     alt_perspective= text_card("🌱 Step 6：もし友だちが同じことを感じていたら、なんて声をかける？", "自分のことじゃなく“友だち”のこととして考えてみよう。", "cbt_alt")
     act_suggested, act_custom = action_picker(mood.get("key"))
@@ -764,12 +889,10 @@ def view_admin():
         rows_share = fetch_rows_cached("school_share", gid_filter, days=60)
         rows_cons  = fetch_rows_cached("consult_msgs", gid_filter, days=60)
 
-        # 今週/先週の区間
         ranges = week_ranges(2)  # [(今週s,e), (先週s,e)]
         def in_range(ts: datetime, r: Tuple[datetime, datetime]) -> bool:
             return isinstance(ts, datetime) and (r[0] <= ts < r[1])
 
-        # 指標：低気分率、体調“なし以外”率、平均睡眠、相談件数・優先度内訳
         def summarize(rng: Tuple[datetime, datetime]) -> dict:
             share = [r for r in rows_share if in_range(r.get("ts"), rng)]
             cons  = [r for r in rows_cons  if in_range(r.get("ts"), rng)]
@@ -785,6 +908,9 @@ def view_admin():
                 pr = classify_priority_by_message(c.get("message",""))
                 pr_counts[pr] = pr_counts.get(pr,0)+1
 
+            # リスク指数（0-100）：自殺念慮リスク含む構造的シグナル
+            risk_index = compute_risk_index(share, cons)
+
             return {
                 "records": total,
                 "low_mood_rate": (low_mood/total*100) if total else 0.0,
@@ -794,6 +920,7 @@ def view_admin():
                 "pr_urgent": pr_counts["urgent"],
                 "pr_medium": pr_counts["medium"],
                 "pr_low": pr_counts["low"],
+                "risk_index": risk_index,
             }
 
         cur = summarize(ranges[0])
@@ -816,22 +943,45 @@ def view_admin():
             bullet.append(f"平均睡眠：{cur['avg_sleep']:.1f}h（先週比 {d:+.1f}h、今週の方が{trend}傾向）")
         bullet.append(f"相談件数：{cur['consult_total']}（緊急 {cur['pr_urgent']} / 中 {cur['pr_medium']} / 低 {cur['pr_low']}）")
 
+        d_risk = delta(cur["risk_index"], prev["risk_index"])
+        if d_risk is not None:
+            trend = "上昇" if d_risk>0 else "低下"
+            bullet.append(f"推定リスク指数：{cur['risk_index']:.1f}（先週比 {d_risk:+.1f}pt {trend}）")
+
+        # Lead Time（対応までの日数）
+        lt = compute_leadtime_metrics(gid_filter, days=60)
+        if lt["n_closed"] > 0 and lt["avg_days"] is not None:
+            bullet.append(f"対応完了チケット {lt['n_closed']} 件の平均リードタイム：{lt['avg_days']} 日")
+
         if bullet:
             st.markdown("- " + "\n- ".join(bullet))
         else:
             st.caption("直近2週間のデータが不足しています。")
 
-        # 可視化（シンプル折れ線）
-        def day_bucket(rows):
-            df = pd.DataFrame([{"ts": r.get("ts"), "mood": payload_series(r,"mood")} for r in rows if isinstance(r.get("ts"), datetime)])
-            if df.empty: return pd.DataFrame()
+        # 日次低気分率＋EMA的変動指標
+        def day_df(rows):
+            data = []
+            for r in rows:
+                ts = r.get("ts")
+                if not isinstance(ts, datetime): continue
+                p = r.get("payload",{}) or {}
+                data.append({
+                    "ts": ts,
+                    "mood": p.get("mood"),
+                    "sleep_hours": p.get("sleep_hours"),
+                })
+            if not data: return pd.DataFrame()
+            df = pd.DataFrame(data)
             df["day"] = df["ts"].dt.tz_convert(None).dt.date
             df["low"] = (df["mood"]=="😟").astype(int)
             agg = df.groupby("day").agg(records=("mood","count"), low=("low","sum")).reset_index()
             agg["low_rate"] = (agg["low"]/agg["records"]*100).round(1)
-            return agg.sort_values("day")
+            return df, agg
 
-        daily = day_bucket(rows_share)
+        raw_df, daily = (pd.DataFrame(), pd.DataFrame())
+        if rows_share:
+            raw_df, daily = day_df(rows_share)
+
         if not daily.empty:
             ch = alt.Chart(daily).mark_line().encode(
                 x=alt.X("day:T", title="日付"),
@@ -840,14 +990,37 @@ def view_admin():
             ).properties(height=260)
             st.altair_chart(ch, use_container_width=True)
         else:
-            st.caption("グラフ表示できるデータがまだありません。")
+            st.caption("低気分率のグラフ表示できるデータがまだありません。")
+
+        st.divider()
+        st.markdown("#### EMA的な変動（気分・睡眠）")
+
+        if not raw_df.empty:
+            ema = compute_daily_ema(raw_df)
+            if not ema.empty:
+                c1, c2 = st.columns(2)
+                with c1:
+                    ch1 = alt.Chart(ema).mark_line().encode(
+                        x=alt.X("day:T", title="日付"),
+                        y=alt.Y("mood_score:Q", title="平均気分スコア(0=良〜2=低)")
+                    ).properties(height=220)
+                    st.altair_chart(ch1, use_container_width=True)
+                with c2:
+                    ch2 = alt.Chart(ema).mark_line().encode(
+                        x=alt.X("day:T", title="日付"),
+                        y=alt.Y("mood_var_7d:Q", title="7日間の気分変動(分散)")
+                    ).properties(height=220)
+                    st.altair_chart(ch2, use_container_width=True)
+            else:
+                st.caption("変動指標を計算できるだけのデータがまだありません。")
+        else:
+            st.caption("EMA的指標を計算するデータがまだありません。")
 
     # ---------- クラス/学年（匿名） ----------
     with tabs[1]:
         st.markdown("#### クラス/学年の傾向（匿名・個人名なし）")
         rows_share = fetch_rows_cached("school_share", gid_filter, days=30)
         if rows_share:
-            # 現状は class 情報が無いので、group_id をクラス相当として集計
             df = pd.DataFrame([{
                 "ts": r.get("ts"),
                 "class_id": r.get("group_id",""),
@@ -868,7 +1041,6 @@ def view_admin():
                 agg["low_rate"] = (agg["low"]/agg["n"]*100).round(1)
                 agg["body_rate"] = (agg["body_any"]/agg["n"]*100).round(1)
 
-                # ヒートマップ（低気分率）
                 st.caption("低気分率ヒートマップ（濃い＝割合高）")
                 heat = agg.pivot_table(index="class_id", columns="date", values="low_rate")
                 st.dataframe(heat.fillna(""), use_container_width=True)
@@ -881,7 +1053,6 @@ def view_admin():
                         y=alt.Y("sleep_avg:Q", title="平均睡眠(h)")
                     ).properties(height=260)
                     st.altair_chart(bar, use_container_width=True)
-
         else:
             st.caption("データがありません。")
 
@@ -891,6 +1062,7 @@ def view_admin():
         rows_cons  = fetch_rows_cached("consult_msgs", gid_filter, days=60)
         if rows_cons:
             df = pd.DataFrame([{
+                "id": r.get("_id",""),
                 "時刻": r.get("ts"),
                 "匿名": r.get("anonymous", True),
                 "宛先": r.get("intent",""),
@@ -901,7 +1073,7 @@ def view_admin():
                 "handle": r.get("handle","")
             } for r in rows_cons if isinstance(r.get("ts"), datetime)])
             df = df.sort_values("時刻", ascending=False)
-            st.dataframe(df, use_container_width=True, hide_index=True)
+            st.dataframe(df.drop(columns=["id","group_id","handle"]), use_container_width=True, hide_index=True)
 
             st.divider()
             st.caption("⚡ 優先度別 件数")
@@ -914,13 +1086,12 @@ def view_admin():
                 okn = 0
                 for _, row in df.head(50).iterrows():
                     rid = hmac_sha256_hex(APP_SECRET, f"{row['時刻']}_ticket_{row['handle']}")
-                    # 既存チェック
                     q = DB.collection("tickets").where("rid","==",rid).limit(1).stream()
                     exists = any(True for _ in q)
                     if exists: continue
                     DB.collection("tickets").add({
                         "rid": rid,
-                        "created_at": datetime.now(timezone.utc),
+                        "created_at": row["時刻"] if isinstance(row["時刻"], datetime) else datetime.now(timezone.utc),
                         "group_id": row["group_id"],
                         "priority": row["優先度"],
                         "status": "open",
@@ -937,18 +1108,37 @@ def view_admin():
         st.markdown("#### チケット一覧（直近100）")
         try:
             docs = list(DB.collection("tickets").order_by("created_at", direction="DESCENDING").limit(100).stream()) if FIRESTORE_ENABLED else []
-            rows = [d.to_dict() for d in docs]
+            rows = [{"id": d.id, **d.to_dict()} for d in docs]
         except Exception:
             rows = []
         if rows:
             tdf = pd.DataFrame([{
+                "id": r.get("id"),
                 "作成": r.get("created_at"),
                 "優先度": r.get("priority",""),
                 "状態": r.get("status",""),
                 "宛先": r.get("intent",""),
                 "要約": r.get("note_head",""),
             } for r in rows])
-            st.dataframe(tdf, use_container_width=True, hide_index=True)
+            st.dataframe(tdf.drop(columns=["id"]), use_container_width=True, hide_index=True)
+
+            st.caption("対応完了にしたいチケットを選んでください。")
+            open_ids = [r["id"] for r in rows if r.get("status") != "closed"]
+            if open_ids:
+                sel_id = st.selectbox("チケットID（内部用）", options=["選択しない"]+open_ids, key="ticket_close_sel")
+                if sel_id != "選択しない":
+                    if st.button("✅ 対応完了として記録", key="ticket_close_btn"):
+                        try:
+                            DB.collection("tickets").document(sel_id).set({
+                                "status": "closed",
+                                "closed_at": datetime.now(timezone.utc),
+                            }, merge=True)
+                            st.success("対応完了として記録しました。（Lead Time 指標に反映されます）")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"更新に失敗しました: {e}")
+            else:
+                st.caption("未対応のチケットはありません。")
         else:
             st.caption("チケットがありません。")
 
@@ -963,6 +1153,7 @@ def view_admin():
         with col2:
             st.session_state["_adm_weekday"] = st.selectbox("週報の作成曜日", ["月","火","水","木","金"], index=["月","火","水","木","金"].index(st.session_state["_adm_weekday"]))
         st.markdown(f"<div class='small'>現在値：変化率 {st.session_state['_adm_alert_delta']}％ / 週報 {st.session_state['_adm_weekday']}曜</div>", unsafe_allow_html=True)
+        st.markdown("<div class='small'>※ 将来的には、ここで介入内容（例：HRでの呼吸ワーク実施など）も記録し、EBPMとしての因果推定に活用します。</div>", unsafe_allow_html=True)
 
 # ================== ルーター ==================
 def main_router():
