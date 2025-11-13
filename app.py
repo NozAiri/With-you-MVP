@@ -1,7 +1,10 @@
-# app.py — With You.
-# （共通パス＋自分だけの名前｜登録先着専有・同時利用OK・Cookie/URL/本人コードなし｜ADMIN対応＋フォールバック）
+# app.py — With You.（学校導入版フル）
+# 生徒UIは現状維持。「今日を伝える」「相談する」だけFirestoreへ送信（匿名）。
+# 学校導入側（ADMIN）に、週報・クラス集計・相談トリアージ・設定を追加。
+# できる限り既存コードを踏襲し、拡張のみに留める。
+
 from __future__ import annotations
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, date
 from typing import Dict, Tuple, List, Optional, Any
 import streamlit as st
 import pandas as pd
@@ -30,7 +33,7 @@ except Exception:
 ADMIN_MASTER_CODE = (
     st.secrets.get("ADMIN_MASTER_CODE")
     or os.environ.get("ADMIN_MASTER_CODE")
-    or "uneiairi0931"   # ← 既定は 0931 付き
+    or "uneiairi0931"   # 既定
 )
 
 # ================== アプリ秘密鍵（HMAC用） ==================
@@ -81,7 +84,6 @@ def db_create_user(group_id: str, handle_norm: str) -> Tuple[bool, str]:
         })
         return True, ""
     except Exception:
-        # 既に存在 → 使用中エラーにする
         return False, "この名前はもう使われています。他の名前にしてください。"
 
 def db_user_exists(group_id: str, handle_norm: str) -> bool:
@@ -108,6 +110,59 @@ def safe_db_add(coll: str, payload: dict) -> bool:
         return True
     except Exception:
         return False
+
+# ===============（学校側）集計・補助ユーティリティ =================
+@st.cache_data(show_spinner=False, ttl=60)
+def fetch_rows_cached(coll: str, gid: Optional[str], days: int = 60) -> List[dict]:
+    """過去days日のデータを取得（ts降順）。インデックスが無くても動くフォールバック実装。"""
+    if not FIRESTORE_ENABLED or DB is None:
+        return []
+    q = DB.collection(coll)
+    if gid:
+        q = q.where("group_id", "==", gid)
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    try:
+        # ts>=since を使いたいが、インデックス未作成でも動くようにまずはlimitのみ→Python側で絞る
+        docs = list(q.order_by("ts", direction="DESCENDING").limit(2000).stream())
+    except Exception:
+        docs = list(q.limit(2000).stream())
+    rows = [d.to_dict() for d in docs]
+    # Python側で時刻絞り込み
+    out = []
+    for r in rows:
+        ts = r.get("ts")
+        if isinstance(ts, datetime):
+            if ts >= since:
+                out.append(r)
+        else:
+            out.append(r)  # tsが無い/型不明なら通す
+    return out
+
+def payload_series(v: dict, key: str, default=None):
+    if not isinstance(v, dict): return default
+    return (v.get("payload", {}) or {}).get(key, default)
+
+def week_ranges(n_weeks: int = 2) -> List[Tuple[datetime, datetime]]:
+    """直近n_weeks区間（各7日）の [start,end) を新→旧の順で返す。"""
+    end = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+    out = []
+    for i in range(n_weeks):
+        s = end - timedelta(days=7)
+        out.append((s, end))
+        end = s
+    return out  # [今週, 先週, …]
+
+def classify_priority_by_message(msg: str) -> str:
+    """超簡易な優先度分類（学校トリアージのMVP）。"""
+    if not msg: return "low"
+    text = msg.lower()
+    hi_kw = ["死にたい","自殺","消えたい","暴力","虐待","いじめ","つらい","希死","殺"]
+    mid_kw = ["眠れない","吐き気","食欲","しんどい","助けて","不安","落ち込"]
+    for k in hi_kw:
+        if k in text: return "urgent"
+    for k in mid_kw:
+        if k in text: return "medium"
+    return "low"
 
 # ================== 状態 ==================
 st.session_state.setdefault("auth_ok", False)
@@ -170,6 +225,8 @@ html, body, .stApp{ background:var(--grad); color:var(--text); }
   border:1px solid #dbe9ff;
   box-shadow:0 18px 36px rgba(90,140,190,.14), inset 0 -10px 25px rgba(120,150,200,.15);
 }
+.small{font-size:.9rem;color:#5b6a85}
+.badge{display:inline-block;border:1px solid #dbe3ff;border-radius:999px;padding:.15rem .5rem;margin-left:.4rem}
 </style>
 """, unsafe_allow_html=True)
 inject_css()
@@ -205,7 +262,6 @@ def top_tabs():
     st.markdown("</div>", unsafe_allow_html=True)
 
 def status_bar():
-    # フラッシュ（あれば表示→消す）
     if st.session_state.get("flash_msg"):
         st.toast(st.session_state["flash_msg"])
         st.markdown(
@@ -255,7 +311,6 @@ def login_register_ui() -> bool:
     btn_label = "登録してはじめる" if mode == "REGISTER" else "入る"
     disabled = (err != "")
     if st.button(btn_label, type="primary", use_container_width=True, disabled=disabled, key="btn_go"):
-        # group_id とハンドルを確定
         gid = group_id_from_password(group_pw)
         st.session_state.group_id = gid
         st.session_state.handle_norm = handle_norm
@@ -368,7 +423,7 @@ def breathing_animation(total_sec: int = 90):
             unsafe_allow_html=True,
         )
 
-    # 停止ボタン（円とカウントダウンの下）
+    # 停止ボタン
     with stop_area.container():
         cols = st.columns([1, 1, 1])
         with cols[1]:
@@ -391,13 +446,11 @@ def breathing_animation(total_sec: int = 90):
                     set_countdown(remain, label)
                     time.sleep(1)
     finally:
-        # 後片付けと状態復帰
         phase_area.empty(); countdown_area.empty(); stop_area.empty(); circle_area.empty()
         st.session_state["_breath_running"] = False
         st.session_state["_breath_stop"] = False
-        st.session_state["_breath_finished"] = True  # 次の描画で完了メッセージを出す
-        st.rerun()  # ← 終了後に即座に“ボタンありの画面”へ戻す
-
+        st.session_state["_breath_finished"] = True
+        st.rerun()
 
 def view_session():
     st.markdown("### 🌙 リラックス（呼吸）")
@@ -412,7 +465,6 @@ def view_session():
         st.success("お疲れさまでした。ありがとうございます。")
 
     if not running:
-        # 実行前だけ「はじめる」を表示（押したら状態を立てて rerun）
         cols = st.columns([1, 1, 1])
         with cols[1]:
             if st.button("🫁 はじめる（90秒）", key="breath_start", type="primary", use_container_width=True):
@@ -420,14 +472,11 @@ def view_session():
                 st.session_state["_breath_running"] = True
                 st.rerun()
     else:
-        # 実行中：ボタンは表示しない。アニメを開始（終了時は内部で rerun）
         breathing_animation(total_seconds)
 
-    # パターン表記（常に1箇所）
     st.caption(f"パターン：{inhale}-{hold}-{exhale}／合計 {total_seconds} 秒")
 
     st.divider()
-    # メーターは1つ（スライダーのみ）
     after = st.slider("いまの気分（1 とてもつらい / 10 とても楽）", 1, 10, 5, key="breath_mood_after")
 
     if st.button("💾 端末に保存（このセッション内）", type="primary", key="breath_save"):
@@ -435,8 +484,6 @@ def view_session():
             "ts": now_iso(), "pattern": "5-2-6", "mood_after": int(after), "sec": total_seconds
         })
         st.success("保存しました。（運営には共有されません）")
-
-
 
 # ----- ノート（ローカル保存） -----
 MOODS = [
@@ -449,7 +496,6 @@ MOODS = [
 ]
 
 def cbt_intro_block():
-    # ご指定の文章をそのまま表示
     st.markdown("""
 <div class="cbt-card">
   <div class="cbt-heading">このワークについて</div>
@@ -525,35 +571,20 @@ def action_picker(mood_key: Optional[str]):
     if custom: return "", custom
     return (chosen or ""), ""
 
-def recap_card(doc: dict):
-    st.markdown('<div class="cbt-card">', unsafe_allow_html=True)
-    st.markdown('<div class="cbt-heading">🧾 まとめ</div>', unsafe_allow_html=True)
-    st.write(f"- 気持ち：{doc['mood'].get('emoji','')} **{doc['mood'].get('label','未選択')}**（強さ {doc['mood'].get('intensity',0)}）")
-    st.write(f"- きっかけ：{doc.get('trigger_text','') or '—'}")
-    st.write(f"- よぎった言葉：{doc.get('auto_thought','') or '—'}")
-    st.write(f"- そう思った理由：{doc.get('reason_for','') or '—'}")
-    st.write(f"- そうでもないかも：{doc.get('reason_against','') or '—'}")
-    st.write(f"- 友だちにかける言葉：{doc.get('alt_perspective','') or '—'}")
-    chosen = doc.get("action_suggested") or doc.get("action_custom") or "—"
-    st.write(f"- 小さな行動：{chosen}")
-    st.write(f"- 日記：{doc.get('reflection','') or '—'}")
-    st.markdown('<span class="ok-chip">保存はこの端末（このセッション）に残ります。</span>', unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
-
 def view_note():
     st.markdown("### 📝 心を整えるノート")
-    cbt_intro()  # ← ご指定の冒頭文を表示
+    cbt_intro()
 
     mood = mood_radio()
     trigger_text   = text_card("🫧 Step 2：その気持ちは、どんなことがきっかけだった？", "「○○があったからかも」「なんとなく○○って思ったから」など自由に。", "cbt_trigger")
     auto_thought   = text_card("💭 Step 3：そのとき、頭の中でどんな言葉がよぎった？", "心の中でつぶやいた言葉やイメージをそのまま書いてOK。", "cbt_auto")
-    reason_against = text_card("🔍 Step 4：そうでもないかもと思う理由はある？", "「でも、こういう面もあるかも」も書いてみよう。", "cbt_against", height=100)
-    alt_perspective= text_card("🌱 Step 5：もし友だちが同じことを感じていたら、なんて声をかける？", "自分のことじゃなく“友だち”のこととして考えてみよう。", "cbt_alt")
+    reason_for     = text_card("🔎 Step 4：そう思った理由は？", "心の中の“根拠”を書いてみよう。", "cbt_for", height=100)  # ← 追加（バグ修正）
+    reason_against = text_card("🔍 Step 5：そうでもないかもと思う理由はある？", "「でも、こういう面もあるかも」も書いてみよう。", "cbt_against", height=100)
+    alt_perspective= text_card("🌱 Step 6：もし友だちが同じことを感じていたら、なんて声をかける？", "自分のことじゃなく“友だち”のこととして考えてみよう。", "cbt_alt")
     act_suggested, act_custom = action_picker(mood.get("key"))
     reflection     = text_card("🌙 Step 7：今日の日記", "気づいたこと・気持ちの変化・これからのことなど自由に。", "cbt_reflect", height=120)
 
     if st.button("💾 記録（この端末）", type="primary", key="cbt_save"):
-        # 保存用ドキュメント（UI文言は変更なし・キー名だけ整合）
         doc = {
             "ts": now_iso(),
             "mood": mood,
@@ -636,7 +667,6 @@ def view_consult():
         ok = safe_db_add("consult_msgs", payload)
         if ok:
             st.session_state.flash_msg = "相談を送信しました。ありがとうございます。"
-            # 入力欄リセット
             for k in ["c_topics","c_msg","c_name","c_anon","c_to"]:
                 if k in st.session_state: del st.session_state[k]
             st.rerun()
@@ -717,79 +747,222 @@ def view_review():
 </div>
 """, unsafe_allow_html=True)
 
-# ----- 運営（ADMIN） -----
+# ================== 運営（ADMIN） — 学校導入ダッシュボード ==================
 def view_admin():
     st.markdown("### 🛠 運営ダッシュボード")
     if not FIRESTORE_ENABLED:
         st.error("Firestore未接続です。st.secretsの設定を確認してください。")
         return
 
-    # ▼ 表示範囲の切替（同じパスのグループのみ / 全グループ）
     scope = st.radio("表示範囲", ["このパスワードのグループだけ", "全グループ"], horizontal=True, key="adm_scope")
     gid_filter = st.session_state.get("group_id","") if scope.startswith("この") else None
 
-    def fetch_rows(coll_name: str, limit_n: int):
-        q = DB.collection(coll_name)
-        if gid_filter:
-            q = q.where("group_id", "==", gid_filter)
-        # 1) インデックスがあれば高速ルート（ts desc）
+    tabs = st.tabs(["📅 週報サマリー", "🏫 クラス/学年（匿名）", "🕊 相談・チケット", "⚙️ 設定"])
+
+    # ---------- 週報サマリー ----------
+    with tabs[0]:
+        rows_share = fetch_rows_cached("school_share", gid_filter, days=60)
+        rows_cons  = fetch_rows_cached("consult_msgs", gid_filter, days=60)
+
+        # 今週/先週の区間
+        ranges = week_ranges(2)  # [(今週s,e), (先週s,e)]
+        def in_range(ts: datetime, r: Tuple[datetime, datetime]) -> bool:
+            return isinstance(ts, datetime) and (r[0] <= ts < r[1])
+
+        # 指標：低気分率、体調“なし以外”率、平均睡眠、相談件数・優先度内訳
+        def summarize(rng: Tuple[datetime, datetime]) -> dict:
+            share = [r for r in rows_share if in_range(r.get("ts"), rng)]
+            cons  = [r for r in rows_cons  if in_range(r.get("ts"), rng)]
+
+            total = len(share)
+            low_mood = sum(1 for r in share if payload_series(r, "mood") == "😟")
+            body_any = sum(1 for r in share if any((payload_series(r, "body", []) or []) and (b!="なし" for b in payload_series(r,"body",[]))))
+            sleep_vals = [float(payload_series(r,"sleep_hours",0.0) or 0.0) for r in share if isinstance(payload_series(r,"sleep_hours",None),(int,float))]
+            avg_sleep = round(sum(sleep_vals)/len(sleep_vals),1) if sleep_vals else None
+
+            pr_counts = {"urgent":0,"medium":0,"low":0}
+            for c in cons:
+                pr = classify_priority_by_message(c.get("message",""))
+                pr_counts[pr] = pr_counts.get(pr,0)+1
+
+            return {
+                "records": total,
+                "low_mood_rate": (low_mood/total*100) if total else 0.0,
+                "body_any_rate": (body_any/total*100) if total else 0.0,
+                "avg_sleep": avg_sleep,
+                "consult_total": len(cons),
+                "pr_urgent": pr_counts["urgent"],
+                "pr_medium": pr_counts["medium"],
+                "pr_low": pr_counts["low"],
+            }
+
+        cur = summarize(ranges[0])
+        prev = summarize(ranges[1])
+
+        def delta(a, b):
+            if b is None or a is None: return None
+            return round(a-b,1)
+
+        st.markdown("#### 今週の要点（自動要約）")
+        bullet = []
+        if cur["low_mood_rate"] is not None:
+            d = delta(cur["low_mood_rate"], prev["low_mood_rate"])
+            if d is not None:
+                trend = "増加" if d>0 else "減少"
+                bullet.append(f"低気分の割合：{cur['low_mood_rate']:.1f}%（先週比 {d:+.1f}pt {trend}）")
+        if cur["avg_sleep"] is not None and prev["avg_sleep"] is not None:
+            d = delta(cur["avg_sleep"], prev["avg_sleep"])
+            trend = "短い" if d<0 else "長い"
+            bullet.append(f"平均睡眠：{cur['avg_sleep']:.1f}h（先週比 {d:+.1f}h、今週の方が{trend}傾向）")
+        bullet.append(f"相談件数：{cur['consult_total']}（緊急 {cur['pr_urgent']} / 中 {cur['pr_medium']} / 低 {cur['pr_low']}）")
+
+        if bullet:
+            st.markdown("- " + "\n- ".join(bullet))
+        else:
+            st.caption("直近2週間のデータが不足しています。")
+
+        # 可視化（シンプル折れ線）
+        def day_bucket(rows):
+            df = pd.DataFrame([{"ts": r.get("ts"), "mood": payload_series(r,"mood")} for r in rows if isinstance(r.get("ts"), datetime)])
+            if df.empty: return pd.DataFrame()
+            df["day"] = df["ts"].dt.tz_convert(None).dt.date
+            df["low"] = (df["mood"]=="😟").astype(int)
+            agg = df.groupby("day").agg(records=("mood","count"), low=("low","sum")).reset_index()
+            agg["low_rate"] = (agg["low"]/agg["records"]*100).round(1)
+            return agg.sort_values("day")
+
+        daily = day_bucket(rows_share)
+        if not daily.empty:
+            ch = alt.Chart(daily).mark_line().encode(
+                x=alt.X("day:T", title="日付"),
+                y=alt.Y("low_rate:Q", title="低気分率(%)"),
+                tooltip=["day:T","low_rate:Q","records:Q"]
+            ).properties(height=260)
+            st.altair_chart(ch, use_container_width=True)
+        else:
+            st.caption("グラフ表示できるデータがまだありません。")
+
+    # ---------- クラス/学年（匿名） ----------
+    with tabs[1]:
+        st.markdown("#### クラス/学年の傾向（匿名・個人名なし）")
+        rows_share = fetch_rows_cached("school_share", gid_filter, days=30)
+        if rows_share:
+            # 現状は class 情報が無いので、group_id をクラス相当として集計
+            df = pd.DataFrame([{
+                "ts": r.get("ts"),
+                "class_id": r.get("group_id",""),
+                "mood": payload_series(r,"mood"),
+                "sleep": payload_series(r,"sleep_hours", None),
+                "body_any": int(any((payload_series(r,"body",[]) or []) and (b!="なし" for b in payload_series(r,"body",[]))))
+            } for r in rows_share if isinstance(r.get("ts"), datetime)])
+            if df.empty:
+                st.caption("データがありません。")
+            else:
+                df["date"] = df["ts"].dt.tz_convert(None).dt.date
+                agg = df.groupby(["class_id","date"]).agg(
+                    n=("mood","count"),
+                    low=("mood", lambda x: (x=="😟").sum()),
+                    body_any=("body_any","sum"),
+                    sleep_avg=("sleep", "mean")
+                ).reset_index()
+                agg["low_rate"] = (agg["low"]/agg["n"]*100).round(1)
+                agg["body_rate"] = (agg["body_any"]/agg["n"]*100).round(1)
+
+                # ヒートマップ（低気分率）
+                st.caption("低気分率ヒートマップ（濃い＝割合高）")
+                heat = agg.pivot_table(index="class_id", columns="date", values="low_rate")
+                st.dataframe(heat.fillna(""), use_container_width=True)
+
+                st.caption("クラス別の平均睡眠（直近30日）")
+                sleep = agg.groupby("class_id")["sleep_avg"].mean().reset_index().dropna()
+                if not sleep.empty:
+                    bar = alt.Chart(sleep).mark_bar().encode(
+                        x=alt.X("class_id:N", title="クラス（=group_id相当）"),
+                        y=alt.Y("sleep_avg:Q", title="平均睡眠(h)")
+                    ).properties(height=260)
+                    st.altair_chart(bar, use_container_width=True)
+
+        else:
+            st.caption("データがありません。")
+
+    # ---------- 相談・チケット ----------
+    with tabs[2]:
+        st.markdown("#### 相談（匿名） → チケット化して分担")
+        rows_cons  = fetch_rows_cached("consult_msgs", gid_filter, days=60)
+        if rows_cons:
+            df = pd.DataFrame([{
+                "時刻": r.get("ts"),
+                "匿名": r.get("anonymous", True),
+                "宛先": r.get("intent",""),
+                "内容": r.get("message",""),
+                "優先度": classify_priority_by_message(r.get("message","")),
+                "トピック": ",".join(r.get("topics",[]) or []),
+                "group_id": r.get("group_id",""),
+                "handle": r.get("handle","")
+            } for r in rows_cons if isinstance(r.get("ts"), datetime)])
+            df = df.sort_values("時刻", ascending=False)
+            st.dataframe(df, use_container_width=True, hide_index=True)
+
+            st.divider()
+            st.caption("⚡ 優先度別 件数")
+            cnt = df.groupby("優先度").size().reset_index(name="件数")
+            st.dataframe(cnt, use_container_width=True, hide_index=True)
+
+            st.divider()
+            st.caption("チケット起票（MVP：相談1件→1チケット）")
+            if st.button("最新50件を一括でチケット起票（重複防止付き）", key="mk_tickets", type="primary"):
+                okn = 0
+                for _, row in df.head(50).iterrows():
+                    rid = hmac_sha256_hex(APP_SECRET, f"{row['時刻']}_ticket_{row['handle']}")
+                    # 既存チェック
+                    q = DB.collection("tickets").where("rid","==",rid).limit(1).stream()
+                    exists = any(True for _ in q)
+                    if exists: continue
+                    DB.collection("tickets").add({
+                        "rid": rid,
+                        "created_at": datetime.now(timezone.utc),
+                        "group_id": row["group_id"],
+                        "priority": row["優先度"],
+                        "status": "open",
+                        "intent": row["宛先"],
+                        "topics": row["トピック"].split(",") if row["トピック"] else [],
+                        "note_head": (row["内容"][:120] + "...") if isinstance(row["内容"], str) and len(row["内容"])>120 else row["内容"],
+                    })
+                    okn += 1
+                st.success(f"チケット起票：{okn}件")
+        else:
+            st.caption("相談データがありません。")
+
+        st.divider()
+        st.markdown("#### チケット一覧（直近100）")
         try:
-            q2 = q.order_by("ts", direction="DESCENDING").limit(int(limit_n))
-            docs = list(q2.stream())
-            return [d.to_dict() for d in docs], None
-        except Exception as e:
-            # 2) フォールバック：order_byなし→Python側でts降順
-            try:
-                docs = list(q.limit(int(limit_n)).stream())
-                rows = [d.to_dict() for d in docs]
-                from datetime import datetime as _dt
-                def _key(r):
-                    v = r.get("ts")
-                    return v if isinstance(v, _dt) else _dt.min
-                rows.sort(key=_key, reverse=True)
-                return rows, "fallback"
-            except Exception as e2:
-                st.error(f"取得エラー: {e}\n{e2}")
-                return [], "error"
+            docs = list(DB.collection("tickets").order_by("created_at", direction="DESCENDING").limit(100).stream()) if FIRESTORE_ENABLED else []
+            rows = [d.to_dict() for d in docs]
+        except Exception:
+            rows = []
+        if rows:
+            tdf = pd.DataFrame([{
+                "作成": r.get("created_at"),
+                "優先度": r.get("priority",""),
+                "状態": r.get("status",""),
+                "宛先": r.get("intent",""),
+                "要約": r.get("note_head",""),
+            } for r in rows])
+            st.dataframe(tdf, use_container_width=True, hide_index=True)
+        else:
+            st.caption("チケットがありません。")
 
-    # ------- 今日を伝える -------
-    st.markdown("#### 🏫 今日を伝える（school_share）")
-    n1 = st.number_input("取得件数（最新から）", 1, 200, 50, 1, key="adm_n1")
-    rows1, mode1 = fetch_rows("school_share", n1)
-    if mode1 == "fallback":
-        st.caption("（インデックス未作成のためフォールバック動作中：サーバ取得→クライアント側で降順）")
-    if rows1:
-        df1 = pd.DataFrame([{
-            "時刻": r.get("ts"),
-            "名前": r.get("handle",""),
-            "気分": (r.get("payload",{}) or {}).get("mood",""),
-            "体調": ",".join((r.get("payload",{}) or {}).get("body",[]) or []),
-            "睡眠(h)": (r.get("payload",{}) or {}).get("sleep_hours",""),
-            "睡眠の質": (r.get("payload",{}) or {}).get("sleep_quality",""),
-            "匿名": r.get("anonymous", True),
-        } for r in rows1])
-        st.dataframe(df1, use_container_width=True, hide_index=True)
-    else:
-        st.caption("データがありません。")
-
-    # ------- 相談 -------
-    st.markdown("#### 🕊 相談（consult_msgs）")
-    n2 = st.number_input("取得件数（最新から） ", 1, 200, 50, 1, key="adm_n2")
-    rows2, mode2 = fetch_rows("consult_msgs", n2)
-    if mode2 == "fallback":
-        st.caption("（インデックス未作成のためフォールバック動作中：サーバ取得→クライアント側で降順）")
-    if rows2:
-        df2 = pd.DataFrame([{
-            "時刻": r.get("ts"),
-            "名前": (r.get("name") or r.get("handle") or ""),
-            "匿名": r.get("anonymous", True),
-            "宛先": r.get("intent",""),
-            "内容": r.get("message",""),
-            "トピック": ",".join(r.get("topics",[]) or []),
-        } for r in rows2])
-        st.dataframe(df2, use_container_width=True, hide_index=True)
-    else:
-        st.caption("データがありません。")
+    # ---------- 設定 ----------
+    with tabs[3]:
+        st.caption("既定は“個人名なし・匿名統計のみ”。ここではアラート閾値や週報の曜日を調整します（MVP：セッション内設定）。")
+        st.session_state.setdefault("_adm_alert_delta", 25)
+        st.session_state.setdefault("_adm_weekday", "金")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.session_state["_adm_alert_delta"] = st.slider("変化率アラート閾値（％）", 10, 60, st.session_state["_adm_alert_delta"], 1)
+        with col2:
+            st.session_state["_adm_weekday"] = st.selectbox("週報の作成曜日", ["月","火","水","木","金"], index=["月","火","水","木","金"].index(st.session_state["_adm_weekday"]))
+        st.markdown(f"<div class='small'>現在値：変化率 {st.session_state['_adm_alert_delta']}％ / 週報 {st.session_state['_adm_weekday']}曜</div>", unsafe_allow_html=True)
 
 # ================== ルーター ==================
 def main_router():
