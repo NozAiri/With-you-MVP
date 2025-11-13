@@ -338,16 +338,20 @@ def page_heatmap(group_filter: Optional[str]):
         st.error("Firestore に接続できません。")
         return
 
-    rows_share = fetch_rows_cached("school_share", group_filter, days=30)
+    # 直近何日を見るか（デフォルト30日）
+    days = st.slider("表示する期間（日数）", 7, 60, 30, step=7, key="hm_days")
+
+    rows_share = fetch_rows_cached("school_share", group_filter, days=days)
     df_share = make_share_df(rows_share)
     if df_share.empty:
-        st.caption("直近30日のデータがありません。")
+        st.caption("指定期間内のデータがありません。")
         return
 
     df = df_share.copy()
     # 現状は group_id を「クラスID」とみなす
-    df["class_id"] = df["group_id"].fillna("")
+    df["class_id"] = df["group_id"].fillna("未設定")
 
+    # 日付×クラス単位で集計
     agg = (
         df.groupby(["class_id", "date"])
         .agg(
@@ -359,37 +363,92 @@ def page_heatmap(group_filter: Optional[str]):
         .reset_index()
     )
     agg["low_rate"] = (agg["low"] / agg["n"] * 100.0).round(1)
+    agg["body_rate"] = (agg["body_any"] / agg["n"] * 100.0).round(1)
 
-    st.caption("低気分率ヒートマップ（濃いほど割合が高い）")
-    if not agg.empty:
-        heat = agg.pivot_table(index="class_id", columns="date", values="low_rate")
-        st.dataframe(heat.fillna(""), use_container_width=True)
-    else:
-        st.caption("データがありません。")
+    # ================== 1. 全体ヒートマップ ==================
+    st.caption("低気分率ヒートマップ（色が濃いほど“しんどい日”が多い）")
+
+    heat_chart = (
+        alt.Chart(agg)
+        .mark_rect()
+        .encode(
+            x=alt.X("date:T", title="日付"),
+            y=alt.Y("class_id:N", title="クラス（group_id 相当）"),
+            color=alt.Color("low_rate:Q", title="低気分率(%)"),
+            tooltip=[
+                alt.Tooltip("class_id:N", title="クラス"),
+                alt.Tooltip("date:T", title="日付"),
+                alt.Tooltip("low_rate:Q", title="低気分率(%)"),
+                alt.Tooltip("n:Q", title="件数"),
+            ],
+        )
+        .properties(height=260)
+    )
+    st.altair_chart(heat_chart, use_container_width=True)
 
     st.markdown("---")
 
-    st.caption("クラス別 平均睡眠時間（直近30日）")
-    sleep = (
-        agg.groupby("class_id")["sleep_avg"]
-        .mean()
-        .reset_index()
-        .dropna()
-        .sort_values("sleep_avg")
-    )
-    if not sleep.empty:
-        bar = (
-            alt.Chart(sleep)
-            .mark_bar()
-            .encode(
-                x=alt.X("class_id:N", title="クラス（group_id 相当）"),
-                y=alt.Y("sleep_avg:Q", title="平均睡眠(h)"),
-            )
-            .properties(height=260)
+    # ================== 2. クラスごとのランキング ==================
+    st.caption("クラス別サマリー（直近期間）")
+
+    summary = (
+        agg.groupby("class_id")
+        .agg(
+            days=("date", "nunique"),
+            records=("n", "sum"),
+            low_sum=("low", "sum"),
+            body_sum=("body_any", "sum"),
+            sleep_avg=("sleep_avg", "mean"),
         )
-        st.altair_chart(bar, use_container_width=True)
-    else:
-        st.caption("睡眠データがありません。")
+        .reset_index()
+    )
+    summary["低気分率(%)"] = (summary["low_sum"] / summary["records"] * 100.0).round(1)
+    summary["体調不良あり率(%)"] = (summary["body_sum"] / summary["records"] * 100.0).round(1)
+    summary["平均睡眠(h)"] = summary["sleep_avg"].round(1)
+
+    # 心配度ランキング（ここではシンプルに低気分率でソート）
+    ranking = (
+        summary[["class_id", "records", "低気分率(%)", "体調不良あり率(%)", "平均睡眠(h)", "days"]]
+        .sort_values("低気分率(%)", ascending=False)
+        .reset_index(drop=True)
+    )
+    ranking.rename(columns={"records": "件数", "days": "日数"}, inplace=True)
+
+    st.dataframe(ranking, use_container_width=True, hide_index=True)
+
+    st.markdown(
+        "<div class='badge'><span class='badge-dot'></span>"
+        " 上から順に“今週、様子を見に行った方がよいクラス”の目安になります。</div>",
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("---")
+
+    # ================== 3. クラス別の時系列ドリルダウン ==================
+    if not ranking.empty:
+        target_class = st.selectbox(
+            "詳しく見たいクラスを選択",
+            options=ranking["class_id"].tolist(),
+            key="hm_target_class",
+        )
+        focus = agg[agg["class_id"] == target_class].sort_values("date")
+
+        st.caption(f"📈 {target_class} の低気分率の推移")
+        line = (
+            alt.Chart(focus)
+            .mark_line(point=True)
+            .encode(
+                x=alt.X("date:T", title="日付"),
+                y=alt.Y("low_rate:Q", title="低気分率(%)"),
+                tooltip=["date:T", "low_rate:Q", "n:Q"],
+            )
+            .properties(height=220)
+        )
+        st.altair_chart(line, use_container_width=True)
+
+        st.caption(
+            "※ グラフがギザギザしている場合は、日ごとの人数が少ない可能性があります。"
+        )
 
 
 # ================== 相談・チケット ==================
