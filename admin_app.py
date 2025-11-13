@@ -146,178 +146,33 @@ def inject_css():
     st.markdown(
         """
 <style>
-/* ベース */
 html, body, .stApp{
   background: radial-gradient(circle at 0% 0%, #12264c, #050b18 60%, #040713 100%);
   color:#f5f7ff;
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Hiragino Sans", "Noto Sans JP", sans-serif;
 }
+
+/* 上部ヘッダ＆ビューコンテナも同じ色で塗る */
+[data-testid="stAppViewContainer"]{
+  background: transparent;
+}
+[data-testid="stHeader"]{
+  background: transparent;
+}
+
+/* メインコンテナの余白を少し上に詰める */
 .block-container{
-  padding-top:1rem;
+  padding-top:0.5rem;
   padding-bottom:1.5rem;
   max-width:1180px;
 }
 
-/* サイドバー（左ナビ） */
+/* （以下は前回渡したスタイルをそのまま続けてOK） */
 section[data-testid="stSidebar"]{
   background: linear-gradient(180deg,#071427 0%,#050b18 100%);
   border-right:1px solid rgba(255,255,255,0.05);
 }
-section[data-testid="stSidebar"] > div{
-  padding-top:1rem;
-}
-.sidebar-logo{
-  font-weight:800;
-  font-size:1.1rem;
-  color:#fafdff;
-  padding:0.2rem 0.4rem 0.7rem;
-}
-.sidebar-logo span{
-  font-size:0.8rem;
-  color:#8ea2ff;
-}
-.nav-item button{
-  width:100%;
-  justify-content:flex-start !important;
-  border-radius:12px !important;
-  border:1px solid transparent !important;
-  background:transparent !important;
-  color:#e1e7ff !important;
-  font-weight:500 !important;
-  padding:0.4rem 0.7rem !important;
-  font-size:0.92rem !important;
-}
-.nav-item-active button{
-  background:rgba(76,132,255,0.25) !important;
-  border-color:rgba(118,174,255,0.9) !important;
-  box-shadow:0 0 0 1px rgba(118,174,255,0.4);
-}
-.nav-section-title{
-  margin:0.9rem 0 0.2rem;
-  font-size:0.78rem;
-  letter-spacing:0.06em;
-  text-transform:uppercase;
-  color:#8590b3;
-}
-
-/* KPIカード */
-.kpi-row{
-  display:flex;
-  gap:1.0rem;
-  margin-bottom:1.2rem;
-}
-.kpi-card{
-  flex:1;
-  background:radial-gradient(circle at 0% 0%,rgba(107,162,255,0.25),rgba(9,17,40,1));
-  border-radius:18px;
-  padding:1.0rem 1.0rem 0.8rem;
-  border:1px solid rgba(151,189,255,0.28);
-  box-shadow:0 18px 40px rgba(3,12,40,0.65);
-  min-height:150px;
-}
-.kpi-title{
-  font-size:0.78rem;
-  text-transform:uppercase;
-  letter-spacing:0.08em;
-  color:#9fb4ff;
-  margin-bottom:0.4rem;
-}
-.kpi-main{
-  display:flex;
-  align-items:flex-end;
-  gap:0.4rem;
-  margin-bottom:0.2rem;
-}
-.kpi-value{
-  font-size:1.8rem;
-  font-weight:700;
-}
-.kpi-unit{
-  font-size:0.9rem;
-  color:#9fb4ff;
-}
-.kpi-sub{
-  font-size:0.8rem;
-  color:#8ea0d9;
-}
-.kpi-tag{
-  display:inline-flex;
-  align-items:center;
-  gap:0.25rem;
-  padding:0.12rem 0.55rem;
-  border-radius:999px;
-  border:1px solid rgba(153,209,255,0.6);
-  font-size:0.78rem;
-  color:#aee0ff;
-  margin-top:0.35rem;
-}
-
-/* メインヘッダ */
-.main-header{
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  margin-bottom:1.0rem;
-}
-.main-title-block{
-  display:flex;
-  flex-direction:column;
-}
-.main-title{
-  font-size:1.4rem;
-  font-weight:700;
-}
-.main-sub{
-  font-size:0.9rem;
-  color:#91a0d3;
-}
-.profile-chip{
-  display:flex;
-  align-items:center;
-  gap:0.4rem;
-  padding:0.35rem 0.8rem;
-  border-radius:999px;
-  background:rgba(8,22,55,0.8);
-  border:1px solid rgba(117,160,255,0.7);
-  font-size:0.82rem;
-  color:#e9f0ff;
-}
-.profile-avatar{
-  width:26px;
-  height:26px;
-  border-radius:999px;
-  background:radial-gradient(circle at 30% 20%,#ffe7b3,#ffb27b);
-}
-
-/* カード / パネル */
-.panel{
-  background:rgba(9,16,40,0.96);
-  border-radius:18px;
-  padding:0.9rem 1.0rem 0.6rem;
-  border:1px solid rgba(88,116,192,0.6);
-  box-shadow:0 18px 40px rgba(2,10,32,0.9);
-}
-.panel-title{
-  font-size:0.96rem;
-  font-weight:600;
-  margin-bottom:0.4rem;
-}
-.panel-sub{
-  font-size:0.8rem;
-  color:#8e9dd1;
-  margin-bottom:0.6rem;
-}
-
-/* テキスト */
-.small-muted{
-  font-size:0.78rem;
-  color:#8a97c2;
-}
-
-/* DataFrame 背景 */
-[data-testid="stDataFrame"] > div{
-  background:transparent;
-}
+...
 </style>
 """,
         unsafe_allow_html=True,
