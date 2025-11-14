@@ -733,34 +733,60 @@ def view_note():
 
 # ----- 今日を伝える（Firestoreに匿名共有） -----
 def view_share():
-    def view_share():
     st.markdown("### 🏫 今日を伝える（匿名）")
 
-    mood = st.radio("気分", ["🙂", "😐", "😟"], index=1, horizontal=True, key="share_mood")
+    mood = st.radio(
+        "気分",
+        ["🙂", "😐", "😟"],
+        index=1,
+        horizontal=True,
+        key="share_mood"
+    )
 
     body_opts = ["頭痛", "腹痛", "吐き気", "食欲低下", "だるさ", "その他", "なし"]
-    body = st.multiselect("体調（当てはまるもの）", body_opts, default=["なし"], key="share_body")
+    body = st.multiselect(
+        "体調（当てはまるもの）",
+        body_opts,
+        default=["なし"],
+        key="share_body"
+    )
+
+    # 「なし」＋他の項目 の同時選択を排除
     if "なし" in body and len(body) > 1:
         body = [b for b in body if b != "なし"]
 
     c1, c2 = st.columns(2)
+
     with c1:
-        sleep_h = st.number_input("睡眠時間（h）", min_value=0.0, max_value=24.0, value=6.0, step=0.5, key="share_sleep_h")
+        sleep_h = st.number_input(
+            "睡眠時間（h）",
+            min_value=0.0,
+            max_value=24.0,
+            value=6.0,
+            step=0.5,
+            key="share_sleep_h"
+        )
+
     with c2:
-        sleep_q = st.radio("睡眠の質", ["ぐっすり", "ふつう", "浅い"], index=1, horizontal=True, key="share_sleep_q")
+        sleep_q = st.radio(
+            "睡眠の質",
+            ["ぐっすり", "ふつう", "浅い"],
+            index=1,
+            horizontal=True,
+            key="share_sleep_q"
+        )
 
     disabled = not FIRESTORE_ENABLED
     label = "📨 先生に送る" if FIRESTORE_ENABLED else "📨 送信（未接続）"
 
-    # -----------------------
-    # 送信処理（ここが拡張された部分）
-    # -----------------------
+    # ---------------------------------
+    # 送信ボタン（重要：ここでflags追加）
+    # ---------------------------------
     if st.button(label, type="primary", disabled=disabled, key="share_send"):
-
         gid = st.session_state.get("group_id", "")
         hdl = st.session_state.get("handle_norm", "")
 
-        # 管理画面で使うフラグ（追加）
+        # 管理画面用フラグ
         low_mood = (mood == "😟")
         short_sleep = (float(sleep_h) < 5)
         body_any = any(b != "なし" for b in body)
@@ -771,7 +797,6 @@ def view_share():
             "handle": hdl,
             "user_key": user_key(gid, hdl) if (gid and hdl) else "",
 
-            # 元のpayload
             "payload": {
                 "mood": mood,
                 "body": body,
@@ -779,7 +804,7 @@ def view_share():
                 "sleep_quality": sleep_q
             },
 
-            # ★追記：管理画面用の新データ
+            # ★追加
             "flags": {
                 "low_mood": low_mood,
                 "short_sleep": short_sleep,
@@ -794,6 +819,7 @@ def view_share():
             st.rerun()
         else:
             st.error("送信できませんでした。")
+
 
 
 
