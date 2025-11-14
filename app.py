@@ -1,14 +1,3 @@
-# app.py — With You.（学校導入版フル）
-# 生徒UIは現状維持。「今日を伝える」「相談する」だけFirestoreへ送信（匿名）。
-# 学校導入側（ADMIN）に、週報・クラス集計・相談トリアージ・設定を追加。
-# 学術的な観点：
-#   - Δ変化率ベースのリスクスコア（自殺念慮リスクの簡易予測）
-#   - 相談〜対応完了までの Lead Time 計測（早期介入）
-#   - 気分・睡眠の変動性（EMAライクな日次集計）
-#   - 匿名集団データからの学級レベル推定
-#   - CBTワークの構造化（臨床モデル準拠）
-#   - EBPM 用の指標（拾い上げ率・Lead Time・回復指標の土台）
-
 from __future__ import annotations
 from datetime import datetime, timezone, timedelta, date
 from typing import Dict, Tuple, List, Optional, Any
@@ -77,17 +66,19 @@ def group_id_from_password(group_password: str) -> str:
 def user_key(group_id: str, handle_norm: str) -> str:
     return sha256_hex(f"{group_id}:{handle_norm}")
 
-def db_create_user(group_id: str, handle_norm: str) -> Tuple[bool, str]:
-    """先着専有：存在すれば失敗。"""
+def db_create_user(group_id: str, handle_norm: str, profile: Dict[str, Any]) -> Tuple[bool, str]:
+    """先着専有：存在すれば失敗。profile に school_label / class_label などを含める。"""
     if not FIRESTORE_ENABLED or DB is None:
         return False, "Firestore未接続です。"
     ref = DB.collection("groups").document(group_id).collection("users").document(handle_norm)
     try:
-        ref.create({
+        data = {
             "user_key": user_key(group_id, handle_norm),
             "created_at": datetime.now(timezone.utc),
             "last_login_at": datetime.now(timezone.utc),
-        })
+        }
+        data.update(profile or {})
+        ref.create(data)
         return True, ""
     except Exception:
         return False, "この名前はもう使われています。他の名前にしてください。"
@@ -107,6 +98,14 @@ def db_touch_login(group_id: str, handle_norm: str):
         ref.set({"last_login_at": datetime.now(timezone.utc)}, merge=True)
     except Exception:
         pass
+
+def db_get_user_profile(group_id: str, handle_norm: str) -> Dict[str, Any]:
+    """ユーザープロファイルを取得（学校名・クラス名など）。存在しない場合は {}。"""
+    if not FIRESTORE_ENABLED or DB is None:
+        return {}
+    ref = DB.collection("groups").document(group_id).collection("users").document(handle_norm)
+    doc = ref.get()
+    return doc.to_dict() if doc.exists else {}
 
 def safe_db_add(coll: str, payload: dict) -> bool:
     if not FIRESTORE_ENABLED or DB is None:
@@ -301,6 +300,10 @@ st.session_state.setdefault("view", "HOME")   # 画面
 st.session_state.setdefault("flash_msg", "")  # 再描画時の一時メッセージ
 st.session_state.setdefault("role", "user")   # "user" or "admin"
 
+# ★ 学校 / クラス情報
+st.session_state.setdefault("school_label", "")  # 例：○○中学校
+st.session_state.setdefault("class_label", "")   # 例：1年A組
+
 # ローカルログ（端末保存）
 st.session_state.setdefault("_local_logs", {"note":[], "breath":[], "study":[]})
 
@@ -399,9 +402,15 @@ def status_bar():
     handle = st.session_state.get("handle_norm", "")
     disp = st.session_state.get("user_disp", "")
     role = st.session_state.get("role","user")
+    school = st.session_state.get("school_label","")
+    cls = st.session_state.get("class_label","")
     fs = "接続済み" if FIRESTORE_ENABLED else "未接続"
+    info = f"ログイン中：{disp or handle or '—'} / ロール：{role}"
+    if school or cls:
+        info += f" / {school or ''} {cls or ''}"
+    info += f" / データ共有：{fs}"
     st.markdown('<div class="card" style="padding:8px 12px; margin-bottom:10px">', unsafe_allow_html=True)
-    st.markdown(f"<div class='tip'>ログイン中：{disp or handle or '—'} / ロール：{role} / データ共有：{fs}</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='tip'>{info}</div>", unsafe_allow_html=True)
     st.markdown("</div>", unsafe_allow_html=True)
 
 # ================== ログイン / 登録 ==================
@@ -419,11 +428,24 @@ def login_register_ui() -> bool:
             st.session_state.mode = "LOGIN"
 
     st.divider()
-    st.markdown("**ご自由にパスワードを設定ください**")
+    st.markdown("**クラスごとの合言葉（パスワード）**")
+    st.caption("先生が伝えた合言葉を入力してください。同じクラスの人は同じ合言葉を使います。")
     group_pw = st.text_input("パスワード", key="inp_group_pw", label_visibility="collapsed", placeholder="例：sakura2025")
+
     st.markdown("**ご自身のニックネーム（4〜12文字）**")
     st.caption("同じ名前は1人だけ使えます（先着）。英数字・ひらがな・カタカナ・漢字と _ - が使えます。")
     handle_raw = st.text_input("自分だけの名前", key="inp_handle", label_visibility="collapsed", placeholder="例：mika / ねこ_3 / sora")
+
+    mode = st.session_state.mode
+    school_label = st.session_state.get("school_label", "")
+    class_label  = st.session_state.get("class_label", "")
+
+    if mode == "REGISTER":
+        st.markdown("---")
+        st.markdown("**学校名とクラス**")
+        st.caption("学校名とクラス名は、先生の管理画面での集計にだけ使われます。")
+        school_label = st.text_input("学校名（先生だけが分かればOK）", key="inp_school_label", value=school_label, placeholder="例：○○中学校")
+        class_label  = st.text_input("クラス（学年＋組など）", key="inp_class_label", value=class_label, placeholder="例：1年A組")
 
     err = ""
     ok_handle, handle_norm = validate_handle(handle_raw)
@@ -431,8 +453,12 @@ def login_register_ui() -> bool:
         err = "パスワードを入力してください。"
     elif not ok_handle:
         err = handle_norm  # エラーメッセージ
+    elif mode == "REGISTER":
+        if not school_label.strip():
+            err = "学校名を入力してください。"
+        elif not class_label.strip():
+            err = "クラスを入力してください。"
 
-    mode = st.session_state.mode
     btn_label = "登録してはじめる" if mode == "REGISTER" else "入る"
     disabled = (err != "")
     if st.button(btn_label, type="primary", use_container_width=True, disabled=disabled, key="btn_go"):
@@ -447,9 +473,17 @@ def login_register_ui() -> bool:
         st.session_state.role = "admin" if entered == master else "user"
 
         if mode == "REGISTER":
-            ok, msg = db_create_user(gid, handle_norm)
+            profile = {
+                "school_label": school_label.strip(),
+                "class_label": class_label.strip(),
+            }
+            ok, msg = db_create_user(gid, handle_norm, profile)
             if not ok:
                 st.error(msg); st.stop()
+
+            st.session_state.school_label = profile["school_label"]
+            st.session_state.class_label  = profile["class_label"]
+
             st.session_state.auth_ok = True
             st.session_state.view = "HOME"
             st.session_state.flash_msg = "登録が完了しました。ようこそ！"
@@ -457,6 +491,11 @@ def login_register_ui() -> bool:
         else:
             if not db_user_exists(gid, handle_norm):
                 st.error("まだ登録がありません。「はじめての人（登録）」から設定してください。"); st.stop()
+
+            prof = db_get_user_profile(gid, handle_norm)
+            st.session_state.school_label = prof.get("school_label", "")
+            st.session_state.class_label  = prof.get("class_label", "")
+
             db_touch_login(gid, handle_norm)
             st.session_state.auth_ok = True
             st.session_state.view = "HOME"
@@ -689,7 +728,7 @@ def action_picker(mood_key: Optional[str]):
     options_disp = disp + ["— 選ばない —"]
     key_pick = f"act_pick_single_{(mood_key or 'default').strip().lower()}"
     sel_disp = st.selectbox("小さな行動（任意）", options=options_disp, index=len(options_disp)-1, key=key_pick)
-    chosen = "" if sel_disp == "— 選ばない —" else vals[disp.index(sel_disp)]
+    chosen = "" if sel_disp == "— 選ばない —" else vals[disp.index(sel_disp)] if sel_disp in disp else ""
     custom_key = f"act_custom_single_{(mood_key or 'default').strip().lower()}"
     custom = st.text_input("＋ 自分の言葉で書く（任意）", key=custom_key, placeholder="例：窓を開けて深呼吸する").strip()
     st.markdown("</div>", unsafe_allow_html=True)
@@ -748,11 +787,15 @@ def view_share():
     if st.button(label, type="primary", disabled=disabled, key="share_send"):
         gid = st.session_state.get("group_id","")
         hdl = st.session_state.get("handle_norm","")
+        school = st.session_state.get("school_label","")
+        cls = st.session_state.get("class_label","")
         ok = safe_db_add("school_share", {
             "ts": datetime.now(timezone.utc),
             "group_id": gid,
             "handle": hdl,
             "user_key": user_key(gid, hdl) if (gid and hdl) else "",
+            "school_label": school,
+            "class_label": cls,
             "payload": {"mood":mood, "body":body, "sleep_hours":float(sleep_h), "sleep_quality":sleep_q},
             "anonymous": True
         })
@@ -778,11 +821,15 @@ def view_consult():
     if st.button(label, type="primary", disabled=disabled, key="c_send"):
         gid = st.session_state.get("group_id","")
         hdl = st.session_state.get("handle_norm","")
+        school = st.session_state.get("school_label","")
+        cls = st.session_state.get("class_label","")
         payload = {
             "ts": datetime.now(timezone.utc),
             "group_id": gid,
             "handle": hdl,
             "user_key": user_key(gid, hdl) if (gid and hdl) else "",
+            "school_label": school,
+            "class_label": cls,
             "message": msg.strip(),
             "topics": topics,
             "intent": "counselor" if to_whom.startswith("カウンセラー") else "teacher",
@@ -1023,16 +1070,17 @@ def view_admin():
         if rows_share:
             df = pd.DataFrame([{
                 "ts": r.get("ts"),
-                "class_id": r.get("group_id",""),
+                "class_id": r.get("class_label","") or r.get("group_id",""),
                 "mood": payload_series(r,"mood"),
                 "sleep": payload_series(r,"sleep_hours", None),
-                "body_any": int(any((payload_series(r,"body",[]) or []) and (b!="なし" for b in payload_series(r,"body",[]))))
+                "body_any": int(any((payload_series(r,"body",[]) or []) and (b!="なし" for b in payload_series(r,"body",[])))),
+                "school_label": r.get("school_label",""),
             } for r in rows_share if isinstance(r.get("ts"), datetime)])
             if df.empty:
                 st.caption("データがありません。")
             else:
                 df["date"] = df["ts"].dt.tz_convert(None).dt.date
-                agg = df.groupby(["class_id","date"]).agg(
+                agg = df.groupby(["school_label","class_id","date"]).agg(
                     n=("mood","count"),
                     low=("mood", lambda x: (x=="😟").sum()),
                     body_any=("body_any","sum"),
@@ -1042,14 +1090,16 @@ def view_admin():
                 agg["body_rate"] = (agg["body_any"]/agg["n"]*100).round(1)
 
                 st.caption("低気分率ヒートマップ（濃い＝割合高）")
-                heat = agg.pivot_table(index="class_id", columns="date", values="low_rate")
+                # 学校＋クラス名をまとめたラベル
+                agg["class_full"] = agg.apply(lambda r: f"{r['school_label']} / {r['class_id']}" if r["school_label"] else r["class_id"], axis=1)
+                heat = agg.pivot_table(index="class_full", columns="date", values="low_rate")
                 st.dataframe(heat.fillna(""), use_container_width=True)
 
                 st.caption("クラス別の平均睡眠（直近30日）")
-                sleep = agg.groupby("class_id")["sleep_avg"].mean().reset_index().dropna()
+                sleep = agg.groupby("class_full")["sleep_avg"].mean().reset_index().dropna()
                 if not sleep.empty:
                     bar = alt.Chart(sleep).mark_bar().encode(
-                        x=alt.X("class_id:N", title="クラス（=group_id相当）"),
+                        x=alt.X("class_full:N", title="クラス"),
                         y=alt.Y("sleep_avg:Q", title="平均睡眠(h)")
                     ).properties(height=260)
                     st.altair_chart(bar, use_container_width=True)
@@ -1070,10 +1120,14 @@ def view_admin():
                 "優先度": classify_priority_by_message(r.get("message","")),
                 "トピック": ",".join(r.get("topics",[]) or []),
                 "group_id": r.get("group_id",""),
-                "handle": r.get("handle","")
+                "handle": r.get("handle",""),
+                "school_label": r.get("school_label",""),
+                "class_label": r.get("class_label",""),
             } for r in rows_cons if isinstance(r.get("ts"), datetime)])
             df = df.sort_values("時刻", ascending=False)
-            st.dataframe(df.drop(columns=["id","group_id","handle"]), use_container_width=True, hide_index=True)
+            show_df = df.copy()
+            show_df["クラス"] = show_df.apply(lambda r: f"{r['school_label']} / {r['class_label']}" if r["school_label"] else r["class_label"], axis=1)
+            st.dataframe(show_df.drop(columns=["id","group_id","handle","school_label","class_label"]), use_container_width=True, hide_index=True)
 
             st.divider()
             st.caption("⚡ 優先度別 件数")
@@ -1098,6 +1152,8 @@ def view_admin():
                         "intent": row["宛先"],
                         "topics": row["トピック"].split(",") if row["トピック"] else [],
                         "note_head": (row["内容"][:120] + "...") if isinstance(row["内容"], str) and len(row["内容"])>120 else row["内容"],
+                        "school_label": row["school_label"],
+                        "class_label": row["class_label"],
                     })
                     okn += 1
                 st.success(f"チケット起票：{okn}件")
@@ -1119,6 +1175,7 @@ def view_admin():
                 "状態": r.get("status",""),
                 "宛先": r.get("intent",""),
                 "要約": r.get("note_head",""),
+                "クラス": (f"{r.get('school_label','')} / {r.get('class_label','')}".strip() if r.get("class_label") else ""),
             } for r in rows])
             st.dataframe(tdf.drop(columns=["id"]), use_container_width=True, hide_index=True)
 
