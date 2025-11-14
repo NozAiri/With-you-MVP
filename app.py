@@ -745,44 +745,46 @@ def view_share():
 
     disabled = not FIRESTORE_ENABLED
     label = "📨 先生に送る" if FIRESTORE_ENABLED else "📨 送信（未接続）"
+        # 送信ボタン
     if st.button(label, type="primary", disabled=disabled, key="share_send"):
-    gid = st.session_state.get("group_id","")
-    hdl = st.session_state.get("handle_norm","")
+        gid = st.session_state.get("group_id", "")
+        hdl = st.session_state.get("handle_norm", "")
 
-    # ---- 追加：管理画面用フラグ ----
-    low_mood = (mood == "😟")
-    short_sleep = (float(sleep_h) < 5)
-    body_any = any(b != "なし" for b in body)
+        # ---- 追加：管理画面用フラグ ----
+        low_mood = (mood == "😟")
+        short_sleep = (float(sleep_h) < 5)
+        body_any = any(b != "なし" for b in body)
 
-    ok = safe_db_add("school_share", {
-        "ts": datetime.now(timezone.utc),
-        "group_id": gid,
-        "handle": hdl,
-        "user_key": user_key(gid, hdl) if (gid and hdl) else "",
+        ok = safe_db_add("school_share", {
+            "ts": datetime.now(timezone.utc),
+            "group_id": gid,
+            "handle": hdl,
+            "user_key": user_key(gid, hdl) if (gid and hdl) else "",
 
-        # 元のpayloadは変更なし
-        "payload": {
-            "mood": mood,
-            "body": body,
-            "sleep_hours": float(sleep_h),
-            "sleep_quality": sleep_q
-        },
+            # 元のpayloadはそのまま
+            "payload": {
+                "mood": mood,
+                "body": body,
+                "sleep_hours": float(sleep_h),
+                "sleep_quality": sleep_q
+            },
 
-        # ---- 追加（管理画面が必要とする集計用） ----
-        "flags": {
-            "low_mood": low_mood,
-            "short_sleep": short_sleep,
-            "body_any": body_any,
-        },
+            # ---- 追加：管理画面で使う3つの指標 ----
+            "flags": {
+                "low_mood": low_mood,
+                "short_sleep": short_sleep,
+                "body_any": body_any,
+            },
 
-        "anonymous": True
-    })
+            "anonymous": True
+        })
 
         if ok:
             st.session_state.flash_msg = "「今日を伝える」を送信しました。ありがとうございます。"
             st.rerun()
         else:
             st.error("送信できませんでした。")
+
 
 # ----- 相談（Firestoreに匿名送信） -----
 CONSULT_TOPICS = ["体調","勉強","人間関係","家庭","進路","いじめ","メンタルの不調","その他"]
