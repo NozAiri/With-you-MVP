@@ -746,6 +746,7 @@ def view_share():
     disabled = not FIRESTORE_ENABLED
     label = "📨 先生に送る" if FIRESTORE_ENABLED else "📨 送信（未接続）"
         # 送信ボタン
+        # 送信ボタン
     if st.button(label, type="primary", disabled=disabled, key="share_send"):
         gid = st.session_state.get("group_id", "")
         hdl = st.session_state.get("handle_norm", "")
@@ -769,7 +770,7 @@ def view_share():
                 "sleep_quality": sleep_q
             },
 
-            # ---- 追加：管理画面で使う3つの指標 ----
+            # ---- 新規追加：管理画面向けデータ ----
             "flags": {
                 "low_mood": low_mood,
                 "short_sleep": short_sleep,
@@ -784,6 +785,7 @@ def view_share():
             st.rerun()
         else:
             st.error("送信できませんでした。")
+
 
 
 # ----- 相談（Firestoreに匿名送信） -----
