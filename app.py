@@ -695,15 +695,26 @@ p, div, span, label {{
 }}
 
 /* セレクトボックス */
-.stSelectbox > div > div > select {{
+.stSelectbox > div > div > select {
   background: rgba(26, 26, 46, 0.6) !important;
   border: 1px solid var(--border) !important;
   color: var(--text-primary) !important;
   border-radius: 12px !important;
   padding: 10px 14px !important;
   transition: all 0.3s ease !important;
-}}
+}
 
+/* セレクトボックスのオプション（ドロップダウン内） */
+.stSelectbox > div > div > select option {
+  background: #1a1a2e !important;
+  color: #e8eaf0 !important;  /* もっと明るい白 */
+  padding: 8px !important;
+}
+
+/* 選択されていないオプション */
+.stSelectbox > div > div > select option:not(:checked) {
+  color: #d4d6e8 !important;  /* 薄すぎない明るさ */
+}
 .stSelectbox > div > div > select:focus {{
   border-color: var(--accent) !important;
   box-shadow: 0 0 0 2px rgba(195, 177, 225, 0.2) !important;
@@ -836,6 +847,48 @@ hr {{
   border-color: var(--border) !important;
 }}
 
+/* ================== セレクトボックス・ドロップダウンの視認性改善 ================== */
+/* Streamlitのデフォルトスタイルを強制上書き */
+.stSelectbox [data-baseweb="select"] {
+  background-color: rgba(26, 26, 46, 0.8) !important;
+}
+
+.stSelectbox [data-baseweb="select"] > div {
+  background-color: rgba(26, 26, 46, 0.8) !important;
+  color: #ffffff !important;  /* 確実に白 */
+}
+
+/* ドロップダウンメニュー */
+.stSelectbox [role="listbox"] {
+  background-color: #1a1a2e !important;
+  border: 1px solid var(--accent) !important;
+}
+
+/* ドロップダウン内の各オプション */
+.stSelectbox [role="option"] {
+  background-color: #1a1a2e !important;
+  color: #f0f2ff !important;  /* 明るい白 */
+  padding: 10px 14px !important;
+}
+
+/* ホバー時 */
+.stSelectbox [role="option"]:hover {
+  background-color: rgba(195, 177, 225, 0.2) !important;
+  color: #ffffff !important;
+}
+
+/* 選択済みオプション */
+.stSelectbox [role="option"][aria-selected="true"] {
+  background-color: rgba(195, 177, 225, 0.3) !important;
+  color: #ffffff !important;
+  font-weight: 600 !important;
+}
+
+/* 無効化されたオプション（グレーアウト） */
+.stSelectbox [role="option"][aria-disabled="true"] {
+  color: #7a8ab0 !important;
+  opacity: 0.6 !important;
+}
 /* ================== レスポンシブ ================== */
 @media (max-width: 768px) {{
   .block-container {{
