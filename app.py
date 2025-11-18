@@ -1,4 +1,4 @@
-# app.py — With You.（学校導入版・生徒側UI）【ネオン調ダークテーマ版】
+# app.py — With You.（学校導入版・生徒側UI）【星空ネオンテーマ版 v2】
 # 管理者側ダッシュボード（with-you-admin-ui）と連携する改良版
 # 
 # 【主な変更点】
@@ -6,7 +6,10 @@
 # 2. 気分データに絵文字マッピングを追加（管理者側で表示用）
 # 3. 送信データ構造を管理者側の集計処理に最適化
 # 4. リスク判定ロジックを強化（自殺念慮キーワード検出）
-# 5. 🌙 デザインをネオン調ダークテーマに変更
+# 5. 🌙 デザインを星空・月モチーフのネオンテーマに変更
+# 6. 🌟 呼吸ワークに吸う→大きく、吐く→小さくのアニメーション追加
+# 7. 🎨 選択系UIの視認性改善（白文字問題、赤ボタン調整）
+# 8. ✨ 背景に星空エフェクトを追加
 
 from __future__ import annotations
 from datetime import datetime, timezone, timedelta, date
@@ -239,84 +242,130 @@ st.session_state.setdefault("role", "user")
 # ローカルログ（端末保存）
 st.session_state.setdefault("_local_logs", {"note":[], "breath":[], "study":[]})
 
-# ================== スタイル【🌙 ネオン調ダークテーマ版】 ==================
+# ================== スタイル【🌙 星空ネオンテーマ版 v2】 ==================
 def inject_css():
     st.markdown("""
 <style>
-/* ================== ネオン調ダークテーマ ==================
+/* ================== 星空ネオンテーマ v2 ==================
    10代向けメンタルヘルスアプリ用
-   落ち着いた・やさしいネオン表現
+   星空・月モチーフ + やさしいネオン表現
    ================================================== */
 
 :root {
   /* カラーパレット */
-  --bg-dark: #020617;
-  --bg-card: rgba(5, 8, 22, 0.7);
-  --text-primary: #e5e7ff;
-  --text-secondary: #9ca3c7;
-  --text-muted: #6b7a9d;
+  --bg-dark: #0a0e27;
+  --bg-card: rgba(10, 14, 39, 0.75);
+  --text-primary: #f0f2ff;
+  --text-secondary: #a8b3d7;
+  --text-muted: #7a8ab0;
   
-  /* ネオンカラー */
-  --neon-cyan: #06b6d4;
-  --neon-purple: #a855f7;
-  --neon-pink: #ec4899;
-  --neon-emerald: #10b981;
-  --neon-blue: #3b82f6;
+  /* ネオンカラー（星空・月テーマ）*/
+  --neon-cyan: #22d3ee;
+  --neon-purple: #c084fc;
+  --neon-pink: #f472b6;
+  --neon-emerald: #34d399;
+  --neon-blue: #60a5fa;
+  --neon-yellow: #fde047;
   
   /* グロー効果 */
-  --glow-cyan: 0 0 20px rgba(6, 182, 212, 0.4);
-  --glow-purple: 0 0 20px rgba(168, 85, 247, 0.4);
-  --glow-pink: 0 0 20px rgba(236, 72, 153, 0.4);
-  --glow-soft: 0 0 30px rgba(59, 130, 246, 0.2);
+  --glow-cyan: 0 0 20px rgba(34, 211, 238, 0.5);
+  --glow-purple: 0 0 20px rgba(192, 132, 252, 0.5);
+  --glow-soft: 0 0 30px rgba(96, 165, 250, 0.25);
+  --glow-moon: 0 0 40px rgba(253, 224, 71, 0.3);
 }
 
-/* ================== 全体背景 ================== */
+/* ================== 全体背景（星空エフェクト）================== */
 html, body, .stApp {
   background: 
-    radial-gradient(ellipse 1400px 800px at 10% 10%, rgba(6, 182, 212, 0.08) 0%, transparent 50%),
-    radial-gradient(ellipse 1200px 700px at 90% 20%, rgba(168, 85, 247, 0.08) 0%, transparent 50%),
-    radial-gradient(ellipse 1000px 600px at 50% 90%, rgba(16, 185, 129, 0.06) 0%, transparent 50%),
-    linear-gradient(180deg, #020617 0%, #0a0f1e 50%, #020617 100%);
+    radial-gradient(2px 2px at 20% 30%, white, transparent),
+    radial-gradient(2px 2px at 60% 70%, white, transparent),
+    radial-gradient(1px 1px at 50% 50%, white, transparent),
+    radial-gradient(1px 1px at 80% 10%, white, transparent),
+    radial-gradient(2px 2px at 90% 60%, white, transparent),
+    radial-gradient(1px 1px at 33% 80%, white, transparent),
+    radial-gradient(1px 1px at 15% 90%, white, transparent),
+    radial-gradient(ellipse 1400px 800px at 15% 20%, rgba(34, 211, 238, 0.08) 0%, transparent 50%),
+    radial-gradient(ellipse 1200px 700px at 85% 30%, rgba(192, 132, 252, 0.08) 0%, transparent 50%),
+    radial-gradient(ellipse 1000px 600px at 50% 85%, rgba(52, 211, 153, 0.05) 0%, transparent 50%),
+    linear-gradient(180deg, #0a0e27 0%, #1a1f3a 50%, #0a0e27 100%);
+  background-size: 
+    200% 200%, 200% 200%, 200% 200%, 200% 200%, 
+    200% 200%, 200% 200%, 200% 200%,
+    100% 100%, 100% 100%, 100% 100%, 100% 100%;
+  background-position: 
+    0 0, 40% 60%, 50% 50%, 80% 10%, 
+    90% 60%, 33% 80%, 15% 90%,
+    0 0, 0 0, 0 0, 0 0;
+  animation: twinkle 8s ease-in-out infinite;
   color: var(--text-primary);
   min-height: 100vh;
+}
+
+@keyframes twinkle {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.8; }
 }
 
 .block-container {
   max-width: 980px;
   padding-top: 1rem;
   padding-bottom: 2rem;
+  position: relative;
+  z-index: 1;
 }
 
 /* ================== カード系 ================== */
 .card {
   background: var(--bg-card);
-  border: 1px solid rgba(6, 182, 212, 0.3);
+  border: 1px solid rgba(34, 211, 238, 0.35);
   border-radius: 22px;
   padding: 18px;
-  box-shadow: var(--glow-soft), inset 0 1px 0 rgba(255, 255, 255, 0.03);
-  backdrop-filter: blur(12px);
+  box-shadow: var(--glow-soft), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(16px);
   transition: all 0.3s ease;
+  position: relative;
+}
+
+.card::before {
+  content: '';
+  position: absolute;
+  top: -2px;
+  left: -2px;
+  right: -2px;
+  bottom: -2px;
+  background: linear-gradient(135deg, 
+    rgba(34, 211, 238, 0.1) 0%, 
+    rgba(192, 132, 252, 0.1) 50%, 
+    rgba(34, 211, 238, 0.1) 100%);
+  border-radius: 22px;
+  z-index: -1;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.card:hover::before {
+  opacity: 1;
 }
 
 .card:hover {
-  border-color: rgba(6, 182, 212, 0.5);
-  box-shadow: 0 0 35px rgba(59, 130, 246, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  border-color: rgba(34, 211, 238, 0.6);
+  box-shadow: 0 0 40px rgba(96, 165, 250, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
 .item {
-  background: rgba(5, 8, 22, 0.6);
-  border: 1px solid rgba(168, 85, 247, 0.25);
+  background: rgba(10, 14, 39, 0.65);
+  border: 1px solid rgba(192, 132, 252, 0.3);
   border-radius: 18px;
   padding: 16px;
   box-shadow: var(--glow-soft);
-  backdrop-filter: blur(8px);
+  backdrop-filter: blur(12px);
   margin-bottom: 12px;
   transition: all 0.3s ease;
 }
 
 .item:hover {
-  border-color: rgba(168, 85, 247, 0.4);
-  box-shadow: 0 0 25px rgba(168, 85, 247, 0.2);
+  border-color: rgba(192, 132, 252, 0.5);
+  box-shadow: 0 0 28px rgba(192, 132, 252, 0.25);
 }
 
 /* ================== テキストスタイル ================== */
@@ -328,7 +377,7 @@ html, body, .stApp {
 
 h1, h2, h3, h4, h5, h6 {
   color: var(--text-primary) !important;
-  text-shadow: 0 0 8px rgba(6, 182, 212, 0.3);
+  text-shadow: 0 0 10px rgba(34, 211, 238, 0.4);
   font-weight: 800;
 }
 
@@ -345,11 +394,11 @@ p, div, span, label {
   position: sticky;
   top: 0;
   z-index: 50;
-  background: rgba(5, 8, 22, 0.85);
-  backdrop-filter: saturate(180%) blur(12px);
-  border: 1px solid rgba(6, 182, 212, 0.4);
+  background: rgba(10, 14, 39, 0.9);
+  backdrop-filter: saturate(180%) blur(16px);
+  border: 1px solid rgba(34, 211, 238, 0.4);
   border-radius: 16px;
-  box-shadow: 0 0 30px rgba(6, 182, 212, 0.2), 0 8px 20px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 0 35px rgba(34, 211, 238, 0.25), 0 8px 24px rgba(0, 0, 0, 0.5);
   padding: 6px 8px;
   margin-bottom: 14px;
 }
@@ -358,29 +407,29 @@ p, div, span, label {
   width: 100%;
   height: 40px;
   border-radius: 12px;
-  font-weight: 800;
+  font-weight: 700;
   font-size: 0.85rem;
-  background: rgba(15, 20, 35, 0.6);
-  border: 1px solid rgba(100, 116, 139, 0.3);
+  background: rgba(20, 25, 45, 0.6);
+  border: 1px solid rgba(120, 130, 160, 0.3);
   color: var(--text-secondary);
   transition: all 0.3s ease;
-  backdrop-filter: blur(4px);
+  backdrop-filter: blur(6px);
 }
 
 .top-tabs .stButton > button:hover {
-  background: rgba(20, 30, 50, 0.8);
-  border-color: rgba(6, 182, 212, 0.5);
+  background: rgba(30, 40, 65, 0.8);
+  border-color: rgba(34, 211, 238, 0.6);
   color: var(--neon-cyan);
-  box-shadow: 0 0 15px rgba(6, 182, 212, 0.3);
+  box-shadow: 0 0 18px rgba(34, 211, 238, 0.4);
   transform: translateY(-1px);
 }
 
 .top-tabs .active .stButton > button {
-  background: linear-gradient(135deg, rgba(6, 182, 212, 0.25) 0%, rgba(168, 85, 247, 0.25) 100%);
+  background: linear-gradient(135deg, rgba(34, 211, 238, 0.3) 0%, rgba(192, 132, 252, 0.3) 100%);
   border: 1px solid var(--neon-cyan);
   border-bottom: 3px solid var(--neon-cyan);
   color: var(--text-primary);
-  box-shadow: 0 0 20px rgba(6, 182, 212, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  box-shadow: 0 0 25px rgba(34, 211, 238, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.12);
   font-weight: 900;
 }
 
@@ -393,16 +442,16 @@ p, div, span, label {
   width: 100%;
   text-align: left;
   border-radius: 22px;
-  border: 1px solid rgba(6, 182, 212, 0.4);
-  box-shadow: 0 0 25px rgba(59, 130, 246, 0.2);
+  border: 1px solid rgba(34, 211, 238, 0.45);
+  box-shadow: 0 0 28px rgba(96, 165, 250, 0.25);
   padding: 18px 18px 16px;
   white-space: pre-wrap;
   line-height: 1.35;
-  background: linear-gradient(135deg, rgba(6, 182, 212, 0.12) 0%, rgba(168, 85, 247, 0.12) 100%);
+  background: linear-gradient(135deg, rgba(34, 211, 238, 0.15) 0%, rgba(192, 132, 252, 0.15) 100%);
   color: var(--text-primary);
   font-weight: 600;
   transition: all 0.3s ease;
-  backdrop-filter: blur(8px);
+  backdrop-filter: blur(10px);
   position: relative;
   overflow: hidden;
 }
@@ -414,7 +463,7 @@ p, div, span, label {
   left: -50%;
   width: 200%;
   height: 200%;
-  background: radial-gradient(circle, rgba(6, 182, 212, 0.1) 0%, transparent 70%);
+  background: radial-gradient(circle, rgba(34, 211, 238, 0.15) 0%, transparent 70%);
   opacity: 0;
   transition: opacity 0.3s ease;
 }
@@ -424,34 +473,34 @@ p, div, span, label {
 }
 
 .bigbtn .stButton > button:hover {
-  border-color: rgba(6, 182, 212, 0.7);
-  box-shadow: 0 0 35px rgba(6, 182, 212, 0.3), 0 0 50px rgba(168, 85, 247, 0.15);
+  border-color: rgba(34, 211, 238, 0.8);
+  box-shadow: 0 0 40px rgba(34, 211, 238, 0.4), 0 0 60px rgba(192, 132, 252, 0.2);
   transform: translateY(-2px);
-  background: linear-gradient(135deg, rgba(6, 182, 212, 0.18) 0%, rgba(168, 85, 247, 0.18) 100%);
+  background: linear-gradient(135deg, rgba(34, 211, 238, 0.22) 0%, rgba(192, 132, 252, 0.22) 100%);
 }
 
 .bigbtn .stButton > button::first-line {
   font-weight: 900;
   font-size: 1.1rem;
   color: var(--text-primary);
-  text-shadow: 0 0 10px rgba(6, 182, 212, 0.5);
+  text-shadow: 0 0 12px rgba(34, 211, 238, 0.6);
 }
 
 /* ================== CBTカード ================== */
 .cbt-card {
-  background: rgba(5, 8, 22, 0.6);
-  border: 1px solid rgba(168, 85, 247, 0.3);
+  background: rgba(10, 14, 39, 0.65);
+  border: 1px solid rgba(192, 132, 252, 0.35);
   border-radius: 18px;
   padding: 18px 18px 14px;
-  box-shadow: 0 0 20px rgba(168, 85, 247, 0.15);
+  box-shadow: 0 0 22px rgba(192, 132, 252, 0.18);
   margin-bottom: 14px;
-  backdrop-filter: blur(8px);
+  backdrop-filter: blur(12px);
   transition: all 0.3s ease;
 }
 
 .cbt-card:hover {
-  border-color: rgba(168, 85, 247, 0.5);
-  box-shadow: 0 0 30px rgba(168, 85, 247, 0.25);
+  border-color: rgba(192, 132, 252, 0.55);
+  box-shadow: 0 0 32px rgba(192, 132, 252, 0.28);
 }
 
 .cbt-heading {
@@ -459,7 +508,7 @@ p, div, span, label {
   font-size: 1.05rem;
   color: var(--text-primary);
   margin: 0 0 6px 0;
-  text-shadow: 0 0 8px rgba(168, 85, 247, 0.4);
+  text-shadow: 0 0 10px rgba(192, 132, 252, 0.5);
 }
 
 .cbt-sub {
@@ -469,39 +518,88 @@ p, div, span, label {
   line-height: 1.6;
 }
 
-/* ================== 呼吸ワーク円 ================== */
+/* ================== 呼吸ワーク円（星のリング + アニメーション）================== */
+.breath-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 20px 0;
+  position: relative;
+}
+
 .breath-spot {
   width: 260px;
   height: 260px;
   border-radius: 999px;
   background: radial-gradient(
     circle at 50% 40%,
-    rgba(6, 182, 212, 0.3) 0%,
-    rgba(6, 182, 212, 0.15) 30%,
-    rgba(16, 185, 129, 0.1) 60%,
+    rgba(253, 224, 71, 0.25) 0%,
+    rgba(34, 211, 238, 0.2) 30%,
+    rgba(52, 211, 153, 0.12) 60%,
     transparent 100%
   );
-  border: 2px solid rgba(6, 182, 212, 0.5);
+  border: 3px solid rgba(34, 211, 238, 0.6);
   box-shadow: 
-    0 0 40px rgba(6, 182, 212, 0.4),
-    0 0 80px rgba(6, 182, 212, 0.2),
-    inset 0 0 30px rgba(6, 182, 212, 0.15);
-  animation: breathGlow 4s ease-in-out infinite;
+    0 0 50px rgba(34, 211, 238, 0.5),
+    0 0 100px rgba(34, 211, 238, 0.25),
+    inset 0 0 40px rgba(34, 211, 238, 0.2);
+  position: relative;
+  transition: all 1s ease-in-out;
 }
 
-@keyframes breathGlow {
-  0%, 100% {
-    box-shadow: 
-      0 0 40px rgba(6, 182, 212, 0.4),
-      0 0 80px rgba(6, 182, 212, 0.2),
-      inset 0 0 30px rgba(6, 182, 212, 0.15);
-  }
-  50% {
-    box-shadow: 
-      0 0 60px rgba(6, 182, 212, 0.6),
-      0 0 100px rgba(6, 182, 212, 0.3),
-      inset 0 0 40px rgba(6, 182, 212, 0.25);
-  }
+/* 星のリングエフェクト */
+.breath-spot::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 100%;
+  height: 100%;
+  transform: translate(-50%, -50%);
+  border-radius: 999px;
+  background: 
+    radial-gradient(2px 2px at 10% 20%, white, transparent),
+    radial-gradient(1px 1px at 80% 30%, white, transparent),
+    radial-gradient(2px 2px at 50% 10%, white, transparent),
+    radial-gradient(1px 1px at 70% 80%, white, transparent),
+    radial-gradient(2px 2px at 20% 70%, white, transparent),
+    radial-gradient(1px 1px at 90% 50%, white, transparent);
+  background-size: 100% 100%;
+  animation: breathStars 4s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes breathStars {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+
+/* 呼吸フェーズ別のサイズ変更 */
+.breath-spot.inhale {
+  transform: scale(1.3);
+  border-color: rgba(34, 211, 238, 0.9);
+  box-shadow: 
+    0 0 70px rgba(34, 211, 238, 0.7),
+    0 0 120px rgba(34, 211, 238, 0.35),
+    inset 0 0 50px rgba(34, 211, 238, 0.3);
+}
+
+.breath-spot.hold {
+  transform: scale(1.3);
+  border-color: rgba(253, 224, 71, 0.8);
+  box-shadow: 
+    0 0 60px rgba(253, 224, 71, 0.6),
+    0 0 110px rgba(253, 224, 71, 0.3),
+    inset 0 0 45px rgba(253, 224, 71, 0.25);
+}
+
+.breath-spot.exhale {
+  transform: scale(0.85);
+  border-color: rgba(192, 132, 252, 0.7);
+  box-shadow: 
+    0 0 40px rgba(192, 132, 252, 0.5),
+    0 0 90px rgba(192, 132, 252, 0.25),
+    inset 0 0 35px rgba(192, 132, 252, 0.2);
 }
 
 /* ================== メタデータ・小テキスト ================== */
@@ -522,8 +620,8 @@ p, div, span, label {
 .stTextArea > div > div > textarea,
 .stNumberInput > div > div > input,
 .stSelectbox > div > div > select {
-  background: rgba(15, 20, 35, 0.8) !important;
-  border: 1px solid rgba(100, 116, 139, 0.4) !important;
+  background: rgba(20, 25, 45, 0.85) !important;
+  border: 1px solid rgba(120, 130, 160, 0.45) !important;
   color: var(--text-primary) !important;
   border-radius: 12px !important;
   padding: 10px 14px !important;
@@ -535,25 +633,26 @@ p, div, span, label {
 .stNumberInput > div > div > input:focus,
 .stSelectbox > div > div > select:focus {
   border-color: var(--neon-cyan) !important;
-  box-shadow: 0 0 15px rgba(6, 182, 212, 0.3) !important;
+  box-shadow: 0 0 18px rgba(34, 211, 238, 0.4) !important;
+  background: rgba(25, 30, 50, 0.9) !important;
 }
 
 /* ボタン */
 .stButton > button {
-  background: linear-gradient(135deg, rgba(6, 182, 212, 0.2) 0%, rgba(168, 85, 247, 0.2) 100%);
-  border: 1px solid rgba(6, 182, 212, 0.5);
+  background: linear-gradient(135deg, rgba(34, 211, 238, 0.25) 0%, rgba(192, 132, 252, 0.25) 100%);
+  border: 1px solid rgba(34, 211, 238, 0.6);
   color: var(--text-primary);
   font-weight: 700;
   border-radius: 12px;
   padding: 10px 20px;
   transition: all 0.3s ease;
-  box-shadow: 0 0 15px rgba(6, 182, 212, 0.2);
+  box-shadow: 0 0 18px rgba(34, 211, 238, 0.25);
 }
 
 .stButton > button:hover {
-  background: linear-gradient(135deg, rgba(6, 182, 212, 0.3) 0%, rgba(168, 85, 247, 0.3) 100%);
+  background: linear-gradient(135deg, rgba(34, 211, 238, 0.35) 0%, rgba(192, 132, 252, 0.35) 100%);
   border-color: var(--neon-cyan);
-  box-shadow: 0 0 25px rgba(6, 182, 212, 0.4);
+  box-shadow: 0 0 28px rgba(34, 211, 238, 0.5);
   transform: translateY(-1px);
 }
 
@@ -561,40 +660,56 @@ p, div, span, label {
 .stButton > button[kind="primary"] {
   background: linear-gradient(135deg, var(--neon-cyan) 0%, var(--neon-purple) 100%);
   border: none;
-  box-shadow: 0 0 25px rgba(6, 182, 212, 0.4);
+  box-shadow: 0 0 28px rgba(34, 211, 238, 0.5);
   font-weight: 800;
 }
 
 .stButton > button[kind="primary"]:hover {
-  box-shadow: 0 0 35px rgba(6, 182, 212, 0.6);
+  box-shadow: 0 0 40px rgba(34, 211, 238, 0.7);
   transform: translateY(-2px);
 }
 
 /* ラジオボタン */
 .stRadio > div {
-  background: rgba(15, 20, 35, 0.6);
-  border: 1px solid rgba(100, 116, 139, 0.3);
+  background: rgba(20, 25, 45, 0.7);
+  border: 1px solid rgba(120, 130, 160, 0.35);
   border-radius: 12px;
-  padding: 8px;
+  padding: 10px;
 }
 
 .stRadio > div > label {
   color: var(--text-primary) !important;
+  font-weight: 600;
+}
+
+.stRadio > div > label > div[data-testid="stMarkdownContainer"] {
+  color: var(--text-primary) !important;
+}
+
+/* ラジオボタンの選択状態 */
+.stRadio input[type="radio"]:checked + div {
+  background-color: rgba(34, 211, 238, 0.2) !important;
+  border-color: var(--neon-cyan) !important;
 }
 
 /* チェックボックス */
 .stCheckbox > label {
   color: var(--text-primary) !important;
+  font-weight: 600;
+}
+
+.stCheckbox > label > div[data-testid="stMarkdownContainer"] {
+  color: var(--text-primary) !important;
 }
 
 /* スライダー */
 .stSlider > div > div > div {
-  background: rgba(6, 182, 212, 0.3) !important;
+  background: rgba(34, 211, 238, 0.35) !important;
 }
 
 .stSlider > div > div > div > div {
   background: var(--neon-cyan) !important;
-  box-shadow: 0 0 10px rgba(6, 182, 212, 0.5) !important;
+  box-shadow: 0 0 12px rgba(34, 211, 238, 0.6) !important;
 }
 
 /* セレクトボックス */
@@ -609,15 +724,26 @@ p, div, span, label {
 
 /* Multiselect */
 .stMultiSelect > div > div {
-  background: rgba(15, 20, 35, 0.8) !important;
-  border: 1px solid rgba(100, 116, 139, 0.4) !important;
+  background: rgba(20, 25, 45, 0.85) !important;
+  border: 1px solid rgba(120, 130, 160, 0.45) !important;
   border-radius: 12px !important;
+}
+
+/* Multiselectの選択されたタグ（赤→青紫に変更）*/
+.stMultiSelect span[data-baseweb="tag"] {
+  background-color: rgba(192, 132, 252, 0.3) !important;
+  border: 1px solid rgba(192, 132, 252, 0.6) !important;
+  color: var(--text-primary) !important;
+}
+
+.stMultiSelect span[data-baseweb="tag"] button {
+  color: var(--text-primary) !important;
 }
 
 /* Tabs */
 .stTabs > div > div > div {
-  background: rgba(5, 8, 22, 0.6);
-  border: 1px solid rgba(6, 182, 212, 0.3);
+  background: rgba(10, 14, 39, 0.65);
+  border: 1px solid rgba(34, 211, 238, 0.35);
   border-radius: 12px;
 }
 
@@ -633,10 +759,11 @@ p, div, span, label {
 
 /* Success/Error/Info メッセージ */
 .stSuccess, .stError, .stWarning, .stInfo {
-  background: rgba(5, 8, 22, 0.8) !important;
+  background: rgba(10, 14, 39, 0.85) !important;
   border-radius: 12px !important;
   border-left: 4px solid var(--neon-emerald) !important;
-  backdrop-filter: blur(8px) !important;
+  backdrop-filter: blur(12px) !important;
+  color: var(--text-primary) !important;
 }
 
 .stError {
@@ -645,7 +772,7 @@ p, div, span, label {
 
 /* Divider */
 hr {
-  border-color: rgba(100, 116, 139, 0.3) !important;
+  border-color: rgba(120, 130, 160, 0.35) !important;
 }
 
 /* ================== レスポンシブ調整 ================== */
@@ -713,14 +840,14 @@ hr {
 }
 
 ::-webkit-scrollbar-track {
-  background: rgba(15, 20, 35, 0.5);
+  background: rgba(20, 25, 45, 0.6);
   border-radius: 5px;
 }
 
 ::-webkit-scrollbar-thumb {
   background: linear-gradient(180deg, var(--neon-cyan) 0%, var(--neon-purple) 100%);
   border-radius: 5px;
-  box-shadow: 0 0 10px rgba(6, 182, 212, 0.5);
+  box-shadow: 0 0 12px rgba(34, 211, 238, 0.6);
 }
 
 ::-webkit-scrollbar-thumb:hover {
@@ -767,7 +894,7 @@ def status_bar():
     if st.session_state.get("flash_msg"):
         st.toast(st.session_state["flash_msg"])
         st.markdown(
-            f"<div class='card' style='padding:10px 12px; margin-bottom:10px; border-left:6px solid #10b981'>"
+            f"<div class='card' style='padding:10px 12px; margin-bottom:10px; border-left:6px solid #34d399'>"
             f"<b>{st.session_state['flash_msg']}</b></div>",
             unsafe_allow_html=True,
         )
@@ -892,8 +1019,8 @@ With You は、あなたの心のそばにある、小さなツールボック�
 🔒 「今日を伝える」と「相談する」だけが先生に届きます。
 それ以外の記録は、すべてあなたの端末だけに残ります。
 
-<div style="margin-top:0.8rem; padding:8px 12px; background:rgba(6, 182, 212, 0.15); border-radius:12px; border-left:4px solid #06b6d4; box-shadow: 0 0 15px rgba(6, 182, 212, 0.2);">
-  <b>あなたのクラス：{class_id}</b>
+<div style="margin-top:0.8rem; padding:8px 12px; background:rgba(34, 211, 238, 0.18); border-radius:12px; border-left:4px solid #22d3ee; box-shadow: 0 0 18px rgba(34, 211, 238, 0.25);">
+  <b style="color:var(--text-primary)">あなたのクラス：{class_id}</b>
 </div>
   </div>
 </div>
@@ -1119,11 +1246,11 @@ def view_consult():
         else:
             st.error("送信できませんでした。")
 
-# ----- リラックス（呼吸）-----
+# ----- リラックス（呼吸）[アニメーション改良版] -----
 BREATH_PATTERN = (5, 2, 6)
 
 def breathing_animation(total_sec: int = 90):
-    """呼吸ワークのアニメーション"""
+    """呼吸ワークのアニメーション（吸う→大きく、吐く→小さく）"""
     st.session_state["_breath_running"] = True
 
     inhale, hold, exhale = BREATH_PATTERN
@@ -1135,20 +1262,21 @@ def breathing_animation(total_sec: int = 90):
     countdown_area = st.empty()
     stop_area = st.empty()
 
-    circle_area.markdown(
-        """
-<div style="display:flex;justify-content:center;align-items:center;padding:8px 0 6px">
-  <div class="breath-spot" style="width:260px;height:260px"></div>
+    def render_circle(phase_class: str = ""):
+        circle_area.markdown(
+            f"""
+<div class="breath-container">
+  <div class="breath-spot {phase_class}"></div>
 </div>
 """,
-        unsafe_allow_html=True,
-    )
+            unsafe_allow_html=True,
+        )
 
     def set_countdown(sec: int, label: str = ""):
         countdown_area.markdown(
             f"""
-<div style="text-align:center;font-size:1.05rem;color:var(--text-secondary);">
-  {label} のこり <b>{sec}</b> 秒
+<div style="text-align:center;font-size:1.1rem;color:var(--text-primary);margin-top:10px;">
+  <b>{label}</b> のこり <b style="color:var(--neon-cyan)">{sec}</b> 秒
 </div>
 """,
             unsafe_allow_html=True,
@@ -1166,14 +1294,19 @@ def breathing_animation(total_sec: int = 90):
 
     try:
         for _ in range(cycles):
-            for label, seconds in [
-                ("吸ってください", inhale), 
-                ("止めてください", hold), 
-                ("吐いてください", exhale)
-            ]:
+            phases = [
+                ("吸ってください", inhale, "inhale"), 
+                ("止めてください", hold, "hold"), 
+                ("吐いてください", exhale, "exhale")
+            ]
+            
+            for label, seconds, phase_class in phases:
                 if seconds <= 0:
                     continue
-                phase_area.markdown(f"**{label}**")
+                
+                render_circle(phase_class)
+                phase_area.markdown(f"<div style='text-align:center;font-size:1.3rem;font-weight:900;color:var(--text-primary);text-shadow:0 0 10px rgba(34,211,238,0.5);'>{label}</div>", unsafe_allow_html=True)
+                
                 for remain in range(seconds, 0, -1):
                     if st.session_state.get("_breath_stop") or st.session_state.view != "SESSION":
                         return
@@ -1416,6 +1549,7 @@ def view_note():
 # ----- Study Tracker -----
 def view_study():
     st.markdown("### 📚 Study Tracker")
+    st.caption("学習時間を記録して、自分の頑張りを見える化しよう。")
     
     subjects_default = ["国語","数学","英語","理科","社会","音楽","美術","情報","その他"]
     subj = st.selectbox("科目", subjects_default, index=0, key="study_subj")
@@ -1431,7 +1565,7 @@ def view_study():
         index=0, 
         key="study_mood"
     )
-    memo = st.text_input("メモ（任意）", key="study_memo")
+    memo = st.text_input("メモ（任意）", key="study_memo", placeholder="例：問題集10ページ進んだ")
     
     if st.button("💾 記録（端末）", type="primary", key="study_save"):
         rec = {
@@ -1505,6 +1639,7 @@ def view_review():
             )
             
             if not pie_agg.empty:
+                st.markdown("#### 科目別学習時間")
                 pie = (
                     alt.Chart(pie_agg)
                     .mark_arc(innerRadius=60)
@@ -1524,6 +1659,7 @@ def view_review():
                 )
                 st.altair_chart(pie, use_container_width=False)
             
+            st.markdown("#### 学習記録一覧")
             for _, r in df.sort_values("ts", ascending=False).iterrows():
                 st.markdown(f"""
 <div class="item">
