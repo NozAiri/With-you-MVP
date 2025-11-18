@@ -695,14 +695,14 @@ p, div, span, label {{
 }}
 
 /* セレクトボックス */
-.stSelectbox > div > div > select {
-  background: rgba(26, 26, 46, 0.6) !important;
+.stSelectbox > div > div > select {{
+  background: rgba(26, 26, 46, 0.9) !important;
   border: 1px solid var(--border) !important;
-  color: var(--text-primary) !important;
+  color: #ffffff !important;
   border-radius: 12px !important;
   padding: 10px 14px !important;
   transition: all 0.3s ease !important;
-}
+}}
 
 /* セレクトボックスのオプション（ドロップダウン内） */
 .stSelectbox > div > div > select option {
