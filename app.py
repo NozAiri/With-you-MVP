@@ -1,4 +1,4 @@
-# app.py — With You.（学校導入版・生徒側UI）
+# app.py — With You.（学校導入版・生徒側UI）【ネオン調ダークテーマ版】
 # 管理者側ダッシュボード（with-you-admin-ui）と連携する改良版
 # 
 # 【主な変更点】
@@ -6,6 +6,7 @@
 # 2. 気分データに絵文字マッピングを追加（管理者側で表示用）
 # 3. 送信データ構造を管理者側の集計処理に最適化
 # 4. リスク判定ロジックを強化（自殺念慮キーワード検出）
+# 5. 🌙 デザインをネオン調ダークテーマに変更
 
 from __future__ import annotations
 from datetime import datetime, timezone, timedelta, date
@@ -238,73 +239,493 @@ st.session_state.setdefault("role", "user")
 # ローカルログ（端末保存）
 st.session_state.setdefault("_local_logs", {"note":[], "breath":[], "study":[]})
 
-# ================== スタイル ==================
+# ================== スタイル【🌙 ネオン調ダークテーマ版】 ==================
 def inject_css():
     st.markdown("""
 <style>
-:root{
-  --text:#182742; --muted:#63728a; --panel:#ffffffee; --panel-brd:#e1e9ff; 
-  --shadow:0 14px 34px rgba(40,80,160,.12);
-  --grad:
-    radial-gradient(1400px 600px at -10% -10%, #e8f1ff 0%, rgba(232,241,255,0) 60%),
-    radial-gradient(1200px 500px at 110% -10%, #ffeef6 0%, rgba(255,238,246,0) 60%),
-    radial-gradient(1200px 500px at 50% 110%, #e9fff7 0%, rgba(233,255,247,0) 60%),
-    linear-gradient(180deg, #f9fbff 0%, #eef5ff 100%);
+/* ================== ネオン調ダークテーマ ==================
+   10代向けメンタルヘルスアプリ用
+   落ち着いた・やさしいネオン表現
+   ================================================== */
+
+:root {
+  /* カラーパレット */
+  --bg-dark: #020617;
+  --bg-card: rgba(5, 8, 22, 0.7);
+  --text-primary: #e5e7ff;
+  --text-secondary: #9ca3c7;
+  --text-muted: #6b7a9d;
+  
+  /* ネオンカラー */
+  --neon-cyan: #06b6d4;
+  --neon-purple: #a855f7;
+  --neon-pink: #ec4899;
+  --neon-emerald: #10b981;
+  --neon-blue: #3b82f6;
+  
+  /* グロー効果 */
+  --glow-cyan: 0 0 20px rgba(6, 182, 212, 0.4);
+  --glow-purple: 0 0 20px rgba(168, 85, 247, 0.4);
+  --glow-pink: 0 0 20px rgba(236, 72, 153, 0.4);
+  --glow-soft: 0 0 30px rgba(59, 130, 246, 0.2);
 }
-html, body, .stApp{ background:var(--grad); color:var(--text); }
-.block-container{ max-width:980px; padding-top:1rem; padding-bottom:2rem }
-.card{ 
-  background:var(--panel); border:1px solid var(--panel-brd); 
-  border-radius:22px; padding:18px; box-shadow:var(--shadow); 
+
+/* ================== 全体背景 ================== */
+html, body, .stApp {
+  background: 
+    radial-gradient(ellipse 1400px 800px at 10% 10%, rgba(6, 182, 212, 0.08) 0%, transparent 50%),
+    radial-gradient(ellipse 1200px 700px at 90% 20%, rgba(168, 85, 247, 0.08) 0%, transparent 50%),
+    radial-gradient(ellipse 1000px 600px at 50% 90%, rgba(16, 185, 129, 0.06) 0%, transparent 50%),
+    linear-gradient(180deg, #020617 0%, #0a0f1e 50%, #020617 100%);
+  color: var(--text-primary);
+  min-height: 100vh;
 }
-.item{ 
-  background:#fff; border:1px solid #e3e8ff; border-radius:18px; 
-  padding:16px; box-shadow:var(--shadow) 
+
+.block-container {
+  max-width: 980px;
+  padding-top: 1rem;
+  padding-bottom: 2rem;
 }
-.tip{ color:#6a7d9e; font-size:.92rem; }
-.top-tabs{
-  position: sticky; top: 0; z-index: 50;
-  background: rgba(250,253,255,.85); backdrop-filter:saturate(160%) blur(8px);
-  border:1px solid #dfe6ff; border-radius:16px; box-shadow:0 12px 24px rgba(70,120,200,.12);
-  padding:6px 8px; margin-bottom:14px;
+
+/* ================== カード系 ================== */
+.card {
+  background: var(--bg-card);
+  border: 1px solid rgba(6, 182, 212, 0.3);
+  border-radius: 22px;
+  padding: 18px;
+  box-shadow: var(--glow-soft), inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(12px);
+  transition: all 0.3s ease;
 }
-.top-tabs .stButton>button{
-  width:100%; height:40px; border-radius:12px; font-weight:800;
-  background:#f6f9ff; border:1px solid #e1eaff; color:#2b4772;
+
+.card:hover {
+  border-color: rgba(6, 182, 212, 0.5);
+  box-shadow: 0 0 35px rgba(59, 130, 246, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
-.top-tabs .active .stButton>button{ 
-  background:#eaf3ff; border-bottom:3px solid #5EA3FF 
+
+.item {
+  background: rgba(5, 8, 22, 0.6);
+  border: 1px solid rgba(168, 85, 247, 0.25);
+  border-radius: 18px;
+  padding: 16px;
+  box-shadow: var(--glow-soft);
+  backdrop-filter: blur(8px);
+  margin-bottom: 12px;
+  transition: all 0.3s ease;
 }
-.bigbtn{ margin-bottom:12px; }
-.bigbtn .stButton>button{
-  width:100%; text-align:left; border-radius:22px; border:1px solid #dfe6ff; 
-  box-shadow:var(--shadow);
-  padding:18px 18px 16px; white-space:pre-wrap; line-height:1.35;
-  background:linear-gradient(135deg,#ffffff 0%,#eef5ff 100%); 
-  color:#132748; font-weight:600;
+
+.item:hover {
+  border-color: rgba(168, 85, 247, 0.4);
+  box-shadow: 0 0 25px rgba(168, 85, 247, 0.2);
 }
-.bigbtn .stButton>button::first-line{ 
-  font-weight:900; font-size:1.06rem; color:#0f2545; 
+
+/* ================== テキストスタイル ================== */
+.tip {
+  color: var(--text-muted);
+  font-size: 0.92rem;
+  line-height: 1.6;
 }
-.cbt-card{ 
-  background:#fff; border:1px solid #e3e8ff; border-radius:18px; 
-  padding:18px 18px 14px; box-shadow:0 6px 20px rgba(31,59,179,0.06); 
-  margin-bottom:14px; 
+
+h1, h2, h3, h4, h5, h6 {
+  color: var(--text-primary) !important;
+  text-shadow: 0 0 8px rgba(6, 182, 212, 0.3);
+  font-weight: 800;
 }
-.cbt-heading{ 
-  font-weight:900; font-size:1.05rem; color:#1b2440; margin:0 0 6px 0;
+
+p, div, span, label {
+  color: var(--text-primary);
 }
-.cbt-sub{ 
-  color:#63728a; font-size:0.92rem; margin:-2px 0 10px 0;
+
+.stMarkdown {
+  color: var(--text-primary);
 }
-.meta{ color:#6a7d9e; font-size:.86rem; margin-bottom:.3rem}
-.breath-spot{
-  width:260px;height:260px;border-radius:999px;
-  background:radial-gradient(circle at 50% 40%, #f7fbff, #e8f2ff 60%, #eef8ff 100%);
-  border:1px solid #dbe9ff;
-  box-shadow:0 18px 36px rgba(90,140,190,.14), inset 0 -10px 25px rgba(120,150,200,.15);
+
+/* ================== トップタブ ================== */
+.top-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: rgba(5, 8, 22, 0.85);
+  backdrop-filter: saturate(180%) blur(12px);
+  border: 1px solid rgba(6, 182, 212, 0.4);
+  border-radius: 16px;
+  box-shadow: 0 0 30px rgba(6, 182, 212, 0.2), 0 8px 20px rgba(0, 0, 0, 0.4);
+  padding: 6px 8px;
+  margin-bottom: 14px;
 }
-.small{font-size:.9rem;color:#5b6a85}
+
+.top-tabs .stButton > button {
+  width: 100%;
+  height: 40px;
+  border-radius: 12px;
+  font-weight: 800;
+  font-size: 0.85rem;
+  background: rgba(15, 20, 35, 0.6);
+  border: 1px solid rgba(100, 116, 139, 0.3);
+  color: var(--text-secondary);
+  transition: all 0.3s ease;
+  backdrop-filter: blur(4px);
+}
+
+.top-tabs .stButton > button:hover {
+  background: rgba(20, 30, 50, 0.8);
+  border-color: rgba(6, 182, 212, 0.5);
+  color: var(--neon-cyan);
+  box-shadow: 0 0 15px rgba(6, 182, 212, 0.3);
+  transform: translateY(-1px);
+}
+
+.top-tabs .active .stButton > button {
+  background: linear-gradient(135deg, rgba(6, 182, 212, 0.25) 0%, rgba(168, 85, 247, 0.25) 100%);
+  border: 1px solid var(--neon-cyan);
+  border-bottom: 3px solid var(--neon-cyan);
+  color: var(--text-primary);
+  box-shadow: 0 0 20px rgba(6, 182, 212, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  font-weight: 900;
+}
+
+/* ================== ホーム大型ボタン ================== */
+.bigbtn {
+  margin-bottom: 12px;
+}
+
+.bigbtn .stButton > button {
+  width: 100%;
+  text-align: left;
+  border-radius: 22px;
+  border: 1px solid rgba(6, 182, 212, 0.4);
+  box-shadow: 0 0 25px rgba(59, 130, 246, 0.2);
+  padding: 18px 18px 16px;
+  white-space: pre-wrap;
+  line-height: 1.35;
+  background: linear-gradient(135deg, rgba(6, 182, 212, 0.12) 0%, rgba(168, 85, 247, 0.12) 100%);
+  color: var(--text-primary);
+  font-weight: 600;
+  transition: all 0.3s ease;
+  backdrop-filter: blur(8px);
+  position: relative;
+  overflow: hidden;
+}
+
+.bigbtn .stButton > button::before {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: radial-gradient(circle, rgba(6, 182, 212, 0.1) 0%, transparent 70%);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.bigbtn .stButton > button:hover::before {
+  opacity: 1;
+}
+
+.bigbtn .stButton > button:hover {
+  border-color: rgba(6, 182, 212, 0.7);
+  box-shadow: 0 0 35px rgba(6, 182, 212, 0.3), 0 0 50px rgba(168, 85, 247, 0.15);
+  transform: translateY(-2px);
+  background: linear-gradient(135deg, rgba(6, 182, 212, 0.18) 0%, rgba(168, 85, 247, 0.18) 100%);
+}
+
+.bigbtn .stButton > button::first-line {
+  font-weight: 900;
+  font-size: 1.1rem;
+  color: var(--text-primary);
+  text-shadow: 0 0 10px rgba(6, 182, 212, 0.5);
+}
+
+/* ================== CBTカード ================== */
+.cbt-card {
+  background: rgba(5, 8, 22, 0.6);
+  border: 1px solid rgba(168, 85, 247, 0.3);
+  border-radius: 18px;
+  padding: 18px 18px 14px;
+  box-shadow: 0 0 20px rgba(168, 85, 247, 0.15);
+  margin-bottom: 14px;
+  backdrop-filter: blur(8px);
+  transition: all 0.3s ease;
+}
+
+.cbt-card:hover {
+  border-color: rgba(168, 85, 247, 0.5);
+  box-shadow: 0 0 30px rgba(168, 85, 247, 0.25);
+}
+
+.cbt-heading {
+  font-weight: 900;
+  font-size: 1.05rem;
+  color: var(--text-primary);
+  margin: 0 0 6px 0;
+  text-shadow: 0 0 8px rgba(168, 85, 247, 0.4);
+}
+
+.cbt-sub {
+  color: var(--text-secondary);
+  font-size: 0.92rem;
+  margin: -2px 0 10px 0;
+  line-height: 1.6;
+}
+
+/* ================== 呼吸ワーク円 ================== */
+.breath-spot {
+  width: 260px;
+  height: 260px;
+  border-radius: 999px;
+  background: radial-gradient(
+    circle at 50% 40%,
+    rgba(6, 182, 212, 0.3) 0%,
+    rgba(6, 182, 212, 0.15) 30%,
+    rgba(16, 185, 129, 0.1) 60%,
+    transparent 100%
+  );
+  border: 2px solid rgba(6, 182, 212, 0.5);
+  box-shadow: 
+    0 0 40px rgba(6, 182, 212, 0.4),
+    0 0 80px rgba(6, 182, 212, 0.2),
+    inset 0 0 30px rgba(6, 182, 212, 0.15);
+  animation: breathGlow 4s ease-in-out infinite;
+}
+
+@keyframes breathGlow {
+  0%, 100% {
+    box-shadow: 
+      0 0 40px rgba(6, 182, 212, 0.4),
+      0 0 80px rgba(6, 182, 212, 0.2),
+      inset 0 0 30px rgba(6, 182, 212, 0.15);
+  }
+  50% {
+    box-shadow: 
+      0 0 60px rgba(6, 182, 212, 0.6),
+      0 0 100px rgba(6, 182, 212, 0.3),
+      inset 0 0 40px rgba(6, 182, 212, 0.25);
+  }
+}
+
+/* ================== メタデータ・小テキスト ================== */
+.meta {
+  color: var(--text-muted);
+  font-size: 0.86rem;
+  margin-bottom: 0.3rem;
+}
+
+.small {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
+
+/* ================== Streamlitコンポーネントの調整 ================== */
+/* 入力フィールド */
+.stTextInput > div > div > input,
+.stTextArea > div > div > textarea,
+.stNumberInput > div > div > input,
+.stSelectbox > div > div > select {
+  background: rgba(15, 20, 35, 0.8) !important;
+  border: 1px solid rgba(100, 116, 139, 0.4) !important;
+  color: var(--text-primary) !important;
+  border-radius: 12px !important;
+  padding: 10px 14px !important;
+  transition: all 0.3s ease !important;
+}
+
+.stTextInput > div > div > input:focus,
+.stTextArea > div > div > textarea:focus,
+.stNumberInput > div > div > input:focus,
+.stSelectbox > div > div > select:focus {
+  border-color: var(--neon-cyan) !important;
+  box-shadow: 0 0 15px rgba(6, 182, 212, 0.3) !important;
+}
+
+/* ボタン */
+.stButton > button {
+  background: linear-gradient(135deg, rgba(6, 182, 212, 0.2) 0%, rgba(168, 85, 247, 0.2) 100%);
+  border: 1px solid rgba(6, 182, 212, 0.5);
+  color: var(--text-primary);
+  font-weight: 700;
+  border-radius: 12px;
+  padding: 10px 20px;
+  transition: all 0.3s ease;
+  box-shadow: 0 0 15px rgba(6, 182, 212, 0.2);
+}
+
+.stButton > button:hover {
+  background: linear-gradient(135deg, rgba(6, 182, 212, 0.3) 0%, rgba(168, 85, 247, 0.3) 100%);
+  border-color: var(--neon-cyan);
+  box-shadow: 0 0 25px rgba(6, 182, 212, 0.4);
+  transform: translateY(-1px);
+}
+
+/* プライマリボタン */
+.stButton > button[kind="primary"] {
+  background: linear-gradient(135deg, var(--neon-cyan) 0%, var(--neon-purple) 100%);
+  border: none;
+  box-shadow: 0 0 25px rgba(6, 182, 212, 0.4);
+  font-weight: 800;
+}
+
+.stButton > button[kind="primary"]:hover {
+  box-shadow: 0 0 35px rgba(6, 182, 212, 0.6);
+  transform: translateY(-2px);
+}
+
+/* ラジオボタン */
+.stRadio > div {
+  background: rgba(15, 20, 35, 0.6);
+  border: 1px solid rgba(100, 116, 139, 0.3);
+  border-radius: 12px;
+  padding: 8px;
+}
+
+.stRadio > div > label {
+  color: var(--text-primary) !important;
+}
+
+/* チェックボックス */
+.stCheckbox > label {
+  color: var(--text-primary) !important;
+}
+
+/* スライダー */
+.stSlider > div > div > div {
+  background: rgba(6, 182, 212, 0.3) !important;
+}
+
+.stSlider > div > div > div > div {
+  background: var(--neon-cyan) !important;
+  box-shadow: 0 0 10px rgba(6, 182, 212, 0.5) !important;
+}
+
+/* セレクトボックス */
+.stSelectbox > label,
+.stMultiSelect > label,
+.stTextInput > label,
+.stTextArea > label,
+.stNumberInput > label {
+  color: var(--text-primary) !important;
+  font-weight: 600;
+}
+
+/* Multiselect */
+.stMultiSelect > div > div {
+  background: rgba(15, 20, 35, 0.8) !important;
+  border: 1px solid rgba(100, 116, 139, 0.4) !important;
+  border-radius: 12px !important;
+}
+
+/* Tabs */
+.stTabs > div > div > div {
+  background: rgba(5, 8, 22, 0.6);
+  border: 1px solid rgba(6, 182, 212, 0.3);
+  border-radius: 12px;
+}
+
+.stTabs [data-baseweb="tab"] {
+  color: var(--text-secondary);
+  font-weight: 700;
+}
+
+.stTabs [aria-selected="true"] {
+  color: var(--neon-cyan);
+  border-bottom-color: var(--neon-cyan);
+}
+
+/* Success/Error/Info メッセージ */
+.stSuccess, .stError, .stWarning, .stInfo {
+  background: rgba(5, 8, 22, 0.8) !important;
+  border-radius: 12px !important;
+  border-left: 4px solid var(--neon-emerald) !important;
+  backdrop-filter: blur(8px) !important;
+}
+
+.stError {
+  border-left-color: var(--neon-pink) !important;
+}
+
+/* Divider */
+hr {
+  border-color: rgba(100, 116, 139, 0.3) !important;
+}
+
+/* ================== レスポンシブ調整 ================== */
+@media (max-width: 768px) {
+  .block-container {
+    padding-top: 0.5rem;
+    padding-bottom: 1rem;
+  }
+  
+  .bigbtn .stButton > button {
+    padding: 14px 14px 12px;
+    font-size: 0.95rem;
+  }
+  
+  .bigbtn .stButton > button::first-line {
+    font-size: 1rem;
+  }
+  
+  .breath-spot {
+    width: 220px;
+    height: 220px;
+  }
+  
+  .top-tabs .stButton > button {
+    font-size: 0.75rem;
+    height: 36px;
+  }
+  
+  h1, h2, h3 {
+    font-size: 1.3rem !important;
+  }
+  
+  .cbt-heading {
+    font-size: 1rem;
+  }
+  
+  .card, .item, .cbt-card {
+    padding: 14px;
+  }
+}
+
+/* ================== アクセシビリティ ================== */
+/* フォーカス時のアウトライン */
+*:focus-visible {
+  outline: 2px solid var(--neon-cyan);
+  outline-offset: 2px;
+}
+
+/* 高コントラストモード対応 */
+@media (prefers-contrast: high) {
+  :root {
+    --text-primary: #ffffff;
+    --text-secondary: #d1d5f0;
+  }
+  
+  .card, .item, .cbt-card {
+    border-width: 2px;
+  }
+}
+
+/* ================== スクロールバー ================== */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(15, 20, 35, 0.5);
+  border-radius: 5px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, var(--neon-cyan) 0%, var(--neon-purple) 100%);
+  border-radius: 5px;
+  box-shadow: 0 0 10px rgba(6, 182, 212, 0.5);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, var(--neon-purple) 0%, var(--neon-cyan) 100%);
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -346,7 +767,7 @@ def status_bar():
     if st.session_state.get("flash_msg"):
         st.toast(st.session_state["flash_msg"])
         st.markdown(
-            f"<div class='card' style='padding:10px 12px; margin-bottom:10px; border-left:6px solid #69c27a'>"
+            f"<div class='card' style='padding:10px 12px; margin-bottom:10px; border-left:6px solid #10b981'>"
             f"<b>{st.session_state['flash_msg']}</b></div>",
             unsafe_allow_html=True,
         )
@@ -462,7 +883,7 @@ def home_intro():
     st.markdown(f"""
 <div class="card" style="margin-bottom:12px">
   <div style="font-weight:900; font-size:1.05rem; margin-bottom:.3rem">🌙 With You</div>
-  <div style="color:#3a4a6a; line-height:1.65; white-space:pre-wrap">
+  <div style="color:var(--text-secondary); line-height:1.65; white-space:pre-wrap">
 気持ちを整理したい日も、誰かに話したい日も。
 With You は、あなたの心のそばにある、小さなツールボックスです。
 
@@ -471,7 +892,7 @@ With You は、あなたの心のそばにある、小さなツールボック�
 🔒 「今日を伝える」と「相談する」だけが先生に届きます。
 それ以外の記録は、すべてあなたの端末だけに残ります。
 
-<div style="margin-top:0.8rem; padding:8px 12px; background:#f0f7ff; border-radius:12px; border-left:4px solid #5EA3FF;">
+<div style="margin-top:0.8rem; padding:8px 12px; background:rgba(6, 182, 212, 0.15); border-radius:12px; border-left:4px solid #06b6d4; box-shadow: 0 0 15px rgba(6, 182, 212, 0.2);">
   <b>あなたのクラス：{class_id}</b>
 </div>
   </div>
@@ -726,7 +1147,7 @@ def breathing_animation(total_sec: int = 90):
     def set_countdown(sec: int, label: str = ""):
         countdown_area.markdown(
             f"""
-<div style="text-align:center;font-size:1.05rem;color:#3a4a6a;">
+<div style="text-align:center;font-size:1.05rem;color:var(--text-secondary);">
   {label} のこり <b>{sec}</b> 秒
 </div>
 """,
@@ -1050,7 +1471,7 @@ def view_review():
                 st.markdown(f"""
 <div class="item">
   <div class="meta">{r['ts']}</div>
-  <div style="font-weight:900; color:#24466e; margin-bottom:.2rem">
+  <div style="font-weight:900; color:var(--text-primary); margin-bottom:.2rem">
     {r['mood'].get('emoji','')} {r['mood'].get('label','')}
   </div>
   <div style="white-space:pre-wrap; margin-bottom:.3rem">きっかけ：{r.get('trigger','')}</div>
@@ -1109,7 +1530,7 @@ def view_review():
   <div class="meta">{r['ts']}</div>
   <div style="font-weight:900">{r['subject']}</div>
   <div>分：{int(r['minutes'])} / 状況：{r.get('mood','')}</div>
-  <div style="white-space:pre-wrap; color:#3b4f71; margin-top:.3rem">{r.get('memo','')}</div>
+  <div style="white-space:pre-wrap; color:var(--text-secondary); margin-top:.3rem">{r.get('memo','')}</div>
 </div>
 """, unsafe_allow_html=True)
 
