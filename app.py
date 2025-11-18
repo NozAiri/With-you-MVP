@@ -289,18 +289,15 @@ THEMES = {
 
 # ================== スタイル【🌙 エモい夜空版 v4】 ==================
 # ================== スタイル【🌙 エモい夜空版 v4】 ==================
+# ================== スタイル【🌙 エモい夜空版 v4】 ==================
 def inject_css():
     theme = THEMES[st.session_state.get("theme", "🌙 静かな夜空")]
     
     st.markdown(f"""
 <style>
-/* ================== エモい夜空UI v4 ==================
-   ダークベース + やさしいネオン
-   CSS onlyの軽量インタラクション
-   ================================================== */
+/* ================== エモい夜空UI v4 ================== */
 
 :root {{
-  /* テーマカラー（動的） */
   --bg-start: {theme['bg_start']};
   --bg-mid: {theme['bg_mid']};
   --bg-end: {theme['bg_end']};
@@ -308,26 +305,18 @@ def inject_css():
   --accent-soft: {theme['accent_soft']};
   --success: {theme['success']};
   
-  /* 固定カラー */
   --text-primary: #e8eaf0;
   --text-secondary: #a8b3d7;
   --text-muted: #7a8ab0;
   --border: rgba(168, 179, 215, 0.15);
   
-  /* 影・グロー */
   --shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
   --glow: 0 0 20px var(--accent);
   --glow-soft: 0 0 30px rgba(195, 177, 225, 0.15);
 }}
 
-/* ================== 全体背景（夜空グラデーション）================== */
 html, body, .stApp {{
-  background: linear-gradient(
-    165deg,
-    var(--bg-start) 0%,
-    var(--bg-mid) 40%,
-    var(--bg-end) 100%
-  );
+  background: linear-gradient(165deg, var(--bg-start) 0%, var(--bg-mid) 40%, var(--bg-end) 100%);
   color: var(--text-primary);
   min-height: 100vh;
   font-family: 'Noto Sans JP', -apple-system, BlinkMacSystemFont, sans-serif;
@@ -335,14 +324,11 @@ html, body, .stApp {{
   line-height: 1.7;
 }}
 
-/* 漂う光粒子（超軽量・CSS only） */
 html::before {{
   content: '';
   position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
   background: 
     radial-gradient(circle at 20% 30%, var(--accent-soft) 0%, transparent 2%),
     radial-gradient(circle at 80% 70%, var(--accent-soft) 0%, transparent 1.5%),
@@ -366,7 +352,6 @@ html::before {{
   z-index: 1;
 }}
 
-/* ================== カード系（ガラスモーフィズム）================== */
 .card {{
   background: rgba(26, 26, 46, 0.6);
   border: 1px solid var(--border);
@@ -399,7 +384,6 @@ html::before {{
   box-shadow: var(--shadow), 0 0 15px rgba(195, 177, 225, 0.1);
 }}
 
-/* ================== テキストスタイル ================== */
 .tip {{
   color: var(--text-muted);
   font-size: 0.88rem;
@@ -417,7 +401,6 @@ p, div, span, label {{
   color: var(--text-primary);
 }}
 
-/* ================== トップタブ ================== */
 .top-tabs {{
   position: sticky;
   top: 0;
@@ -455,7 +438,6 @@ p, div, span, label {{
   box-shadow: var(--glow-soft);
 }}
 
-/* ================== ホーム大型カード（ぷるんと反応）================== */
 .bigbtn {{
   margin-bottom: 14px;
 }}
@@ -494,7 +476,6 @@ p, div, span, label {{
   color: var(--accent-soft);
 }}
 
-/* ================== CBTカード ================== */
 .cbt-card {{
   background: rgba(26, 26, 46, 0.5);
   border: 1px solid var(--border);
@@ -527,7 +508,6 @@ p, div, span, label {{
   font-weight: 300;
 }}
 
-/* ================== 呼吸ワーク円（白い息・ゆらゆら）================== */
 .breath-container {{
   display: flex;
   justify-content: center;
@@ -540,36 +520,21 @@ p, div, span, label {{
   width: 280px;
   height: 280px;
   border-radius: 999px;
-  background: radial-gradient(
-    circle at 50% 40%,
-    rgba(255, 255, 255, 0.15) 0%,
-    rgba(195, 177, 225, 0.1) 30%,
-    rgba(168, 211, 234, 0.05) 70%,
-    transparent 100%
-  );
+  background: radial-gradient(circle at 50% 40%, rgba(255, 255, 255, 0.15) 0%, rgba(195, 177, 225, 0.1) 30%, rgba(168, 211, 234, 0.05) 70%, transparent 100%);
   border: 2px solid rgba(195, 177, 225, 0.3);
-  box-shadow: 
-    0 0 40px rgba(195, 177, 225, 0.2),
-    inset 0 0 50px rgba(255, 255, 255, 0.05);
+  box-shadow: 0 0 40px rgba(195, 177, 225, 0.2), inset 0 0 50px rgba(255, 255, 255, 0.05);
   position: relative;
   transition: all 1.2s cubic-bezier(0.4, 0, 0.2, 1);
 }}
 
-/* ゆらゆら浮遊（軽量） */
 .breath-spot::before {{
   content: '';
   position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 80%;
-  height: 80%;
+  top: 50%; left: 50%;
+  width: 80%; height: 80%;
   transform: translate(-50%, -50%);
   border-radius: 999px;
-  background: radial-gradient(
-    circle,
-    rgba(255, 255, 255, 0.1) 0%,
-    transparent 70%
-  );
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.1) 0%, transparent 70%);
   animation: breathFloat 4s ease-in-out infinite;
 }}
 
@@ -578,32 +543,24 @@ p, div, span, label {{
   50% {{ transform: translate(-50%, -48%) scale(1.02); opacity: 0.8; }}
 }}
 
-/* 呼吸フェーズ別 */
 .breath-spot.inhale {{
   transform: scale(1.25);
   border-color: rgba(168, 230, 207, 0.5);
-  box-shadow: 
-    0 0 60px rgba(168, 230, 207, 0.3),
-    inset 0 0 60px rgba(255, 255, 255, 0.08);
+  box-shadow: 0 0 60px rgba(168, 230, 207, 0.3), inset 0 0 60px rgba(255, 255, 255, 0.08);
 }}
 
 .breath-spot.hold {{
   transform: scale(1.25);
   border-color: rgba(195, 177, 225, 0.5);
-  box-shadow: 
-    0 0 50px rgba(195, 177, 225, 0.3),
-    inset 0 0 55px rgba(255, 255, 255, 0.08);
+  box-shadow: 0 0 50px rgba(195, 177, 225, 0.3), inset 0 0 55px rgba(255, 255, 255, 0.08);
 }}
 
 .breath-spot.exhale {{
   transform: scale(0.9);
   border-color: rgba(168, 211, 234, 0.4);
-  box-shadow: 
-    0 0 35px rgba(168, 211, 234, 0.25),
-    inset 0 0 45px rgba(255, 255, 255, 0.05);
+  box-shadow: 0 0 35px rgba(168, 211, 234, 0.25), inset 0 0 45px rgba(255, 255, 255, 0.05);
 }}
 
-/* ================== Study Tracker専用 ================== */
 .study-goal-card {{
   background: linear-gradient(135deg, rgba(195, 177, 225, 0.08) 0%, rgba(168, 230, 207, 0.08) 100%);
   border: 1px solid var(--border);
@@ -660,7 +617,6 @@ p, div, span, label {{
   100% {{ transform: scale(1); opacity: 1; }}
 }}
 
-/* ================== メタデータ ================== */
 .meta {{
   color: var(--text-muted);
   font-size: 0.8rem;
@@ -674,8 +630,6 @@ p, div, span, label {{
   font-weight: 300;
 }}
 
-/* ================== Streamlitコンポーネント調整 ================== */
-/* 入力フィールド */
 .stTextInput > div > div > input,
 .stTextArea > div > div > textarea,
 .stNumberInput > div > div > input {{
@@ -695,7 +649,6 @@ p, div, span, label {{
   background: rgba(26, 26, 46, 0.8) !important;
 }}
 
-/* セレクトボックス */
 .stSelectbox > div > div > select {{
   background: rgba(26, 26, 46, 0.9) !important;
   border: 1px solid var(--border) !important;
@@ -710,7 +663,6 @@ p, div, span, label {{
   box-shadow: 0 0 0 2px rgba(195, 177, 225, 0.2) !important;
 }}
 
-/* ボタン */
 .stButton > button {{
   background: rgba(195, 177, 225, 0.15);
   border: 1px solid var(--border);
@@ -734,7 +686,6 @@ p, div, span, label {{
   transition: transform 0.1s ease;
 }}
 
-/* プライマリボタン */
 .stButton > button[kind="primary"] {{
   background: linear-gradient(135deg, var(--accent) 0%, var(--accent-soft) 100%);
   border: none;
@@ -748,7 +699,6 @@ p, div, span, label {{
   transform: translateY(-2px);
 }}
 
-/* ラジオボタン */
 .stRadio > div {{
   background: rgba(26, 26, 46, 0.4);
   border: 1px solid var(--border);
@@ -761,13 +711,11 @@ p, div, span, label {{
   font-weight: 500;
 }}
 
-/* チェックボックス */
 .stCheckbox > label {{
   color: var(--text-primary) !important;
   font-weight: 500;
 }}
 
-/* スライダー */
 .stSlider > div > div > div {{
   background: rgba(195, 177, 225, 0.2) !important;
 }}
@@ -777,7 +725,6 @@ p, div, span, label {{
   box-shadow: 0 0 8px var(--accent) !important;
 }}
 
-/* ラベル */
 .stSelectbox > label,
 .stMultiSelect > label,
 .stTextInput > label,
@@ -788,7 +735,6 @@ p, div, span, label {{
   font-size: 0.88rem;
 }}
 
-/* Multiselect */
 .stMultiSelect > div > div {{
   background: rgba(26, 26, 46, 0.6) !important;
   border: 1px solid var(--border) !important;
@@ -802,7 +748,6 @@ p, div, span, label {{
   border-radius: 10px !important;
 }}
 
-/* Tabs */
 .stTabs > div > div > div {{
   background: rgba(26, 26, 46, 0.5);
   border: 1px solid var(--border);
@@ -819,7 +764,6 @@ p, div, span, label {{
   border-bottom-color: var(--accent);
 }}
 
-/* Success/Error/Info */
 .stSuccess, .stError, .stWarning, .stInfo {{
   background: rgba(26, 26, 46, 0.8) !important;
   border-radius: 12px !important;
@@ -832,13 +776,10 @@ p, div, span, label {{
   border-left-color: #f6c6ea !important;
 }}
 
-/* Divider */
 hr {{
   border-color: var(--border) !important;
 }}
 
-/* ================== セレクトボックス・ドロップダウンの視認性改善 ================== */
-/* Streamlitのデフォルトスタイルを強制上書き */
 .stSelectbox [data-baseweb="select"] {{
   background-color: rgba(26, 26, 46, 0.8) !important;
 }}
@@ -848,62 +789,52 @@ hr {{
   color: #ffffff !important;
 }}
 
-/* ドロップダウンメニュー */
 .stSelectbox [role="listbox"] {{
   background-color: #1a1a2e !important;
   border: 1px solid var(--accent) !important;
 }}
 
-/* ドロップダウン内の各オプション */
 .stSelectbox [role="option"] {{
   background-color: #1a1a2e !important;
   color: #f0f2ff !important;
   padding: 10px 14px !important;
 }}
 
-/* ホバー時 */
 .stSelectbox [role="option"]:hover {{
   background-color: rgba(195, 177, 225, 0.2) !important;
   color: #ffffff !important;
 }}
 
-/* 選択済みオプション */
 .stSelectbox [role="option"][aria-selected="true"] {{
   background-color: rgba(195, 177, 225, 0.3) !important;
   color: #ffffff !important;
   font-weight: 600 !important;
 }}
 
-/* 無効化されたオプション（グレーアウト） */
 .stSelectbox [role="option"][aria-disabled="true"] {{
   color: #7a8ab0 !important;
   opacity: 0.6 !important;
 }}
 
-/* ================== レスポンシブ ================== */
 @media (max-width: 768px) {{
   .block-container {{
     padding-top: 1rem;
     padding-bottom: 2rem;
   }}
-  
   .bigbtn .stButton > button {{
     padding: 18px 16px 14px;
     font-size: 0.95rem;
   }}
-  
   .breath-spot {{
     width: 240px;
     height: 240px;
   }}
-  
   .top-tabs .stButton > button {{
     font-size: 0.75rem;
     height: 36px;
   }}
 }}
 
-/* ================== スクロールバー ================== */
 ::-webkit-scrollbar {{
   width: 8px;
   height: 8px;
