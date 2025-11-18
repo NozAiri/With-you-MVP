@@ -291,16 +291,28 @@ THEMES = {
 def inject_css():
     theme = THEMES[st.session_state.get("theme", "🌙 静かな夜空")]
     
-    st.markdown(f"""
+    css_template = """
 <style>
-/* ================== エモい夜空UI v4 ==================
-   ダークベース + やさしいネオン
-   CSS onlyの軽量インタラクション
-   ================================================== */
-
-:root {{
-  /* テーマカラー（動的） */
-  --bg-start: {theme['bg_start']};
+:root {
+  --bg-start: THEME_BG_START;
+  --bg-mid: THEME_BG_MID;
+  --bg-end: THEME_BG_END;
+  --accent: THEME_ACCENT;
+  --accent-soft: THEME_ACCENT_SOFT;
+  --success: THEME_SUCCESS;
+  ...
+}
+"""
+    
+    # テーマ変数を置換
+    css = css_template.replace("THEME_BG_START", theme['bg_start'])
+    css = css.replace("THEME_BG_MID", theme['bg_mid'])
+    css = css.replace("THEME_BG_END", theme['bg_end'])
+    css = css.replace("THEME_ACCENT", theme['accent'])
+    css = css.replace("THEME_ACCENT_SOFT", theme['accent_soft'])
+    css = css.replace("THEME_SUCCESS", theme['success'])
+    
+    st.markdown(css, unsafe_allow_html=True)
   --bg-mid: {theme['bg_mid']};
   --bg-end: {theme['bg_end']};
   --accent: {theme['accent']};
@@ -678,8 +690,8 @@ p, div, span, label {{
 .stTextInput > div > div > input,
 .stTextArea > div > div > textarea,
 .stNumberInput > div > div > input {{
-  background: rgba(26, 26, 46, 0.6) !important;
-  border: 1px solid var(--border) !important;
+background: rgba(26, 26, 46, 0.6) !important;
+border: 1px solid var(--border) !important;
   border-radius: 12px !important;
   color: var(--text-primary) !important;
   padding: 10px 14px !important;
