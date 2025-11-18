@@ -1,12 +1,11 @@
-# app.py — With You.（学校導入版・生徒側UI）【北欧メディテーション風 v3】
-# 管理者側ダッシュボード（with-you-admin-ui）と連携する改良版
+# app.py — With You.（学校導入版・生徒側UI）【エモい夜空版 v4】
 # 
-# 【主な変更点 v3】
-# 1. 🌿 北欧メディテーション風デザインへ全面刷新
-# 2. 📚 Study Tracker機能を大幅強化（目標設定・進捗管理）
-# 3. 🌬 呼吸ワークを白い息のような柔らかい表現に
-# 4. 💬 言葉を「観察と許し」のトーンに変更
-# 5. 🎨 色・動き・形すべてを北欧の静けさに統一
+# 【v4の特徴】
+# 🌙 ダークベース + やさしいネオン（目に優しい夜空グラデーション）
+# ✨ CSS onlyの軽量マイクロインタラクション（ギガ消費ゼロ）
+# 🎮 軽めのゲーミフィケーション（連続記録・レベル・グラフ）
+# 🎨 テーマ切り替え3種類（夜空・桜・海）
+# 📱 予防層もメンタル重い層も使いやすい
 
 from __future__ import annotations
 from datetime import datetime, timezone, timedelta, date
@@ -19,7 +18,7 @@ import hashlib, hmac, unicodedata, re, json, os, time
 # ================== ページ設定 ==================
 st.set_page_config(
     page_title="With You.", 
-    page_icon="🌿", 
+    page_icon="🌙", 
     layout="centered", 
     initial_sidebar_state="collapsed"
 )
@@ -75,9 +74,9 @@ def normalize_handle(s: str) -> str:
 def validate_handle(raw: str) -> Tuple[bool, str]:
     n = normalize_handle(raw)
     if len(n) < 4 or len(n) > 12:
-        return False, "4〜12文字で入力できます。"
+        return False, "4〜12文字で入力できます"
     if not HANDLE_ALLOWED_RE.match(n):
-        return False, "英数字・ひらがな・カタカナ・漢字と「_」「-」が使えます。"
+        return False, "英数字・ひらがな・カタカナ・漢字と「_」「-」が使えます"
     return True, n
 
 def group_id_from_password(group_password: str) -> str:
@@ -91,10 +90,7 @@ def user_key(group_id: str, handle_norm: str) -> str:
 
 # ================== クラス情報の抽出 ==================
 def extract_class_info(group_password: str) -> Dict[str, str]:
-    """
-    グループパスワードからクラス情報を抽出
-    例：「1年A組2025」→ grade="1", class_name="A"
-    """
+    """グループパスワードからクラス情報を抽出"""
     pw = unicodedata.normalize("NFKC", (group_password or "").strip())
     match = re.search(r'(\d+)年([A-Za-zァ-ヶー]+)組', pw)
     
@@ -117,7 +113,7 @@ def extract_class_info(group_password: str) -> Dict[str, str]:
 def db_create_user(group_id: str, handle_norm: str, class_info: Dict[str, str]) -> Tuple[bool, str]:
     """先着専有：存在すれば失敗。クラス情報も保存"""
     if not FIRESTORE_ENABLED or DB is None:
-        return False, "Firestore未接続です。"
+        return False, "Firestore未接続です"
     
     ref = DB.collection("groups").document(group_id).collection("users").document(handle_norm)
     try:
@@ -129,7 +125,7 @@ def db_create_user(group_id: str, handle_norm: str, class_info: Dict[str, str]) 
         })
         return True, ""
     except Exception:
-        return False, "この名前はすでに使われています。"
+        return False, "この名前はすでに使われています"
 
 def db_user_exists(group_id: str, handle_norm: str) -> bool:
     if not FIRESTORE_ENABLED or DB is None:
@@ -158,9 +154,9 @@ def safe_db_add(coll: str, payload: dict) -> bool:
 
 # ================== 気分の絵文字マッピング ==================
 MOOD_EMOJI_MAP = {
-    "😟": {"label": "つらい", "score": 2, "color": "#E3C9CF"},
-    "😐": {"label": "ふつう", "score": 1, "color": "#CAD2BE"},
-    "🙂": {"label": "まあまあ", "score": 0, "color": "#A7C7D9"},
+    "😟": {"label": "つらい", "score": 2, "color": "#f6c6ea"},
+    "😐": {"label": "ふつう", "score": 1, "color": "#a8e6cf"},
+    "🙂": {"label": "まあまあ", "score": 0, "color": "#a8d8ea"},
 }
 
 def get_mood_label(emoji: str) -> str:
@@ -175,7 +171,6 @@ def classify_risk_level(message: str, mood: str, body: List[str], sleep_hours: f
     
     text = message.lower()
     
-    # 【最優先】自殺念慮・自傷・虐待関連のキーワード
     urgent_keywords = [
         "死にたい", "自殺", "消えたい", "死ぬ", "終わり",
         "暴力", "虐待", "いじめられ", "殴られ", "蹴られ",
@@ -186,7 +181,6 @@ def classify_risk_level(message: str, mood: str, body: List[str], sleep_hours: f
         if kw in text:
             return "urgent"
     
-    # 【中リスク】メンタル不調・身体症状
     medium_keywords = [
         "眠れない", "食べられない", "吐き気", "しんどい",
         "助けて", "不安", "落ち込", "つらい", "苦しい",
@@ -206,6 +200,42 @@ def classify_risk_level(message: str, mood: str, body: List[str], sleep_hours: f
     
     return "low"
 
+# ================== ゲーミフィケーション機能 ==================
+def calculate_streak(logs: List[Dict]) -> int:
+    """連続記録日数を計算"""
+    if not logs:
+        return 0
+    
+    try:
+        dates = sorted(set(datetime.fromisoformat(log['ts']).date() for log in logs), reverse=True)
+    except:
+        return 0
+    
+    if not dates or dates[0] != date.today():
+        return 0
+    
+    streak = 1
+    for i in range(len(dates)-1):
+        if (dates[i] - dates[i+1]).days == 1:
+            streak += 1
+        else:
+            break
+    
+    return streak
+
+def get_study_level(total_minutes: int) -> Dict[str, Any]:
+    """学習レベルを取得"""
+    hours = total_minutes / 60
+    
+    if hours < 5:
+        return {"emoji": "🌱", "name": "学び始め", "next": 5, "progress": hours/5}
+    elif hours < 20:
+        return {"emoji": "🌿", "name": "学習者", "next": 20, "progress": hours/20}
+    elif hours < 50:
+        return {"emoji": "🌳", "name": "学習マスター", "next": 50, "progress": hours/50}
+    else:
+        return {"emoji": "🏆", "name": "学習の達人", "next": None, "progress": 1.0}
+
 # ================== 状態管理 ==================
 st.session_state.setdefault("auth_ok", False)
 st.session_state.setdefault("mode", "LOGIN")
@@ -219,65 +249,93 @@ st.session_state.setdefault("view", "HOME")
 st.session_state.setdefault("flash_msg", "")
 st.session_state.setdefault("role", "user")
 
+# テーマ設定
+st.session_state.setdefault("theme", "🌙 静かな夜空")
+
 # ローカルログ（端末保存）
 st.session_state.setdefault("_local_logs", {"note":[], "breath":[], "study":[]})
 
 # Study Tracker用の目標設定
-st.session_state.setdefault("study_weekly_goal", 300)  # 週300分
-st.session_state.setdefault("study_monthly_goal", 1200)  # 月1200分
+st.session_state.setdefault("study_weekly_goal", 300)
+st.session_state.setdefault("study_monthly_goal", 1200)
 
-# ================== スタイル【🌿 北欧メディテーション風 v3】 ==================
-def inject_css():
-    st.markdown("""
-<style>
-/* ================== 北欧メディテーション風 UI ==================
-   静けさ × 温かみ × 自然のリズム
-   配色：霧・湖・森・雪の自然光カラー
-   動き：0.6〜0.9秒のゆっくりとしたフェード
-   ================================================== */
-
-:root {
-  /* 北欧カラーパレット */
-  --snow-white: #F6F7F5;
-  --mist-gray: #ECEFEB;
-  --nordic-blue: #E3E9F0;
-  --winter-lake: #A7C7D9;
-  --forest-green: #CAD2BE;
-  --wood-pink: #E3C9CF;
-  --deep-calm-blue: #6B7D8C;
-  --moss-green: #8A9A5B;
-  
-  /* テキストカラー */
-  --text-primary: #3D4A52;
-  --text-secondary: #6B7D8C;
-  --text-muted: #9AABB8;
-  
-  /* 極薄枠線 */
-  --border-light: #DADFE3;
-  
-  /* 柔らかい影 */
-  --shadow-soft: 0 2px 12px rgba(61, 74, 82, 0.06);
-  --shadow-hover: 0 4px 20px rgba(61, 74, 82, 0.08);
+# ================== テーマ設定 ==================
+THEMES = {
+    "🌙 静かな夜空": {
+        "bg_start": "#1a1a2e",
+        "bg_mid": "#16213e",
+        "bg_end": "#3d4a7a",
+        "accent": "#c3b1e1",
+        "accent_soft": "#d4c5f9",
+        "success": "#a8e6cf",
+    },
+    "🌸 桜の夕暮れ": {
+        "bg_start": "#2d1b3d",
+        "bg_mid": "#3d2850",
+        "bg_end": "#4a3a5a",
+        "accent": "#f6c6ea",
+        "accent_soft": "#ffd4e5",
+        "success": "#ffb3d9",
+    },
+    "🌊 夏の海辺": {
+        "bg_start": "#1a2d3d",
+        "bg_mid": "#1e3a4f",
+        "bg_end": "#2d4a5a",
+        "accent": "#a8d8ea",
+        "accent_soft": "#c8e8f5",
+        "success": "#7fc8d9",
+    }
 }
 
-/* ================== 全体背景（霧と光のグラデーション）================== */
-html, body, .stApp {
+# ================== スタイル【🌙 エモい夜空版 v4】 ==================
+def inject_css():
+    theme = THEMES[st.session_state.get("theme", "🌙 静かな夜空")]
+    
+    st.markdown(f"""
+<style>
+/* ================== エモい夜空UI v4 ==================
+   ダークベース + やさしいネオン
+   CSS onlyの軽量インタラクション
+   ================================================== */
+
+:root {{
+  /* テーマカラー（動的） */
+  --bg-start: {theme['bg_start']};
+  --bg-mid: {theme['bg_mid']};
+  --bg-end: {theme['bg_end']};
+  --accent: {theme['accent']};
+  --accent-soft: {theme['accent_soft']};
+  --success: {theme['success']};
+  
+  /* 固定カラー */
+  --text-primary: #e8eaf0;
+  --text-secondary: #a8b3d7;
+  --text-muted: #7a8ab0;
+  --border: rgba(168, 179, 215, 0.15);
+  
+  /* 影・グロー */
+  --shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  --glow: 0 0 20px var(--accent);
+  --glow-soft: 0 0 30px rgba(195, 177, 225, 0.15);
+}}
+
+/* ================== 全体背景（夜空グラデーション）================== */
+html, body, .stApp {{
   background: linear-gradient(
     165deg,
-    var(--snow-white) 0%,
-    var(--mist-gray) 35%,
-    var(--nordic-blue) 70%,
-    #E8EFF5 100%
+    var(--bg-start) 0%,
+    var(--bg-mid) 40%,
+    var(--bg-end) 100%
   );
   color: var(--text-primary);
   min-height: 100vh;
   font-family: 'Noto Sans JP', -apple-system, BlinkMacSystemFont, sans-serif;
   font-weight: 400;
-  line-height: 1.8;
-}
+  line-height: 1.7;
+}}
 
-/* かすかに漂う光粒子 */
-html::before {
+/* 漂う光粒子（超軽量・CSS only） */
+html::before {{
   content: '';
   position: fixed;
   top: 0;
@@ -285,490 +343,542 @@ html::before {
   width: 100%;
   height: 100%;
   background: 
-    radial-gradient(circle at 20% 30%, rgba(167, 199, 217, 0.03) 0%, transparent 50%),
-    radial-gradient(circle at 80% 70%, rgba(202, 210, 190, 0.03) 0%, transparent 50%);
+    radial-gradient(circle at 20% 30%, var(--accent-soft) 0%, transparent 2%),
+    radial-gradient(circle at 80% 70%, var(--accent-soft) 0%, transparent 1.5%),
+    radial-gradient(circle at 50% 50%, var(--accent-soft) 0%, transparent 1%);
+  opacity: 0.08;
   pointer-events: none;
-  animation: breatheLight 10s ease-in-out infinite;
+  animation: gentleFloat 8s ease-in-out infinite;
   z-index: 0;
-}
+}}
 
-@keyframes breatheLight {
-  0%, 100% { opacity: 0.5; }
-  50% { opacity: 0.8; }
-}
+@keyframes gentleFloat {{
+  0%, 100% {{ opacity: 0.06; }}
+  50% {{ opacity: 0.12; }}
+}}
 
-.block-container {
+.block-container {{
   max-width: 920px;
   padding-top: 1.5rem;
   padding-bottom: 3rem;
   position: relative;
   z-index: 1;
-}
+}}
 
-/* ================== カード系（木製家具のような柔らかさ）================== */
-.card {
-  background: rgba(255, 255, 255, 0.75);
-  border: 1px solid var(--border-light);
-  border-radius: 24px;
-  padding: 22px;
-  box-shadow: var(--shadow-soft);
-  backdrop-filter: blur(20px);
-  transition: all 0.7s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.card:hover {
-  box-shadow: var(--shadow-hover);
-  transform: translateY(-2px);
-}
-
-.item {
-  background: rgba(255, 255, 255, 0.65);
-  border: 1px solid var(--border-light);
+/* ================== カード系（ガラスモーフィズム）================== */
+.card {{
+  background: rgba(26, 26, 46, 0.6);
+  border: 1px solid var(--border);
   border-radius: 20px;
-  padding: 18px;
-  box-shadow: var(--shadow-soft);
+  padding: 20px;
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(20px);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}}
+
+.card:hover {{
+  border-color: var(--accent);
+  box-shadow: var(--shadow), var(--glow-soft);
+  transform: translateY(-2px);
+}}
+
+.item {{
+  background: rgba(26, 26, 46, 0.5);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 16px;
+  box-shadow: var(--shadow);
   backdrop-filter: blur(16px);
-  margin-bottom: 14px;
-  transition: all 0.6s ease;
-}
+  margin-bottom: 12px;
+  transition: all 0.3s ease;
+}}
 
-.item:hover {
-  box-shadow: var(--shadow-hover);
-}
+.item:hover {{
+  border-color: var(--accent-soft);
+  box-shadow: var(--shadow), 0 0 15px rgba(195, 177, 225, 0.1);
+}}
 
-/* ================== テキストスタイル（静かな優しさ）================== */
-.tip {
+/* ================== テキストスタイル ================== */
+.tip {{
   color: var(--text-muted);
-  font-size: 0.9rem;
-  line-height: 1.7;
+  font-size: 0.88rem;
+  line-height: 1.6;
   font-weight: 300;
-}
+}}
 
-h1, h2, h3, h4, h5, h6 {
+h1, h2, h3, h4, h5, h6 {{
   color: var(--text-primary) !important;
-  font-weight: 500;
-  letter-spacing: 0.02em;
-}
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}}
 
-p, div, span, label {
+p, div, span, label {{
   color: var(--text-primary);
-}
+}}
 
-.stMarkdown {
-  color: var(--text-primary);
-}
-
-/* ================== トップタブ（最小限の主張）================== */
-.top-tabs {
+/* ================== トップタブ ================== */
+.top-tabs {{
   position: sticky;
   top: 0;
   z-index: 50;
-  background: rgba(255, 255, 255, 0.85);
+  background: rgba(26, 26, 46, 0.8);
   backdrop-filter: saturate(180%) blur(20px);
-  border: 1px solid var(--border-light);
-  border-radius: 20px;
-  box-shadow: var(--shadow-soft);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  box-shadow: var(--shadow);
   padding: 8px 10px;
-  margin-bottom: 18px;
-}
+  margin-bottom: 16px;
+}}
 
-.top-tabs .stButton > button {
+.top-tabs .stButton > button {{
   width: 100%;
-  height: 40px;
-  border-radius: 14px;
+  height: 38px;
+  border-radius: 12px;
   font-weight: 500;
   font-size: 0.85rem;
   background: transparent;
   border: none;
   color: var(--text-secondary);
-  transition: all 0.6s ease;
-}
+  transition: all 0.3s ease;
+}}
 
-.top-tabs .stButton > button:hover {
-  background: rgba(167, 199, 217, 0.15);
-  color: var(--deep-calm-blue);
-}
+.top-tabs .stButton > button:hover {{
+  background: rgba(195, 177, 225, 0.1);
+  color: var(--accent);
+}}
 
-.top-tabs .active .stButton > button {
-  background: rgba(167, 199, 217, 0.25);
-  color: var(--deep-calm-blue);
+.top-tabs .active .stButton > button {{
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-soft) 100%);
+  color: #ffffff;
   font-weight: 600;
-  box-shadow: inset 0 0 0 1px var(--winter-lake);
-}
+  box-shadow: var(--glow-soft);
+}}
 
-/* ================== ホーム大型カード（机の上の3つの道具）================== */
-.bigbtn {
-  margin-bottom: 16px;
-}
+/* ================== ホーム大型カード（ぷるんと反応）================== */
+.bigbtn {{
+  margin-bottom: 14px;
+}}
 
-.bigbtn .stButton > button {
+.bigbtn .stButton > button {{
   width: 100%;
   text-align: left;
-  border-radius: 24px;
-  border: 1px solid var(--border-light);
-  box-shadow: var(--shadow-soft);
-  padding: 24px 22px 20px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  padding: 22px 20px 18px;
   white-space: pre-wrap;
   line-height: 1.5;
-  background: rgba(255, 255, 255, 0.7);
+  background: rgba(26, 26, 46, 0.5);
   color: var(--text-primary);
   font-weight: 500;
-  transition: all 0.7s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   backdrop-filter: blur(16px);
-}
+}}
 
-.bigbtn .stButton > button:hover {
-  border-color: var(--winter-lake);
-  box-shadow: var(--shadow-hover);
+.bigbtn .stButton > button:hover {{
+  border-color: var(--accent);
+  box-shadow: var(--shadow), var(--glow-soft);
   transform: translateY(-3px);
-  background: rgba(255, 255, 255, 0.85);
-}
+  background: rgba(26, 26, 46, 0.7);
+}}
 
-.bigbtn .stButton > button::first-line {
-  font-weight: 600;
+.bigbtn .stButton > button:active {{
+  transform: translateY(-1px) scale(0.98);
+  transition: transform 0.1s ease;
+}}
+
+.bigbtn .stButton > button::first-line {{
+  font-weight: 700;
   font-size: 1.05rem;
-  color: var(--deep-calm-blue);
-}
+  color: var(--accent-soft);
+}}
 
-/* ================== CBTカード（白紙ノートのような静けさ）================== */
-.cbt-card {
-  background: rgba(255, 255, 255, 0.6);
-  border: 1px solid var(--border-light);
-  border-radius: 20px;
-  padding: 20px 20px 16px;
-  box-shadow: var(--shadow-soft);
-  margin-bottom: 16px;
+/* ================== CBTカード ================== */
+.cbt-card {{
+  background: rgba(26, 26, 46, 0.5);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 18px 18px 14px;
+  box-shadow: var(--shadow);
+  margin-bottom: 14px;
   backdrop-filter: blur(16px);
-  transition: all 0.6s ease;
-}
+  transition: all 0.3s ease;
+}}
 
-.cbt-card:hover {
-  box-shadow: var(--shadow-hover);
-}
+.cbt-card:hover {{
+  border-color: var(--accent-soft);
+  box-shadow: var(--shadow), 0 0 15px rgba(195, 177, 225, 0.1);
+}}
 
-.cbt-heading {
+.cbt-heading {{
   font-weight: 600;
-  font-size: 1rem;
-  color: var(--deep-calm-blue);
-  margin: 0 0 8px 0;
-  letter-spacing: 0.02em;
-}
+  font-size: 0.98rem;
+  color: var(--accent-soft);
+  margin: 0 0 6px 0;
+  letter-spacing: 0.01em;
+}}
 
-.cbt-sub {
+.cbt-sub {{
   color: var(--text-secondary);
-  font-size: 0.88rem;
-  margin: -2px 0 12px 0;
-  line-height: 1.7;
+  font-size: 0.86rem;
+  margin: -2px 0 10px 0;
+  line-height: 1.6;
   font-weight: 300;
-}
+}}
 
-/* ================== 呼吸ワーク円（白い息のような柔らかい光）================== */
-.breath-container {
+/* ================== 呼吸ワーク円（白い息・ゆらゆら）================== */
+.breath-container {{
   display: flex;
   justify-content: center;
   align-items: center;
   padding: 30px 0;
   position: relative;
-}
+}}
 
-.breath-spot {
+.breath-spot {{
   width: 280px;
   height: 280px;
   border-radius: 999px;
   background: radial-gradient(
     circle at 50% 40%,
-    rgba(255, 255, 255, 0.9) 0%,
-    rgba(227, 233, 240, 0.7) 30%,
-    rgba(202, 210, 190, 0.3) 70%,
+    rgba(255, 255, 255, 0.15) 0%,
+    rgba(195, 177, 225, 0.1) 30%,
+    rgba(168, 211, 234, 0.05) 70%,
     transparent 100%
   );
-  border: 2px solid rgba(167, 199, 217, 0.3);
+  border: 2px solid rgba(195, 177, 225, 0.3);
   box-shadow: 
-    0 0 40px rgba(167, 199, 217, 0.2),
-    inset 0 0 50px rgba(255, 255, 255, 0.5);
+    0 0 40px rgba(195, 177, 225, 0.2),
+    inset 0 0 50px rgba(255, 255, 255, 0.05);
   position: relative;
   transition: all 1.2s cubic-bezier(0.4, 0, 0.2, 1);
-}
+}}
 
-/* 呼吸フェーズ別（ゆっくり・柔らかく）*/
-.breath-spot.inhale {
+/* ゆらゆら浮遊（軽量） */
+.breath-spot::before {{
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 80%;
+  height: 80%;
+  transform: translate(-50%, -50%);
+  border-radius: 999px;
+  background: radial-gradient(
+    circle,
+    rgba(255, 255, 255, 0.1) 0%,
+    transparent 70%
+  );
+  animation: breathFloat 4s ease-in-out infinite;
+}}
+
+@keyframes breathFloat {{
+  0%, 100% {{ transform: translate(-50%, -50%) scale(1); opacity: 0.5; }}
+  50% {{ transform: translate(-50%, -48%) scale(1.02); opacity: 0.8; }}
+}}
+
+/* 呼吸フェーズ別 */
+.breath-spot.inhale {{
   transform: scale(1.25);
-  border-color: rgba(167, 199, 217, 0.5);
+  border-color: rgba(168, 230, 207, 0.5);
   box-shadow: 
-    0 0 60px rgba(167, 199, 217, 0.3),
-    inset 0 0 60px rgba(255, 255, 255, 0.6);
-}
+    0 0 60px rgba(168, 230, 207, 0.3),
+    inset 0 0 60px rgba(255, 255, 255, 0.08);
+}}
 
-.breath-spot.hold {
+.breath-spot.hold {{
   transform: scale(1.25);
-  border-color: rgba(202, 210, 190, 0.5);
+  border-color: rgba(195, 177, 225, 0.5);
   box-shadow: 
-    0 0 50px rgba(202, 210, 190, 0.3),
-    inset 0 0 55px rgba(255, 255, 255, 0.55);
-}
+    0 0 50px rgba(195, 177, 225, 0.3),
+    inset 0 0 55px rgba(255, 255, 255, 0.08);
+}}
 
-.breath-spot.exhale {
+.breath-spot.exhale {{
   transform: scale(0.9);
-  border-color: rgba(227, 201, 207, 0.4);
+  border-color: rgba(168, 211, 234, 0.4);
   box-shadow: 
-    0 0 35px rgba(227, 201, 207, 0.25),
-    inset 0 0 45px rgba(255, 255, 255, 0.5);
-}
+    0 0 35px rgba(168, 211, 234, 0.25),
+    inset 0 0 45px rgba(255, 255, 255, 0.05);
+}}
 
-/* ================== Study Tracker専用スタイル ================== */
-.study-goal-card {
-  background: linear-gradient(135deg, rgba(167, 199, 217, 0.1) 0%, rgba(202, 210, 190, 0.1) 100%);
-  border: 1px solid var(--border-light);
-  border-radius: 20px;
-  padding: 20px;
-  margin-bottom: 16px;
-  box-shadow: var(--shadow-soft);
-}
+/* ================== Study Tracker専用 ================== */
+.study-goal-card {{
+  background: linear-gradient(135deg, rgba(195, 177, 225, 0.08) 0%, rgba(168, 230, 207, 0.08) 100%);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 18px;
+  margin-bottom: 14px;
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(16px);
+}}
 
-.progress-bar-container {
-  background: rgba(218, 223, 227, 0.3);
+.progress-bar-container {{
+  background: rgba(120, 130, 160, 0.2);
   border-radius: 12px;
-  height: 12px;
+  height: 10px;
   overflow: hidden;
   margin: 8px 0;
-}
+}}
 
-.progress-bar-fill {
-  background: linear-gradient(90deg, var(--winter-lake) 0%, var(--deep-calm-blue) 100%);
+.progress-bar-fill {{
+  background: linear-gradient(90deg, var(--accent) 0%, var(--accent-soft) 100%);
   height: 100%;
   border-radius: 12px;
   transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: 0 0 8px rgba(167, 199, 217, 0.4);
-}
+  box-shadow: 0 0 10px var(--accent);
+}}
 
-.study-stat {
+.study-stat {{
   display: inline-block;
-  padding: 8px 16px;
-  background: rgba(255, 255, 255, 0.6);
-  border: 1px solid var(--border-light);
-  border-radius: 16px;
+  padding: 6px 14px;
+  background: rgba(26, 26, 46, 0.5);
+  border: 1px solid var(--border);
+  border-radius: 14px;
   margin: 4px 6px 4px 0;
-  font-size: 0.9rem;
-  color: var(--text-secondary);
-  font-weight: 500;
-}
-
-/* ================== メタデータ・小テキスト ================== */
-.meta {
-  color: var(--text-muted);
-  font-size: 0.82rem;
-  margin-bottom: 0.3rem;
-  font-weight: 300;
-}
-
-.small {
   font-size: 0.88rem;
   color: var(--text-secondary);
-  font-weight: 300;
-}
+  font-weight: 500;
+}}
 
-/* ================== Streamlitコンポーネントの調整 ================== */
-/* 入力フィールド（下線のみ・枠なし）*/
+.badge {{
+  display: inline-block;
+  padding: 8px 16px;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-soft) 100%);
+  border-radius: 16px;
+  margin: 6px 8px 6px 0;
+  font-size: 0.9rem;
+  color: #ffffff;
+  font-weight: 600;
+  box-shadow: var(--glow-soft);
+  animation: badgePop 0.5s cubic-bezier(0.68, -0.55, 0.27, 1.55);
+}}
+
+@keyframes badgePop {{
+  0% {{ transform: scale(0); opacity: 0; }}
+  100% {{ transform: scale(1); opacity: 1; }}
+}}
+
+/* ================== メタデータ ================== */
+.meta {{
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  margin-bottom: 0.3rem;
+  font-weight: 300;
+}}
+
+.small {{
+  font-size: 0.86rem;
+  color: var(--text-secondary);
+  font-weight: 300;
+}}
+
+/* ================== Streamlitコンポーネント調整 ================== */
+/* 入力フィールド */
 .stTextInput > div > div > input,
 .stTextArea > div > div > textarea,
-.stNumberInput > div > div > input {
-  background: transparent !important;
-  border: none !important;
-  border-bottom: 1px solid var(--border-light) !important;
-  border-radius: 0 !important;
+.stNumberInput > div > div > input {{
+  background: rgba(26, 26, 46, 0.6) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 12px !important;
   color: var(--text-primary) !important;
-  padding: 10px 4px !important;
-  transition: all 0.6s ease !important;
-  font-size: 15px !important;
-}
+  padding: 10px 14px !important;
+  transition: all 0.3s ease !important;
+}}
 
 .stTextInput > div > div > input:focus,
 .stTextArea > div > div > textarea:focus,
-.stNumberInput > div > div > input:focus {
-  border-bottom-color: var(--winter-lake) !important;
-  box-shadow: 0 1px 0 0 var(--winter-lake) !important;
-  background: rgba(167, 199, 217, 0.03) !important;
-}
+.stNumberInput > div > div > input:focus {{
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 2px rgba(195, 177, 225, 0.2) !important;
+  background: rgba(26, 26, 46, 0.8) !important;
+}}
 
 /* セレクトボックス */
-.stSelectbox > div > div > select {
-  background: rgba(255, 255, 255, 0.5) !important;
-  border: 1px solid var(--border-light) !important;
+.stSelectbox > div > div > select {{
+  background: rgba(26, 26, 46, 0.6) !important;
+  border: 1px solid var(--border) !important;
   color: var(--text-primary) !important;
-  border-radius: 14px !important;
+  border-radius: 12px !important;
   padding: 10px 14px !important;
-  transition: all 0.6s ease !important;
-}
+  transition: all 0.3s ease !important;
+}}
 
-.stSelectbox > div > div > select:focus {
-  border-color: var(--winter-lake) !important;
-  box-shadow: 0 0 0 2px rgba(167, 199, 217, 0.15) !important;
-}
+.stSelectbox > div > div > select:focus {{
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 2px rgba(195, 177, 225, 0.2) !important;
+}}
 
 /* ボタン */
-.stButton > button {
-  background: rgba(167, 199, 217, 0.15);
-  border: 1px solid var(--border-light);
-  color: var(--deep-calm-blue);
+.stButton > button {{
+  background: rgba(195, 177, 225, 0.15);
+  border: 1px solid var(--border);
+  color: var(--accent-soft);
   font-weight: 500;
-  border-radius: 16px;
+  border-radius: 14px;
   padding: 10px 20px;
-  transition: all 0.7s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: var(--shadow-soft);
-}
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: var(--shadow);
+}}
 
-.stButton > button:hover {
-  background: rgba(167, 199, 217, 0.25);
-  border-color: var(--winter-lake);
-  box-shadow: var(--shadow-hover);
+.stButton > button:hover {{
+  background: rgba(195, 177, 225, 0.25);
+  border-color: var(--accent);
+  box-shadow: var(--shadow), var(--glow-soft);
   transform: translateY(-2px);
-}
+}}
+
+.stButton > button:active {{
+  transform: translateY(0) scale(0.98);
+  transition: transform 0.1s ease;
+}}
 
 /* プライマリボタン */
-.stButton > button[kind="primary"] {
-  background: linear-gradient(135deg, var(--winter-lake) 0%, var(--deep-calm-blue) 100%);
+.stButton > button[kind="primary"] {{
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-soft) 100%);
   border: none;
-  color: white;
-  box-shadow: var(--shadow-soft);
+  color: #ffffff;
+  box-shadow: var(--shadow), var(--glow-soft);
   font-weight: 600;
-}
+}}
 
-.stButton > button[kind="primary"]:hover {
-  box-shadow: var(--shadow-hover);
+.stButton > button[kind="primary"]:hover {{
+  box-shadow: var(--shadow), var(--glow);
   transform: translateY(-2px);
-}
+}}
 
 /* ラジオボタン */
-.stRadio > div {
-  background: rgba(255, 255, 255, 0.4);
-  border: 1px solid var(--border-light);
-  border-radius: 14px;
-  padding: 12px;
-}
+.stRadio > div {{
+  background: rgba(26, 26, 46, 0.4);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px;
+}}
 
-.stRadio > div > label {
+.stRadio > div > label {{
   color: var(--text-primary) !important;
   font-weight: 500;
-}
+}}
 
 /* チェックボックス */
-.stCheckbox > label {
+.stCheckbox > label {{
   color: var(--text-primary) !important;
   font-weight: 500;
-}
+}}
 
 /* スライダー */
-.stSlider > div > div > div {
-  background: rgba(167, 199, 217, 0.25) !important;
-}
+.stSlider > div > div > div {{
+  background: rgba(195, 177, 225, 0.2) !important;
+}}
 
-.stSlider > div > div > div > div {
-  background: var(--winter-lake) !important;
-  box-shadow: 0 0 8px rgba(167, 199, 217, 0.4) !important;
-}
+.stSlider > div > div > div > div {{
+  background: var(--accent) !important;
+  box-shadow: 0 0 8px var(--accent) !important;
+}}
 
-/* セレクトボックス・ラベル */
+/* ラベル */
 .stSelectbox > label,
 .stMultiSelect > label,
 .stTextInput > label,
 .stTextArea > label,
-.stNumberInput > label {
+.stNumberInput > label {{
   color: var(--text-secondary) !important;
   font-weight: 500;
-  font-size: 0.9rem;
-}
+  font-size: 0.88rem;
+}}
 
 /* Multiselect */
-.stMultiSelect > div > div {
-  background: rgba(255, 255, 255, 0.5) !important;
-  border: 1px solid var(--border-light) !important;
-  border-radius: 14px !important;
-}
+.stMultiSelect > div > div {{
+  background: rgba(26, 26, 46, 0.6) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 12px !important;
+}}
 
-.stMultiSelect span[data-baseweb="tag"] {
-  background-color: rgba(167, 199, 217, 0.25) !important;
-  border: 1px solid var(--winter-lake) !important;
-  color: var(--deep-calm-blue) !important;
+.stMultiSelect span[data-baseweb="tag"] {{
+  background-color: rgba(195, 177, 225, 0.25) !important;
+  border: 1px solid var(--accent) !important;
+  color: var(--text-primary) !important;
   border-radius: 10px !important;
-}
+}}
 
 /* Tabs */
-.stTabs > div > div > div {
-  background: rgba(255, 255, 255, 0.5);
-  border: 1px solid var(--border-light);
-  border-radius: 14px;
-}
+.stTabs > div > div > div {{
+  background: rgba(26, 26, 46, 0.5);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}}
 
-.stTabs [data-baseweb="tab"] {
+.stTabs [data-baseweb="tab"] {{
   color: var(--text-secondary);
   font-weight: 500;
-}
+}}
 
-.stTabs [aria-selected="true"] {
-  color: var(--deep-calm-blue);
-  border-bottom-color: var(--winter-lake);
-}
+.stTabs [aria-selected="true"] {{
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}}
 
-/* Success/Error/Info メッセージ */
-.stSuccess, .stError, .stWarning, .stInfo {
-  background: rgba(255, 255, 255, 0.8) !important;
-  border-radius: 14px !important;
-  border-left: 4px solid var(--forest-green) !important;
+/* Success/Error/Info */
+.stSuccess, .stError, .stWarning, .stInfo {{
+  background: rgba(26, 26, 46, 0.8) !important;
+  border-radius: 12px !important;
+  border-left: 4px solid var(--success) !important;
   backdrop-filter: blur(16px) !important;
   color: var(--text-primary) !important;
-}
+}}
 
-.stError {
-  border-left-color: var(--wood-pink) !important;
-}
+.stError {{
+  border-left-color: #f6c6ea !important;
+}}
 
 /* Divider */
-hr {
-  border-color: var(--border-light) !important;
-}
+hr {{
+  border-color: var(--border) !important;
+}}
 
-/* ================== レスポンシブ調整 ================== */
-@media (max-width: 768px) {
-  .block-container {
+/* ================== レスポンシブ ================== */
+@media (max-width: 768px) {{
+  .block-container {{
     padding-top: 1rem;
     padding-bottom: 2rem;
-  }
+  }}
   
-  .bigbtn .stButton > button {
+  .bigbtn .stButton > button {{
     padding: 18px 16px 14px;
     font-size: 0.95rem;
-  }
+  }}
   
-  .breath-spot {
+  .breath-spot {{
     width: 240px;
     height: 240px;
-  }
+  }}
   
-  .top-tabs .stButton > button {
+  .top-tabs .stButton > button {{
     font-size: 0.75rem;
     height: 36px;
-  }
-}
+  }}
+}}
 
 /* ================== スクロールバー ================== */
-::-webkit-scrollbar {
+::-webkit-scrollbar {{
   width: 8px;
   height: 8px;
-}
+}}
 
-::-webkit-scrollbar-track {
-  background: rgba(236, 239, 235, 0.5);
+::-webkit-scrollbar-track {{
+  background: rgba(26, 26, 46, 0.5);
   border-radius: 4px;
-}
+}}
 
-::-webkit-scrollbar-thumb {
-  background: var(--winter-lake);
+::-webkit-scrollbar-thumb {{
+  background: var(--accent);
   border-radius: 4px;
-}
+  box-shadow: 0 0 5px var(--accent);
+}}
 
-::-webkit-scrollbar-thumb:hover {
-  background: var(--deep-calm-blue);
-}
+::-webkit-scrollbar-thumb:hover {{
+  background: var(--accent-soft);
+}}
 </style>
 """, unsafe_allow_html=True)
 
@@ -781,8 +891,8 @@ def get_sections():
         ("SHARE",  "💬 今日を伝える"),
         ("SESSION","🌬 リラックス"),
         ("NOTE",   "📔 ノート"),
-        ("STUDY",  "📚 Study Tracker"),
-        ("REVIEW", "📋 ふりかえり"),
+        ("STUDY",  "📚 Study"),
+        ("REVIEW", "📋 記録"),
         ("CONSULT","🕊 相談"),
     ]
 
@@ -810,7 +920,7 @@ def status_bar():
     if st.session_state.get("flash_msg"):
         st.toast(st.session_state["flash_msg"])
         st.markdown(
-            f"<div class='card' style='padding:10px 12px; margin-bottom:10px; border-left:4px solid #CAD2BE'>"
+            f"<div class='card' style='padding:10px 12px; margin-bottom:10px; border-left:4px solid var(--success)'>"
             f"<b>{st.session_state['flash_msg']}</b></div>",
             unsafe_allow_html=True,
         )
@@ -828,10 +938,24 @@ def status_bar():
     )
     st.markdown("</div>", unsafe_allow_html=True)
 
+# ================== テーマ切り替え ==================
+def theme_selector():
+    with st.sidebar:
+        st.markdown("### 🎨 テーマ")
+        theme = st.selectbox(
+            "見た目を選ぶ",
+            list(THEMES.keys()),
+            index=list(THEMES.keys()).index(st.session_state.get("theme", "🌙 静かな夜空")),
+            key="theme_select"
+        )
+        if theme != st.session_state.get("theme"):
+            st.session_state["theme"] = theme
+            st.rerun()
+
 # ================== ログイン / 登録 ==================
 def login_register_ui() -> bool:
     st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.markdown("### 🌿 With You")
+    st.markdown("### 🌙 With You")
     st.caption("気持ちを整える、やさしいノート")
 
     c1, c2 = st.columns(2)
@@ -865,7 +989,7 @@ def login_register_ui() -> bool:
     ok_handle, handle_norm = validate_handle(handle_raw)
     
     if (group_pw or "").strip() == "":
-        err = "パスワードを入力できます。"
+        err = "パスワードを入力できます"
     elif not ok_handle:
         err = handle_norm
 
@@ -895,7 +1019,7 @@ def login_register_ui() -> bool:
             st.rerun()
         else:
             if not db_user_exists(gid, handle_norm):
-                st.error("まだ登録がありません。「はじめての人」から設定できます。")
+                st.error("まだ登録がありません。「はじめての人」から設定できます")
                 st.stop()
             
             db_touch_login(gid, handle_norm)
@@ -918,26 +1042,33 @@ def logout_btn():
             st.session_state.update(keep)
             st.rerun()
 
-# ================== HOME / 機能UI ==================
+# ================== HOME ==================
 def home_intro():
     class_info = st.session_state.get("class_info", {})
     class_id = class_info.get("class_id", "")
     
+    # 連続記録ストリーク表示
+    streak = calculate_streak(st.session_state["_local_logs"]["note"])
+    
+    streak_html = ""
+    if streak >= 3:
+        streak_html = f'<div class="badge">🔥 {streak}日連続記録中</div>'
+    if streak >= 7:
+        streak_html += '<div class="badge">✨ 1週間継続達成</div>'
+    if streak >= 30:
+        streak_html += '<div class="badge">🏆 1ヶ月継続マスター</div>'
+    
     st.markdown(f"""
-<div class="card" style="margin-bottom:18px">
-  <div style="font-weight:500; font-size:1rem; margin-bottom:.5rem; color:var(--deep-calm-blue)">🌿 With You</div>
-  <div style="color:var(--text-secondary); line-height:1.75; white-space:pre-wrap; font-weight:300;">
+<div class="card" style="margin-bottom:16px">
+  <div style="font-weight:600; font-size:1rem; margin-bottom:.4rem; color:var(--accent-soft)">🌙 With You</div>
+  <div style="color:var(--text-secondary); line-height:1.7; white-space:pre-wrap; font-weight:300; font-size:0.9rem;">
 気持ちを整理したい日も、誰かに話したい日も。
 With You は、あなたの心のそばにある、小さなツールボックスです。
 
-いま、どのカードが自分に合いそうか、
-ゆっくり選んでみてください。
+{streak_html}
 
-🔒 「今日を伝える」と「相談する」だけが先生に届きます。
-それ以外の記録は、すべてあなたの端末だけに残ります。
-
-<div style="margin-top:1rem; padding:10px 14px; background:rgba(167, 199, 217, 0.12); border-radius:16px; border-left:3px solid #A7C7D9;">
-  <b style="color:var(--deep-calm-blue); font-weight:500">あなたのクラス：{class_id}</b>
+<div style="margin-top:0.8rem; padding:8px 12px; background:rgba(195, 177, 225, 0.1); border-radius:12px; border-left:3px solid var(--accent);">
+  <b style="color:var(--accent-soft); font-weight:500">あなたのクラス：{class_id}</b>
 </div>
   </div>
 </div>
@@ -954,7 +1085,6 @@ def big_button(title: str, sub: str, to_view: str, key: str, emoji: str):
 def view_home():
     home_intro()
     
-    # 大きなカード3つ（机の上の道具）
     big_button(
         "今日を伝える", 
         "今日の体調や気分を、静かに記録します", 
@@ -998,7 +1128,7 @@ def view_home():
 # ----- 今日を伝える -----
 def view_share():
     st.markdown("### 💬 今日を伝える")
-    st.caption("この情報は先生が見ることができます。個人は特定されません。")
+    st.caption("この情報は先生が見ることができます。個人は特定されません")
     
     mood = st.radio(
         "いま、どんな感じですか？", 
@@ -1082,10 +1212,11 @@ def view_share():
         ok = safe_db_add("school_share", payload)
         
         if ok:
+            st.balloons()
             st.session_state.flash_msg = "記録しました。ありがとうございます"
             st.rerun()
         else:
-            st.error("送信できませんでした。")
+            st.error("送信できませんでした")
 
 # ----- 相談 -----
 CONSULT_TOPICS = [
@@ -1095,7 +1226,7 @@ CONSULT_TOPICS = [
 
 def view_consult():
     st.markdown("### 🕊 相談")
-    st.caption("話しにくいことでも、ここに書けます。お名前は空欄のままでも大丈夫です。")
+    st.caption("話しにくいことでも、ここに書けます。お名前は空欄のままでも大丈夫です")
     
     to_whom = st.radio(
         "相談先", 
@@ -1154,19 +1285,20 @@ def view_consult():
         ok = safe_db_add("consult_msgs", payload)
         
         if ok:
+            st.balloons()
             st.session_state.flash_msg = "送信しました。ありがとうございます"
             for k in ["c_topics","c_msg","c_name","c_anon","c_to"]:
                 if k in st.session_state: 
                     del st.session_state[k]
             st.rerun()
         else:
-            st.error("送信できませんでした。")
+            st.error("送信できませんでした")
 
 # ----- リラックス（呼吸）-----
 BREATH_PATTERN = (5, 2, 6)
 
 def breathing_animation(total_sec: int = 90):
-    """呼吸ワークのアニメーション（白い息のような柔らかい光）"""
+    """呼吸ワークのアニメーション"""
     st.session_state["_breath_running"] = True
 
     inhale, hold, exhale = BREATH_PATTERN
@@ -1191,8 +1323,8 @@ def breathing_animation(total_sec: int = 90):
     def set_countdown(sec: int, label: str = ""):
         countdown_area.markdown(
             f"""
-<div style="text-align:center;font-size:1rem;color:var(--text-secondary);margin-top:10px;font-weight:300;">
-  {label} のこり <b style="color:var(--deep-calm-blue)">{sec}</b> 秒
+<div style="text-align:center;font-size:0.95rem;color:var(--text-secondary);margin-top:10px;font-weight:300;">
+  {label} のこり <b style="color:var(--accent-soft)">{sec}</b> 秒
 </div>
 """,
             unsafe_allow_html=True,
@@ -1222,7 +1354,7 @@ def breathing_animation(total_sec: int = 90):
                 
                 render_circle(phase_class)
                 phase_area.markdown(
-                    f"<div style='text-align:center;font-size:1.15rem;font-weight:500;color:var(--deep-calm-blue);'>{label}</div>", 
+                    f"<div style='text-align:center;font-size:1.1rem;font-weight:500;color:var(--accent-soft);'>{label}</div>", 
                     unsafe_allow_html=True
                 )
                 
@@ -1243,7 +1375,7 @@ def breathing_animation(total_sec: int = 90):
 
 def view_session():
     st.markdown("### 🌬 リラックス（呼吸）")
-    st.caption("円が大きくなったら吸って、小さくなったら吐きます。途中で停止できます。")
+    st.caption("円が大きくなったら吸って、小さくなったら吐きます。途中で停止できます")
 
     total_seconds = 90
     inhale, hold, exhale = BREATH_PATTERN
@@ -1285,6 +1417,7 @@ def view_session():
             "mood_after": int(after), 
             "sec": total_seconds
         })
+        st.balloons()
         st.success("保存しました")
 
 # ----- ノート（CBT構造化ワーク） -----
@@ -1373,7 +1506,7 @@ def _flat_action_options_emoji():
 def action_picker(mood_key: Optional[str]):
     st.markdown('<div class="cbt-card">', unsafe_allow_html=True)
     st.markdown('<div class="cbt-heading">Step 6：今できそうなこと</div>', unsafe_allow_html=True)
-    st.markdown('<div class="cbt-sub">ぴったりを1つだけ。選ばなくても大丈夫です。</div>', unsafe_allow_html=True)
+    st.markdown('<div class="cbt-sub">ぴったりを1つだけ。選ばなくても大丈夫です</div>', unsafe_allow_html=True)
     
     disp, vals = _flat_action_options_emoji()
     options_disp = disp + ["— 選ばない —"]
@@ -1408,29 +1541,29 @@ def view_note():
     mood = mood_radio()
     trigger_text = text_card(
         "Step 2：きっかけ", 
-        "その気持ちは、どんなことがきっかけだったでしょうか。", 
+        "その気持ちは、どんなことがきっかけだったでしょうか", 
         "cbt_trigger"
     )
     auto_thought = text_card(
         "Step 3：頭の中の言葉", 
-        "そのとき、頭の中でどんな言葉がよぎりましたか。", 
+        "そのとき、頭の中でどんな言葉がよぎりましたか", 
         "cbt_auto"
     )
     reason_for = text_card(
         "Step 4：そう思った理由", 
-        "心の中の「根拠」があれば、書いてみてください。", 
+        "心の中の「根拠」があれば、書いてみてください", 
         "cbt_for", 
         height=100
     )
     reason_against = text_card(
         "Step 5：別の見方", 
-        "そうでもないかも、と思う理由はありますか。", 
+        "そうでもないかも、と思う理由はありますか", 
         "cbt_against", 
         height=100
     )
     alt_perspective = text_card(
         "Step 6：友だちだったら", 
-        "もし友だちが同じことを感じていたら、なんて声をかけますか。", 
+        "もし友だちが同じことを感じていたら、なんて声をかけますか", 
         "cbt_alt"
     )
     
@@ -1438,7 +1571,7 @@ def view_note():
     
     reflection = text_card(
         "Step 7：今日の日記", 
-        "気づいたこと・これからのことなど、自由に。", 
+        "気づいたこと・これからのことなど、自由に", 
         "cbt_reflect", 
         height=120
     )
@@ -1456,6 +1589,7 @@ def view_note():
             "diary": (reflection or "").strip(),
         }
         st.session_state["_local_logs"]["note"].append(doc)
+        st.balloons()
         st.success("保存しました")
         
         st.download_button(
@@ -1466,7 +1600,7 @@ def view_note():
             key=f"dl_note_{len(st.session_state['_local_logs']['note'])}"
         )
 
-# ----- Study Tracker【強化版】 -----
+# ----- Study Tracker【強化版＋ゲーミフィケーション】 -----
 def calculate_study_stats(studies: List[Dict]) -> Dict[str, Any]:
     """学習統計を計算"""
     if not studies:
@@ -1508,7 +1642,22 @@ def view_study():
     st.markdown("### 📚 Study Tracker")
     st.caption("学習時間を記録して、自分の成長を確かめよう")
     
-    # 目標設定セクション
+    # レベル表示
+    studies = st.session_state["_local_logs"]["study"]
+    stats = calculate_study_stats(studies)
+    level = get_study_level(stats["total_minutes"])
+    
+    if stats["total_minutes"] > 0:
+        st.markdown(f"<div class='badge'>{level['emoji']} {level['name']}</div>", unsafe_allow_html=True)
+        
+        if level['next']:
+            hours = stats['total_minutes'] / 60
+            next_hours = level['next'] - hours
+            progress = level['progress'] * 100
+            st.progress(level['progress'])
+            st.caption(f"次のレベルまで あと {next_hours:.1f}時間")
+    
+    # 目標設定
     with st.expander("🎯 目標設定", expanded=False):
         st.markdown("**週間目標（分）**")
         weekly = st.number_input(
@@ -1538,9 +1687,6 @@ def view_study():
             st.success("目標を更新しました")
     
     # 進捗サマリー
-    studies = st.session_state["_local_logs"]["study"]
-    stats = calculate_study_stats(studies)
-    
     if stats["total_minutes"] > 0:
         st.markdown('<div class="study-goal-card">', unsafe_allow_html=True)
         st.markdown("#### 📊 学習状況")
@@ -1596,7 +1742,7 @@ def view_study():
     memo = st.text_area(
         "学習メモ・次回の課題", 
         key="study_memo",
-        placeholder="例：問題集p.50-60を解いた。次回は公式の復習から始める。",
+        placeholder="例：問題集p.50-60を解いた。次回は公式の復習から始める",
         height=80
     )
     
@@ -1610,6 +1756,7 @@ def view_study():
             "memo": memo
         }
         st.session_state["_local_logs"]["study"].append(rec)
+        st.balloons()
         st.success("記録しました")
         st.rerun()
 
@@ -1619,6 +1766,11 @@ def view_review():
     st.caption("この端末に保存した記録を見返すことができます")
     
     logs = st.session_state["_local_logs"]
+    
+    # 連続記録ストリーク表示
+    streak = calculate_streak(logs["note"])
+    if streak > 0:
+        st.markdown(f'<div class="badge">🔥 {streak}日連続記録中</div>', unsafe_allow_html=True)
     
     if any(len(v)>0 for v in logs.values()):
         all_json = json.dumps(logs, ensure_ascii=False, indent=2).encode("utf-8")
@@ -1641,12 +1793,12 @@ def view_review():
                 st.markdown(f"""
 <div class="item">
   <div class="meta">{r['ts']}</div>
-  <div style="font-weight:500; color:var(--deep-calm-blue); margin-bottom:.2rem">
+  <div style="font-weight:500; color:var(--accent-soft); margin-bottom:.2rem">
     {r['mood'].get('emoji','')} {r['mood'].get('label','')}
   </div>
-  <div style="white-space:pre-wrap; margin-bottom:.3rem; font-size:0.9rem">きっかけ：{r.get('trigger','')}</div>
-  <div style="white-space:pre-wrap; margin-bottom:.3rem; font-size:0.9rem">頭の中の言葉：{r.get('auto','')}</div>
-  <div style="white-space:pre-wrap; margin-bottom:.3rem; font-size:0.9rem">日記：{r.get('diary','')}</div>
+  <div style="white-space:pre-wrap; margin-bottom:.3rem; font-size:0.88rem">きっかけ：{r.get('trigger','')}</div>
+  <div style="white-space:pre-wrap; margin-bottom:.3rem; font-size:0.88rem">頭の中の言葉：{r.get('auto','')}</div>
+  <div style="white-space:pre-wrap; margin-bottom:.3rem; font-size:0.88rem">日記：{r.get('diary','')}</div>
 </div>
 """, unsafe_allow_html=True)
     
@@ -1655,12 +1807,27 @@ def view_review():
         if not breaths: 
             st.caption("まだ記録がありません")
         else:
+            # 気分グラフ
+            if len(breaths) >= 2:
+                st.markdown("#### 📈 気分の推移")
+                df = pd.DataFrame(breaths)
+                df['date'] = pd.to_datetime(df['ts']).dt.date
+                
+                chart = alt.Chart(df.tail(10)).mark_line(point=True, color='#c3b1e1').encode(
+                    x=alt.X('ts:T', title='日時'),
+                    y=alt.Y('mood_after:Q', title='気分', scale=alt.Scale(domain=[1, 10])),
+                    tooltip=['ts:T', 'mood_after:Q']
+                ).properties(width=600, height=200)
+                
+                st.altair_chart(chart, use_container_width=True)
+                st.divider()
+            
             for r in breaths:
                 st.markdown(f"""
 <div class="item">
   <div class="meta">{r['ts']}</div>
-  <div style="font-size:0.9rem">パターン：{r.get('pattern','5-2-6')} / 実施：{r.get('sec',90)}秒</div>
-  <div style="font-size:0.9rem">終了時の気分：{r.get('mood_after','')}</div>
+  <div style="font-size:0.88rem">パターン：{r.get('pattern','5-2-6')} / 実施：{r.get('sec',90)}秒</div>
+  <div style="font-size:0.88rem">終了時の気分：{r.get('mood_after','')}</div>
 </div>
 """, unsafe_allow_html=True)
     
@@ -1675,6 +1842,11 @@ def view_review():
                 st.markdown("#### 📊 学習統計")
                 hours = stats["total_minutes"] / 60
                 st.markdown(f'<div class="study-stat">累計学習時間：{hours:.1f}時間</div>', unsafe_allow_html=True)
+                
+                # レベル表示
+                level = get_study_level(stats["total_minutes"])
+                st.markdown(f'<div class="badge">{level["emoji"]} {level["name"]}</div>', unsafe_allow_html=True)
+                
                 st.divider()
             
             # 記録一覧
@@ -1683,13 +1855,13 @@ def view_review():
                 st.markdown(f"""
 <div class="item">
   <div class="meta">{r['ts']}</div>
-  <div style="font-weight:600; color:var(--deep-calm-blue)">{r['subject']}</div>
-  <div style="font-size:0.9rem; margin:4px 0">
+  <div style="font-weight:600; color:var(--accent-soft)">{r['subject']}</div>
+  <div style="font-size:0.88rem; margin:4px 0">
     学習時間：{int(r['minutes'])}分 / 
     理解度：{r.get('understanding','')} / 
     集中度：{r.get('concentration','')}
   </div>
-  <div style="white-space:pre-wrap; color:var(--text-secondary); margin-top:.3rem; font-size:0.88rem">{r.get('memo','')}</div>
+  <div style="white-space:pre-wrap; color:var(--text-secondary); margin-top:.3rem; font-size:0.85rem">{r.get('memo','')}</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -1717,6 +1889,7 @@ def main_router():
 # ================== アプリ起動 ==================
 if st.session_state.get("auth_ok", False):
     logout_btn()
+    theme_selector()
     status_bar()
     top_tabs()
     main_router()
