@@ -288,32 +288,645 @@ THEMES = {
 }
 
 # ================== スタイル【🌙 エモい夜空版 v4】 ==================
+# ================== スタイル【🌙 エモい夜空版 v4】 ==================
 def inject_css():
     theme = THEMES[st.session_state.get("theme", "🌙 静かな夜空")]
     
-    css_template = """
+    st.markdown(f"""
 <style>
-:root {
-  --bg-start: THEME_BG_START;
-  --bg-mid: THEME_BG_MID;
-  --bg-end: THEME_BG_END;
-  --accent: THEME_ACCENT;
-  --accent-soft: THEME_ACCENT_SOFT;
-  --success: THEME_SUCCESS;
-  ...
-}
-"""
-    
-    # テーマ変数を置換
-    css = css_template.replace("THEME_BG_START", theme['bg_start'])
-    css = css.replace("THEME_BG_MID", theme['bg_mid'])
-    css = css.replace("THEME_BG_END", theme['bg_end'])
-    css = css.replace("THEME_ACCENT", theme['accent'])
-    css = css.replace("THEME_ACCENT_SOFT", theme['accent_soft'])
-    css = css.replace("THEME_SUCCESS", theme['success'])
-    
-    st.markdown(css, unsafe_allow_html=True)
+/* ================== エモい夜空UI v4 ==================
+   ダークベース + やさしいネオン
+   CSS onlyの軽量インタラクション
+   ================================================== */
+
+:root {{
+  /* テーマカラー（動的） */
+  --bg-start: {theme['bg_start']};
   --bg-mid: {theme['bg_mid']};
+  --bg-end: {theme['bg_end']};
+  --accent: {theme['accent']};
+  --accent-soft: {theme['accent_soft']};
+  --success: {theme['success']};
+  
+  /* 固定カラー */
+  --text-primary: #e8eaf0;
+  --text-secondary: #a8b3d7;
+  --text-muted: #7a8ab0;
+  --border: rgba(168, 179, 215, 0.15);
+  
+  /* 影・グロー */
+  --shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  --glow: 0 0 20px var(--accent);
+  --glow-soft: 0 0 30px rgba(195, 177, 225, 0.15);
+}}
+
+/* ================== 全体背景（夜空グラデーション）================== */
+html, body, .stApp {{
+  background: linear-gradient(
+    165deg,
+    var(--bg-start) 0%,
+    var(--bg-mid) 40%,
+    var(--bg-end) 100%
+  );
+  color: var(--text-primary);
+  min-height: 100vh;
+  font-family: 'Noto Sans JP', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-weight: 400;
+  line-height: 1.7;
+}}
+
+/* 漂う光粒子（超軽量・CSS only） */
+html::before {{
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: 
+    radial-gradient(circle at 20% 30%, var(--accent-soft) 0%, transparent 2%),
+    radial-gradient(circle at 80% 70%, var(--accent-soft) 0%, transparent 1.5%),
+    radial-gradient(circle at 50% 50%, var(--accent-soft) 0%, transparent 1%);
+  opacity: 0.08;
+  pointer-events: none;
+  animation: gentleFloat 8s ease-in-out infinite;
+  z-index: 0;
+}}
+
+@keyframes gentleFloat {{
+  0%, 100% {{ opacity: 0.06; }}
+  50% {{ opacity: 0.12; }}
+}}
+
+.block-container {{
+  max-width: 920px;
+  padding-top: 1.5rem;
+  padding-bottom: 3rem;
+  position: relative;
+  z-index: 1;
+}}
+
+/* ================== カード系（ガラスモーフィズム）================== */
+.card {{
+  background: rgba(26, 26, 46, 0.6);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 20px;
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(20px);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}}
+
+.card:hover {{
+  border-color: var(--accent);
+  box-shadow: var(--shadow), var(--glow-soft);
+  transform: translateY(-2px);
+}}
+
+.item {{
+  background: rgba(26, 26, 46, 0.5);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 16px;
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(16px);
+  margin-bottom: 12px;
+  transition: all 0.3s ease;
+}}
+
+.item:hover {{
+  border-color: var(--accent-soft);
+  box-shadow: var(--shadow), 0 0 15px rgba(195, 177, 225, 0.1);
+}}
+
+/* ================== テキストスタイル ================== */
+.tip {{
+  color: var(--text-muted);
+  font-size: 0.88rem;
+  line-height: 1.6;
+  font-weight: 300;
+}}
+
+h1, h2, h3, h4, h5, h6 {{
+  color: var(--text-primary) !important;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}}
+
+p, div, span, label {{
+  color: var(--text-primary);
+}}
+
+/* ================== トップタブ ================== */
+.top-tabs {{
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: rgba(26, 26, 46, 0.8);
+  backdrop-filter: saturate(180%) blur(20px);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  box-shadow: var(--shadow);
+  padding: 8px 10px;
+  margin-bottom: 16px;
+}}
+
+.top-tabs .stButton > button {{
+  width: 100%;
+  height: 38px;
+  border-radius: 12px;
+  font-weight: 500;
+  font-size: 0.85rem;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  transition: all 0.3s ease;
+}}
+
+.top-tabs .stButton > button:hover {{
+  background: rgba(195, 177, 225, 0.1);
+  color: var(--accent);
+}}
+
+.top-tabs .active .stButton > button {{
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-soft) 100%);
+  color: #ffffff;
+  font-weight: 600;
+  box-shadow: var(--glow-soft);
+}}
+
+/* ================== ホーム大型カード（ぷるんと反応）================== */
+.bigbtn {{
+  margin-bottom: 14px;
+}}
+
+.bigbtn .stButton > button {{
+  width: 100%;
+  text-align: left;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  padding: 22px 20px 18px;
+  white-space: pre-wrap;
+  line-height: 1.5;
+  background: rgba(26, 26, 46, 0.5);
+  color: var(--text-primary);
+  font-weight: 500;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  backdrop-filter: blur(16px);
+}}
+
+.bigbtn .stButton > button:hover {{
+  border-color: var(--accent);
+  box-shadow: var(--shadow), var(--glow-soft);
+  transform: translateY(-3px);
+  background: rgba(26, 26, 46, 0.7);
+}}
+
+.bigbtn .stButton > button:active {{
+  transform: translateY(-1px) scale(0.98);
+  transition: transform 0.1s ease;
+}}
+
+.bigbtn .stButton > button::first-line {{
+  font-weight: 700;
+  font-size: 1.05rem;
+  color: var(--accent-soft);
+}}
+
+/* ================== CBTカード ================== */
+.cbt-card {{
+  background: rgba(26, 26, 46, 0.5);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 18px 18px 14px;
+  box-shadow: var(--shadow);
+  margin-bottom: 14px;
+  backdrop-filter: blur(16px);
+  transition: all 0.3s ease;
+}}
+
+.cbt-card:hover {{
+  border-color: var(--accent-soft);
+  box-shadow: var(--shadow), 0 0 15px rgba(195, 177, 225, 0.1);
+}}
+
+.cbt-heading {{
+  font-weight: 600;
+  font-size: 0.98rem;
+  color: var(--accent-soft);
+  margin: 0 0 6px 0;
+  letter-spacing: 0.01em;
+}}
+
+.cbt-sub {{
+  color: var(--text-secondary);
+  font-size: 0.86rem;
+  margin: -2px 0 10px 0;
+  line-height: 1.6;
+  font-weight: 300;
+}}
+
+/* ================== 呼吸ワーク円（白い息・ゆらゆら）================== */
+.breath-container {{
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 30px 0;
+  position: relative;
+}}
+
+.breath-spot {{
+  width: 280px;
+  height: 280px;
+  border-radius: 999px;
+  background: radial-gradient(
+    circle at 50% 40%,
+    rgba(255, 255, 255, 0.15) 0%,
+    rgba(195, 177, 225, 0.1) 30%,
+    rgba(168, 211, 234, 0.05) 70%,
+    transparent 100%
+  );
+  border: 2px solid rgba(195, 177, 225, 0.3);
+  box-shadow: 
+    0 0 40px rgba(195, 177, 225, 0.2),
+    inset 0 0 50px rgba(255, 255, 255, 0.05);
+  position: relative;
+  transition: all 1.2s cubic-bezier(0.4, 0, 0.2, 1);
+}}
+
+/* ゆらゆら浮遊（軽量） */
+.breath-spot::before {{
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 80%;
+  height: 80%;
+  transform: translate(-50%, -50%);
+  border-radius: 999px;
+  background: radial-gradient(
+    circle,
+    rgba(255, 255, 255, 0.1) 0%,
+    transparent 70%
+  );
+  animation: breathFloat 4s ease-in-out infinite;
+}}
+
+@keyframes breathFloat {{
+  0%, 100% {{ transform: translate(-50%, -50%) scale(1); opacity: 0.5; }}
+  50% {{ transform: translate(-50%, -48%) scale(1.02); opacity: 0.8; }}
+}}
+
+/* 呼吸フェーズ別 */
+.breath-spot.inhale {{
+  transform: scale(1.25);
+  border-color: rgba(168, 230, 207, 0.5);
+  box-shadow: 
+    0 0 60px rgba(168, 230, 207, 0.3),
+    inset 0 0 60px rgba(255, 255, 255, 0.08);
+}}
+
+.breath-spot.hold {{
+  transform: scale(1.25);
+  border-color: rgba(195, 177, 225, 0.5);
+  box-shadow: 
+    0 0 50px rgba(195, 177, 225, 0.3),
+    inset 0 0 55px rgba(255, 255, 255, 0.08);
+}}
+
+.breath-spot.exhale {{
+  transform: scale(0.9);
+  border-color: rgba(168, 211, 234, 0.4);
+  box-shadow: 
+    0 0 35px rgba(168, 211, 234, 0.25),
+    inset 0 0 45px rgba(255, 255, 255, 0.05);
+}}
+
+/* ================== Study Tracker専用 ================== */
+.study-goal-card {{
+  background: linear-gradient(135deg, rgba(195, 177, 225, 0.08) 0%, rgba(168, 230, 207, 0.08) 100%);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 18px;
+  margin-bottom: 14px;
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(16px);
+}}
+
+.progress-bar-container {{
+  background: rgba(120, 130, 160, 0.2);
+  border-radius: 12px;
+  height: 10px;
+  overflow: hidden;
+  margin: 8px 0;
+}}
+
+.progress-bar-fill {{
+  background: linear-gradient(90deg, var(--accent) 0%, var(--accent-soft) 100%);
+  height: 100%;
+  border-radius: 12px;
+  transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 0 10px var(--accent);
+}}
+
+.study-stat {{
+  display: inline-block;
+  padding: 6px 14px;
+  background: rgba(26, 26, 46, 0.5);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  margin: 4px 6px 4px 0;
+  font-size: 0.88rem;
+  color: var(--text-secondary);
+  font-weight: 500;
+}}
+
+.badge {{
+  display: inline-block;
+  padding: 8px 16px;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-soft) 100%);
+  border-radius: 16px;
+  margin: 6px 8px 6px 0;
+  font-size: 0.9rem;
+  color: #ffffff;
+  font-weight: 600;
+  box-shadow: var(--glow-soft);
+  animation: badgePop 0.5s cubic-bezier(0.68, -0.55, 0.27, 1.55);
+}}
+
+@keyframes badgePop {{
+  0% {{ transform: scale(0); opacity: 0; }}
+  100% {{ transform: scale(1); opacity: 1; }}
+}}
+
+/* ================== メタデータ ================== */
+.meta {{
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  margin-bottom: 0.3rem;
+  font-weight: 300;
+}}
+
+.small {{
+  font-size: 0.86rem;
+  color: var(--text-secondary);
+  font-weight: 300;
+}}
+
+/* ================== Streamlitコンポーネント調整 ================== */
+/* 入力フィールド */
+.stTextInput > div > div > input,
+.stTextArea > div > div > textarea,
+.stNumberInput > div > div > input {{
+  background: rgba(26, 26, 46, 0.6) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 12px !important;
+  color: var(--text-primary) !important;
+  padding: 10px 14px !important;
+  transition: all 0.3s ease !important;
+}}
+
+.stTextInput > div > div > input:focus,
+.stTextArea > div > div > textarea:focus,
+.stNumberInput > div > div > input:focus {{
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 2px rgba(195, 177, 225, 0.2) !important;
+  background: rgba(26, 26, 46, 0.8) !important;
+}}
+
+/* セレクトボックス */
+.stSelectbox > div > div > select {{
+  background: rgba(26, 26, 46, 0.9) !important;
+  border: 1px solid var(--border) !important;
+  color: #ffffff !important;
+  border-radius: 12px !important;
+  padding: 10px 14px !important;
+  transition: all 0.3s ease !important;
+}}
+
+.stSelectbox > div > div > select:focus {{
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 2px rgba(195, 177, 225, 0.2) !important;
+}}
+
+/* ボタン */
+.stButton > button {{
+  background: rgba(195, 177, 225, 0.15);
+  border: 1px solid var(--border);
+  color: var(--accent-soft);
+  font-weight: 500;
+  border-radius: 14px;
+  padding: 10px 20px;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: var(--shadow);
+}}
+
+.stButton > button:hover {{
+  background: rgba(195, 177, 225, 0.25);
+  border-color: var(--accent);
+  box-shadow: var(--shadow), var(--glow-soft);
+  transform: translateY(-2px);
+}}
+
+.stButton > button:active {{
+  transform: translateY(0) scale(0.98);
+  transition: transform 0.1s ease;
+}}
+
+/* プライマリボタン */
+.stButton > button[kind="primary"] {{
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-soft) 100%);
+  border: none;
+  color: #ffffff;
+  box-shadow: var(--shadow), var(--glow-soft);
+  font-weight: 600;
+}}
+
+.stButton > button[kind="primary"]:hover {{
+  box-shadow: var(--shadow), var(--glow);
+  transform: translateY(-2px);
+}}
+
+/* ラジオボタン */
+.stRadio > div {{
+  background: rgba(26, 26, 46, 0.4);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px;
+}}
+
+.stRadio > div > label {{
+  color: var(--text-primary) !important;
+  font-weight: 500;
+}}
+
+/* チェックボックス */
+.stCheckbox > label {{
+  color: var(--text-primary) !important;
+  font-weight: 500;
+}}
+
+/* スライダー */
+.stSlider > div > div > div {{
+  background: rgba(195, 177, 225, 0.2) !important;
+}}
+
+.stSlider > div > div > div > div {{
+  background: var(--accent) !important;
+  box-shadow: 0 0 8px var(--accent) !important;
+}}
+
+/* ラベル */
+.stSelectbox > label,
+.stMultiSelect > label,
+.stTextInput > label,
+.stTextArea > label,
+.stNumberInput > label {{
+  color: var(--text-secondary) !important;
+  font-weight: 500;
+  font-size: 0.88rem;
+}}
+
+/* Multiselect */
+.stMultiSelect > div > div {{
+  background: rgba(26, 26, 46, 0.6) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 12px !important;
+}}
+
+.stMultiSelect span[data-baseweb="tag"] {{
+  background-color: rgba(195, 177, 225, 0.25) !important;
+  border: 1px solid var(--accent) !important;
+  color: var(--text-primary) !important;
+  border-radius: 10px !important;
+}}
+
+/* Tabs */
+.stTabs > div > div > div {{
+  background: rgba(26, 26, 46, 0.5);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}}
+
+.stTabs [data-baseweb="tab"] {{
+  color: var(--text-secondary);
+  font-weight: 500;
+}}
+
+.stTabs [aria-selected="true"] {{
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}}
+
+/* Success/Error/Info */
+.stSuccess, .stError, .stWarning, .stInfo {{
+  background: rgba(26, 26, 46, 0.8) !important;
+  border-radius: 12px !important;
+  border-left: 4px solid var(--success) !important;
+  backdrop-filter: blur(16px) !important;
+  color: var(--text-primary) !important;
+}}
+
+.stError {{
+  border-left-color: #f6c6ea !important;
+}}
+
+/* Divider */
+hr {{
+  border-color: var(--border) !important;
+}}
+
+/* ================== セレクトボックス・ドロップダウンの視認性改善 ================== */
+/* Streamlitのデフォルトスタイルを強制上書き */
+.stSelectbox [data-baseweb="select"] {{
+  background-color: rgba(26, 26, 46, 0.8) !important;
+}}
+
+.stSelectbox [data-baseweb="select"] > div {{
+  background-color: rgba(26, 26, 46, 0.8) !important;
+  color: #ffffff !important;
+}}
+
+/* ドロップダウンメニュー */
+.stSelectbox [role="listbox"] {{
+  background-color: #1a1a2e !important;
+  border: 1px solid var(--accent) !important;
+}}
+
+/* ドロップダウン内の各オプション */
+.stSelectbox [role="option"] {{
+  background-color: #1a1a2e !important;
+  color: #f0f2ff !important;
+  padding: 10px 14px !important;
+}}
+
+/* ホバー時 */
+.stSelectbox [role="option"]:hover {{
+  background-color: rgba(195, 177, 225, 0.2) !important;
+  color: #ffffff !important;
+}}
+
+/* 選択済みオプション */
+.stSelectbox [role="option"][aria-selected="true"] {{
+  background-color: rgba(195, 177, 225, 0.3) !important;
+  color: #ffffff !important;
+  font-weight: 600 !important;
+}}
+
+/* 無効化されたオプション（グレーアウト） */
+.stSelectbox [role="option"][aria-disabled="true"] {{
+  color: #7a8ab0 !important;
+  opacity: 0.6 !important;
+}}
+
+/* ================== レスポンシブ ================== */
+@media (max-width: 768px) {{
+  .block-container {{
+    padding-top: 1rem;
+    padding-bottom: 2rem;
+  }}
+  
+  .bigbtn .stButton > button {{
+    padding: 18px 16px 14px;
+    font-size: 0.95rem;
+  }}
+  
+  .breath-spot {{
+    width: 240px;
+    height: 240px;
+  }}
+  
+  .top-tabs .stButton > button {{
+    font-size: 0.75rem;
+    height: 36px;
+  }}
+}}
+
+/* ================== スクロールバー ================== */
+::-webkit-scrollbar {{
+  width: 8px;
+  height: 8px;
+}}
+
+::-webkit-scrollbar-track {{
+  background: rgba(26, 26, 46, 0.5);
+  border-radius: 4px;
+}}
+
+::-webkit-scrollbar-thumb {{
+  background: var(--accent);
+  border-radius: 4px;
+  box-shadow: 0 0 5px var(--accent);
+}}
+
+::-webkit-scrollbar-thumb:hover {{
+  background: var(--accent-soft);
+}}
+</style>
+""", unsafe_allow_html=True)
+
+inject_css()
   --bg-end: {theme['bg_end']};
   --accent: {theme['accent']};
   --accent-soft: {theme['accent_soft']};
