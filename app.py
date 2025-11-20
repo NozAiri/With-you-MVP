@@ -804,21 +804,28 @@ hr {{
   border: 1px solid var(--accent) !important;
 }}
 
-/* 各選択肢 */
-.stSelectbox [role="option"] {{
+/* 各選択肢 - より強力な指定 */
+.stSelectbox [role="option"],
+.stSelectbox [role="option"] *,
+.stSelectbox [role="option"] span,
+.stSelectbox [role="option"] div {{
   background-color: #ffffff !important;
   color: #000000 !important;
   padding: 10px 14px !important;
 }}
 
 /* ホバー時 */
-.stSelectbox [role="option"]:hover {{
+.stSelectbox [role="option"]:hover,
+.stSelectbox [role="option"]:hover *,
+.stSelectbox [role="option"]:hover span {{
   background-color: rgba(195, 177, 225, 0.3) !important;
   color: #000000 !important;
 }}
 
 /* 選択済み */
-.stSelectbox [role="option"][aria-selected="true"] {{
+.stSelectbox [role="option"][aria-selected="true"],
+.stSelectbox [role="option"][aria-selected="true"] *,
+.stSelectbox [role="option"][aria-selected="true"] span {{
   background-color: rgba(195, 177, 225, 0.4) !important;
   color: #000000 !important;
   font-weight: 600 !important;
@@ -844,6 +851,28 @@ hr {{
 }}
 
 .stMultiSelect [data-baseweb="select"] span {{
+  color: #000000 !important;
+}}
+
+/* Multiselectのドロップダウンリスト */
+.stMultiSelect [role="listbox"] {{
+  background-color: #ffffff !important;
+  border: 1px solid var(--accent) !important;
+}}
+
+.stMultiSelect [role="option"],
+.stMultiSelect [role="option"] *,
+.stMultiSelect [role="option"] span,
+.stMultiSelect [role="option"] div {{
+  background-color: #ffffff !important;
+  color: #000000 !important;
+  padding: 10px 14px !important;
+}}
+
+.stMultiSelect [role="option"]:hover,
+.stMultiSelect [role="option"]:hover *,
+.stMultiSelect [role="option"]:hover span {{
+  background-color: rgba(195, 177, 225, 0.3) !important;
   color: #000000 !important;
 }}
 
