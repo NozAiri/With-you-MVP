@@ -780,35 +780,37 @@ hr {{
   border-color: var(--border) !important;
 }}
 
-/* セレクトボックス - プレースホルダーと選択済みテキスト */
-.stSelectbox [data-baseweb="select"] {{
+/* ==================== セレクトボックス完全上書き ==================== */
+
+/* プレースホルダーと選択済みテキスト - 全要素に適用 */
+.stSelectbox [data-baseweb="select"],
+.stSelectbox [data-baseweb="select"] *,
+.stSelectbox [data-baseweb="select"] > div,
+.stSelectbox [data-baseweb="select"] > div *,
+.stSelectbox [data-baseweb="select"] input,
+.stSelectbox [data-baseweb="select"] span,
+.stSelectbox [data-baseweb="select"] div {{
   background-color: #ffffff !important;
-}}
-
-.stSelectbox [data-baseweb="select"] > div {{
-  background-color: #ffffff !important;
-  color: #000000 !important;
-}}
-
-.stSelectbox [data-baseweb="select"] input {{
-  color: #000000 !important;
-}}
-
-.stSelectbox [data-baseweb="select"] span {{
   color: #000000 !important;
 }}
 
 /* ドロップダウンメニュー全体 */
-.stSelectbox [role="listbox"] {{
+.stSelectbox [role="listbox"],
+.stSelectbox [role="listbox"] * {{
   background-color: #ffffff !important;
   border: 1px solid var(--accent) !important;
 }}
 
-/* 各選択肢 - より強力な指定 */
+/* 各選択肢 - すべての子孫要素に適用 */
 .stSelectbox [role="option"],
 .stSelectbox [role="option"] *,
+.stSelectbox [role="option"] > *,
 .stSelectbox [role="option"] span,
-.stSelectbox [role="option"] div {{
+.stSelectbox [role="option"] div,
+.stSelectbox li,
+.stSelectbox li *,
+.stSelectbox li span,
+.stSelectbox li div {{
   background-color: #ffffff !important;
   color: #000000 !important;
   padding: 10px 14px !important;
@@ -817,7 +819,9 @@ hr {{
 /* ホバー時 */
 .stSelectbox [role="option"]:hover,
 .stSelectbox [role="option"]:hover *,
-.stSelectbox [role="option"]:hover span {{
+.stSelectbox [role="option"]:hover span,
+.stSelectbox li:hover,
+.stSelectbox li:hover * {{
   background-color: rgba(195, 177, 225, 0.3) !important;
   color: #000000 !important;
 }}
@@ -832,30 +836,27 @@ hr {{
 }}
 
 /* 無効化 */
-.stSelectbox [role="option"][aria-disabled="true"] {{
-  color: #999999 !important;
+.stSelectbox [role="option"][aria-disabled="true"],
+.stSelectbox [role="option"][aria-disabled="true"] * {{
+  color: #666666 !important;
   opacity: 0.6 !important;
 }}
 
 /* Multiselect用にも同じスタイル適用 */
-.stMultiSelect [data-baseweb="select"] {{
+.stMultiSelect [data-baseweb="select"],
+.stMultiSelect [data-baseweb="select"] *,
+.stMultiSelect [data-baseweb="select"] > div,
+.stMultiSelect [data-baseweb="select"] > div *,
+.stMultiSelect [data-baseweb="select"] input,
+.stMultiSelect [data-baseweb="select"] span,
+.stMultiSelect [data-baseweb="select"] div {{
   background-color: #ffffff !important;
-}}
-
-.stMultiSelect [data-baseweb="select"] > div {{
-  background-color: #ffffff !important;
-}}
-
-.stMultiSelect [data-baseweb="select"] input {{
-  color: #000000 !important;
-}}
-
-.stMultiSelect [data-baseweb="select"] span {{
   color: #000000 !important;
 }}
 
 /* Multiselectのドロップダウンリスト */
-.stMultiSelect [role="listbox"] {{
+.stMultiSelect [role="listbox"],
+.stMultiSelect [role="listbox"] * {{
   background-color: #ffffff !important;
   border: 1px solid var(--accent) !important;
 }}
@@ -863,7 +864,11 @@ hr {{
 .stMultiSelect [role="option"],
 .stMultiSelect [role="option"] *,
 .stMultiSelect [role="option"] span,
-.stMultiSelect [role="option"] div {{
+.stMultiSelect [role="option"] div,
+.stMultiSelect li,
+.stMultiSelect li *,
+.stMultiSelect li span,
+.stMultiSelect li div {{
   background-color: #ffffff !important;
   color: #000000 !important;
   padding: 10px 14px !important;
@@ -871,7 +876,9 @@ hr {{
 
 .stMultiSelect [role="option"]:hover,
 .stMultiSelect [role="option"]:hover *,
-.stMultiSelect [role="option"]:hover span {{
+.stMultiSelect [role="option"]:hover span,
+.stMultiSelect li:hover,
+.stMultiSelect li:hover * {{
   background-color: rgba(195, 177, 225, 0.3) !important;
   color: #000000 !important;
 }}
