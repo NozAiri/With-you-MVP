@@ -921,10 +921,131 @@ hr {{
 ::-webkit-scrollbar-thumb:hover {{
   background: var(--accent-soft);
 }}
+
+/* ==================== セレクトボックス緊急修正 v2 ==================== */
+/* Streamlit Multiselect/Selectbox の完全上書き */
+
+/* すべてのセレクトボックス関連要素に黒文字を適用 */
+div[data-baseweb="select"],
+div[data-baseweb="select"] *,
+div[data-baseweb="popover"] *,
+ul[role="listbox"],
+ul[role="listbox"] *,
+li[role="option"],
+li[role="option"] *,
+.stSelectbox *,
+.stMultiSelect * {{
+  color: #000000 !important;
+}}
+
+/* 背景を白に */
+div[data-baseweb="select"],
+div[data-baseweb="popover"],
+ul[role="listbox"],
+li[role="option"] {{
+  background-color: #ffffff !important;
+}}
+
+/* ホバー時 */
+li[role="option"]:hover,
+li[role="option"]:hover * {{
+  background-color: rgba(195, 177, 225, 0.3) !important;
+  color: #000000 !important;
+}}
+
+/* 選択済み */
+li[role="option"][aria-selected="true"],
+li[role="option"][aria-selected="true"] * {{
+  background-color: rgba(195, 177, 225, 0.4) !important;
+  color: #000000 !important;
+  font-weight: 600 !important;
+}}
+
 </style>
 """, unsafe_allow_html=True)
 
 inject_css()
+
+# セレクトボックスの視認性を強制的に改善
+st.markdown("""
+<style>
+/* 最優先ルール - 全ての要素に適用 */
+div[data-baseweb="select"], 
+div[data-baseweb="select"] *, 
+div[data-baseweb="select"] span,
+div[data-baseweb="select"] div,
+ul[role="listbox"], 
+ul[role="listbox"] *,
+ul[role="listbox"] li,
+li[role="option"], 
+li[role="option"] *,
+li[role="option"] span,
+li[role="option"] div {
+    color: #000000 !important;
+    background-color: #ffffff !important;
+}
+
+li[role="option"]:hover,
+li[role="option"]:hover * {
+    background-color: rgba(195, 177, 225, 0.3) !important;
+    color: #000000 !important;
+}
+
+/* Multiselect専用 - ドロップダウン内のテキスト */
+.stMultiSelect [data-baseweb="popover"] {
+    background-color: #ffffff !important;
+}
+
+.stMultiSelect [data-baseweb="popover"] * {
+    color: #000000 !important;
+}
+
+.stMultiSelect ul {
+    background-color: #ffffff !important;
+}
+
+.stMultiSelect ul li {
+    color: #000000 !important;
+    background-color: #ffffff !important;
+}
+
+.stMultiSelect ul li:hover {
+    background-color: rgba(195, 177, 225, 0.3) !important;
+}
+
+/* Selectbox専用 */
+.stSelectbox [data-baseweb="popover"] {
+    background-color: #ffffff !important;
+}
+
+.stSelectbox [data-baseweb="popover"] * {
+    color: #000000 !important;
+}
+
+.stSelectbox ul {
+    background-color: #ffffff !important;
+}
+
+.stSelectbox ul li {
+    color: #000000 !important;
+    background-color: #ffffff !important;
+}
+
+.stSelectbox ul li:hover {
+    background-color: rgba(195, 177, 225, 0.3) !important;
+}
+
+/* 全てのBaseWeb要素に強制適用 */
+[class*="BaseWeb"] {
+    color: #000000 !important;
+}
+
+[class*="BaseWeb"] li {
+    color: #000000 !important;
+    background-color: #ffffff !important;
+}
+</style>
+""", unsafe_allow_html=True)
 
 # ================== ナビゲーション ==================
 def get_sections():
