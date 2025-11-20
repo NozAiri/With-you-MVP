@@ -780,40 +780,71 @@ hr {{
   border-color: var(--border) !important;
 }}
 
+/* セレクトボックス - プレースホルダーと選択済みテキスト */
 .stSelectbox [data-baseweb="select"] {{
-  background-color: rgba(240, 242, 255, 0.95) !important;
+  background-color: #ffffff !important;
 }}
 
 .stSelectbox [data-baseweb="select"] > div {{
-  background-color: rgba(240, 242, 255, 0.95) !important;
-  color: #1a1a1a !important;
+  background-color: #ffffff !important;
+  color: #000000 !important;
 }}
 
+.stSelectbox [data-baseweb="select"] input {{
+  color: #000000 !important;
+}}
+
+.stSelectbox [data-baseweb="select"] span {{
+  color: #000000 !important;
+}}
+
+/* ドロップダウンメニュー全体 */
 .stSelectbox [role="listbox"] {{
-  background-color: #f0f2ff !important;
+  background-color: #ffffff !important;
   border: 1px solid var(--accent) !important;
 }}
 
+/* 各選択肢 */
 .stSelectbox [role="option"] {{
-  background-color: #f0f2ff !important;
-  color: #1a1a1a !important;
+  background-color: #ffffff !important;
+  color: #000000 !important;
   padding: 10px 14px !important;
 }}
 
+/* ホバー時 */
 .stSelectbox [role="option"]:hover {{
   background-color: rgba(195, 177, 225, 0.3) !important;
   color: #000000 !important;
 }}
 
+/* 選択済み */
 .stSelectbox [role="option"][aria-selected="true"] {{
   background-color: rgba(195, 177, 225, 0.4) !important;
   color: #000000 !important;
   font-weight: 600 !important;
 }}
 
+/* 無効化 */
 .stSelectbox [role="option"][aria-disabled="true"] {{
-  color: #7a7a7a !important;
+  color: #999999 !important;
   opacity: 0.6 !important;
+}}
+
+/* Multiselect用にも同じスタイル適用 */
+.stMultiSelect [data-baseweb="select"] {{
+  background-color: #ffffff !important;
+}}
+
+.stMultiSelect [data-baseweb="select"] > div {{
+  background-color: #ffffff !important;
+}}
+
+.stMultiSelect [data-baseweb="select"] input {{
+  color: #000000 !important;
+}}
+
+.stMultiSelect [data-baseweb="select"] span {{
+  color: #000000 !important;
 }}
 
 @media (max-width: 768px) {{
