@@ -643,7 +643,7 @@ p, div, span, label {{
 .stSelectbox > div > div > select {{
   background: rgba(26, 26, 46, 0.9) !important;
   border: 1px solid var(--border) !important;
-  color: #ffffff !important;
+  color: #1a1a1a !important;
   border-radius: 12px !important;
   padding: 10px 14px !important;
   transition: all 0.3s ease !important;
@@ -652,6 +652,15 @@ p, div, span, label {{
 .stSelectbox > div > div > select:focus {{
   border-color: var(--accent) !important;
   box-shadow: 0 0 0 2px rgba(195, 177, 225, 0.2) !important;
+}}
+
+/* プレースホルダー（Choose options）の色 */
+.stSelectbox [data-baseweb="select"] input {{
+  color: #2d2d2d !important;
+}}
+
+.stSelectbox [data-baseweb="select"] > div {{
+  color: #2d2d2d !important;
 }}
 
 .stButton > button {{
@@ -772,38 +781,38 @@ hr {{
 }}
 
 .stSelectbox [data-baseweb="select"] {{
-  background-color: rgba(26, 26, 46, 0.8) !important;
+  background-color: rgba(240, 242, 255, 0.95) !important;
 }}
 
 .stSelectbox [data-baseweb="select"] > div {{
-  background-color: rgba(26, 26, 46, 0.8) !important;
-  color: #ffffff !important;
+  background-color: rgba(240, 242, 255, 0.95) !important;
+  color: #1a1a1a !important;
 }}
 
 .stSelectbox [role="listbox"] {{
-  background-color: #1a1a2e !important;
+  background-color: #f0f2ff !important;
   border: 1px solid var(--accent) !important;
 }}
 
 .stSelectbox [role="option"] {{
-  background-color: #1a1a2e !important;
-  color: #f0f2ff !important;
+  background-color: #f0f2ff !important;
+  color: #1a1a1a !important;
   padding: 10px 14px !important;
 }}
 
 .stSelectbox [role="option"]:hover {{
-  background-color: rgba(195, 177, 225, 0.2) !important;
-  color: #ffffff !important;
+  background-color: rgba(195, 177, 225, 0.3) !important;
+  color: #000000 !important;
 }}
 
 .stSelectbox [role="option"][aria-selected="true"] {{
-  background-color: rgba(195, 177, 225, 0.3) !important;
-  color: #ffffff !important;
+  background-color: rgba(195, 177, 225, 0.4) !important;
+  color: #000000 !important;
   font-weight: 600 !important;
 }}
 
 .stSelectbox [role="option"][aria-disabled="true"] {{
-  color: #7a8ab0 !important;
+  color: #7a7a7a !important;
   opacity: 0.6 !important;
 }}
 
